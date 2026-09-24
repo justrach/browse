@@ -1,14 +1,18 @@
 import SwiftUI
 
 /// Codegraff, down the right of the window (see Agent.swift for what it is
-/// talking to). The same ground, hairline and pills as the rest of the app:
-/// what was said, in order, a question when graff has one, and a field at
-/// the foot. The page you are on goes with what you type unless you take it
-/// off.
+/// talking to) — or the whole stage, the talk as a page of its own, when
+/// the door in its head is pressed. The same ground, hairline and pills as
+/// the rest of the app: what was said, in order, a question when graff has
+/// one, and a field at the foot. The page you are on goes with what you
+/// type unless you take it off.
 struct AgentColumn: View {
     @ObservedObject var browser: Browser
     @ObservedObject var agent: Agent
     @ObservedObject var prefs: Preferences
+
+    /// The whole stage rather than a column beside it (see Browser.agentFull).
+    var full = false
 
     @FocusState private var typing: Bool
     /// The width the column had when the edge was picked up.
@@ -19,22 +23,36 @@ struct AgentColumn: View {
         VStack(spacing: 0) {
             head
             Rectangle().fill(Palette.hairline).frame(height: 1)
-            said
-            if let ask = agent.asking {
-                AskCard(ask: ask) { agent.answer(ask, with: $0) }
-                    .padding(.horizontal, 12)
-                    .padding(.bottom, 8)
+            if full && agent.entries.isEmpty {
+                // Nothing said yet, and the whole page to say it on: the
+                // invitation and the field stand in the middle of it, the way
+                // a chat's first page does, rather than reach up from the foot.
+                Spacer(minLength: 0)
+                measure(empty)
+                measure(foot)
+                Spacer(minLength: 0)
+            } else {
+                said
+                if let ask = agent.asking {
+                    measure(
+                        AskCard(ask: ask) { agent.answer(ask, with: $0) }
+                            .padding(.horizontal, 12)
+                            .padding(.bottom, 8)
+                    )
                     .transition(.move(edge: .bottom).combined(with: .opacity))
+                }
+                measure(foot)
             }
-            foot
         }
-        .frame(width: prefs.agentWidth)
-        .frame(maxHeight: .infinity)
+        .frame(width: full ? nil : prefs.agentWidth)
+        .frame(maxWidth: full ? .infinity : nil, maxHeight: .infinity)
         .background(Palette.ground)
         .overlay(alignment: .leading) {
-            Rectangle().fill(Palette.hairline).frame(width: 1)
+            if !full {
+                Rectangle().fill(Palette.hairline).frame(width: 1)
+            }
         }
-        .overlay(alignment: .leading) { edge }
+        .overlay(alignment: .leading) { if !full { edge } }
         .animation(Motion.settle, value: agent.asking?.id)
         .onAppear {
             agent.wake()
@@ -61,6 +79,12 @@ struct AgentColumn: View {
             Spacer(minLength: 0)
             Door(icon: "square.and.pencil", help: "New conversation") { agent.startOver() }
                 .disabled(agent.entries.isEmpty)
+            Door(
+                icon: full ? "arrow.down.right.and.arrow.up.left" : "arrow.up.left.and.arrow.down.right",
+                help: full ? "Back to the column" : "Fill the window"
+            ) {
+                withAnimation(Motion.glide) { browser.agentFull.toggle() }
+            }
             Door(icon: "xmark", help: "Close   ⇧⌘A") { browser.toggleAgent() }
         }
         .padding(.leading, 14)
@@ -138,19 +162,20 @@ struct AgentColumn: View {
     /// at the bottom every guess moved the whole column.
     private var said: some View {
         ScrollView {
-            VStack(alignment: .leading, spacing: 10) {
-                if agent.entries.isEmpty { empty }
-                ForEach(Agent.grouped(agent.entries), id: \.first?.id) { run in
-                    if run.first?.kind == .page {
-                        PagesCard(pages: run) { url in browser.open(url, foreground: true) }
-                    } else if let entry = run.first {
-                        EntryRow(entry: entry) { url in browser.open(url, foreground: true) }
+            measure(
+                VStack(alignment: .leading, spacing: 10) {
+                    if agent.entries.isEmpty { empty }
+                    ForEach(Agent.grouped(agent.entries), id: \.first?.id) { run in
+                        if run.first?.kind == .page {
+                            PagesCard(pages: run) { url in browser.open(url, foreground: true) }
+                        } else if let entry = run.first {
+                            EntryRow(entry: entry) { url in browser.open(url, foreground: true) }
+                        }
                     }
                 }
-            }
-            .padding(.horizontal, 14)
-            .padding(.vertical, 12)
-            .frame(maxWidth: .infinity, alignment: .leading)
+                .padding(.horizontal, 14)
+                .padding(.vertical, 12)
+            )
         }
         .defaultScrollAnchor(.bottom)
         .frame(maxHeight: .infinity)
@@ -290,6 +315,14 @@ struct AgentColumn: View {
     private func send() {
         guard agent.canSend else { return }
         agent.send(page: agent.withPage ? browser.active : nil)
+    }
+
+    /// Everything the talk draws is held to one measure and centred on the
+    /// stage it fills; in the column it fills the column and nothing more.
+    private func measure<Content: View>(_ content: Content) -> some View {
+        content
+            .frame(maxWidth: full ? Metrics.chat : .infinity, alignment: .leading)
+            .frame(maxWidth: .infinity)
     }
 
     /// The column's edge: pulled left to widen it, double-clicked to put it

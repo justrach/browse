@@ -252,31 +252,37 @@ struct ContentView: View {
                     Color.clear.frame(height: band)
 
                     HStack(spacing: 0) {
-                        // One stage, always.
-                        if let tab = browser.active {
-                            Page(tab: tab)
-                                .overlay(alignment: .topTrailing) {
-                                    if browser.finding {
-                                        FindBar(browser: browser)
-                                            .transition(.move(edge: .top).combined(with: .opacity))
-                                    }
-                                }
-                                .overlay(alignment: .topLeading) {
-                                    if let asked = browser.suggesting, asked.tab == tab.id {
-                                        AccountList(browser: browser, asked: asked)
-                                            .transition(.opacity)
-                                    }
-                                }
-                                .animation(Motion.quick, value: browser.suggesting)
+                        // One stage, always: the page, or the talk filling it.
+                        if consulting && browser.agentFull {
+                            AgentColumn(browser: browser, agent: browser.agent, prefs: browser.prefs, full: true)
+                                .transition(.opacity)
                         } else {
-                            Palette.ground
-                        }
+                            if let tab = browser.active {
+                                Page(tab: tab)
+                                    .overlay(alignment: .topTrailing) {
+                                        if browser.finding {
+                                            FindBar(browser: browser)
+                                                .transition(.move(edge: .top).combined(with: .opacity))
+                                        }
+                                    }
+                                    .overlay(alignment: .topLeading) {
+                                        if let asked = browser.suggesting, asked.tab == tab.id {
+                                            AccountList(browser: browser, asked: asked)
+                                                .transition(.opacity)
+                                        }
+                                    }
+                                    .animation(Motion.quick, value: browser.suggesting)
+                            } else {
+                                Palette.ground
+                            }
 
-                        // Codegraff, beside the page rather than over it, so
-                        // what it is talking about stays in view (see Agent.swift).
-                        if consulting {
-                            AgentColumn(browser: browser, agent: browser.agent, prefs: browser.prefs)
-                                .transition(.move(edge: .trailing))
+                            // Codegraff, beside the page rather than over it, so
+                            // what it is talking about stays in view (see Agent.swift)
+                            // — or over it, filling the stage, at a word from its head.
+                            if consulting {
+                                AgentColumn(browser: browser, agent: browser.agent, prefs: browser.prefs)
+                                    .transition(.move(edge: .trailing))
+                            }
                         }
                     }
                 }
@@ -290,6 +296,7 @@ struct ContentView: View {
         .ignoresSafeArea()
         .animation(Motion.glide, value: browser.prefs.sidebar)
         .animation(Motion.glide, value: consulting)
+        .animation(Motion.glide, value: browser.agentFull)
         .animation(.easeOut(duration: 0.12), value: browser.active?.immersed)
     }
 
@@ -321,13 +328,16 @@ struct ContentView: View {
     /// own whenever a tab has nowhere to be yet.
     @ViewBuilder
     private var field: some View {
-        if browser.fieldShowing {
+        // The blank tab's field stands in the middle of the stage — where the
+        // chat's own field takes its place when the talk fills it — so it
+        // stands down there. One raised by ⌘L or ⌘K is still welcome over.
+        if browser.fieldShowing, browser.editing || !(consulting && browser.agentFull) {
             Omnibox(browser: browser, over: !(browser.active?.isBlank ?? true))
                 // Centred on the page, not on the window. The column of tabs
                 // is not what the field is standing over, and dimming it along
                 // with the page says otherwise.
                 .padding(.leading, sidebar ? browser.prefs.sideWidth : 0)
-                .padding(.trailing, consulting ? browser.prefs.agentWidth : 0)
+                .padding(.trailing, consulting && !browser.agentFull ? browser.prefs.agentWidth : 0)
                 .transition(.scale(scale: 0.97).combined(with: .opacity))
         }
     }
@@ -366,7 +376,7 @@ struct ContentView: View {
                     .onTapGesture { browser.reviewing = false }
                 HiddenPanel(browser: browser)
                     .padding(.top, Metrics.strip + 8)
-                    .padding(.trailing, 14 + (consulting ? browser.prefs.agentWidth : 0))
+                    .padding(.trailing, 14 + (consulting && !browser.agentFull ? browser.prefs.agentWidth : 0))
                     .transition(.scale(scale: 0.97, anchor: .topTrailing).combined(with: .opacity))
             }
             .ignoresSafeArea()

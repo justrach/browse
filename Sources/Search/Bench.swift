@@ -1039,6 +1039,13 @@ final class Bench {
             if let on = request["downloads"] as? Bool { browser.hoarding = on }
             if let on = request["bookmarks"] as? Bool { browser.bookmarking = on }
             if let on = request["hidden"] as? Bool { browser.reviewing = on }
+            // Codegraff's column, and the chat filling the stage instead —
+            // the two states of AgentColumn.swift, up without the doors.
+            if let on = request["agent"] as? Bool {
+                if on { browser.prefs.usesAgent = true }
+                browser.consulting = on
+            }
+            if let on = request["agentfull"] as? Bool { browser.agentFull = on }
             if let look = (request["look"] as? String).flatMap(Look.init) { browser.prefs.look = look }
             if let on = request["sidebar"] as? Bool { browser.prefs.sidebar = on }
             if let on = request["spaces"] as? Bool { browser.prefs.usesSpaces = on }

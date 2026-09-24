@@ -129,6 +129,9 @@ enum Metrics {
     static let agent: CGFloat = 360
     static let agentMin: CGFloat = 280
     static let agentMax: CGFloat = 640
+    /// The measure its talk is held to when it fills the stage (see
+    /// AgentColumn.swift).
+    static let chat: CGFloat = 680
 }
 
 // One spring for anything that moves between two places, one for anything that

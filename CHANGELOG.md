@@ -13,6 +13,7 @@ in [ROADMAP.md](ROADMAP.md).
 
 ### Added
 
+- Codegraff's chat takes the whole window when asked: the door in its head, between New conversation and Close, moves the same talk from the column to the stage the page had — held to one measure down the middle, and with the invitation and the field standing in the middle of it before anything has been said — and back to the column with the door beside it.
 - Codegraff, down the right of the window: ⇧⌘A opens a chat with the `graff` on your Mac — the one you already sign in to — which reads the page you're on and works on your Mac with its own tools, commands and file edits included. It gets Search's hands as well: your tabs, opening pages and reading them in hidden ones of its own, searching the web and taking up to a dozen results in at once. What it read comes out as one card of links, each a click from being a tab of yours. ⌘↩ in the address field, or the row under it, asks it instead of a search engine. Under its field, the model it works on and how hard it thinks, each a menu. Settings › Agent.
 - Spaces with the tabs across the top: two fingers up or down over the bar, or a notch of a mouse wheel, bring the next space's tabs in as these go; past the last, a new space is made right in the bar. "New Space…" makes it in place in the column too.
 - Reopen Closed Tab is in the right-click menu of every tab, in the row and in the column, beside Close Other Tabs; it was only on ⌘⇧T and in the History menu. Thanks [@andupoto](https://x.com/andupoto) for asking

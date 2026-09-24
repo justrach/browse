@@ -47,6 +47,9 @@ final class Browser: NSObject, ObservableObject {
     }()
     /// Its column, down the right.
     @Published var consulting = false
+    /// The same talk filling the stage instead, as a page of its own (see
+    /// AgentColumn.swift). Only where it is drawn; nothing remembers it.
+    @Published var agentFull = false
 
     /// ⇧⌘A. Asking for the column is turning it on; Settings › Agent turns
     /// it off again.
