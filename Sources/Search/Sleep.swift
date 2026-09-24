@@ -17,7 +17,15 @@ import WebKit
 // video out in the little window, or holding something typed and not sent.
 //
 // When macOS says memory is short, the half hour shrinks: to five minutes on
-// a warning, to nothing when it is critical.
+// a warning, to nothing when it is critical — and Codegraff lets go of what it
+// holds too: its own pages on a warning, graff itself when it is critical.
+//
+// Nor are more than a handful kept awake behind the one on screen. Twenty
+// tabs opened in a burst were twenty content processes for half an hour —
+// five real pages measured 400 MB between them, 65 MB once four slept (25 Sep
+// 2026). Past `awakeMost`, the ones looked at longest ago sleep once they have
+// been left a couple of minutes, so going back and forth between a few tabs
+// never reloads anything.
 
 extension Browser {
     /// How long a tab has to go without being looked at. Half an hour, or
@@ -25,6 +33,20 @@ extension Browser {
     static var sleepAfter: TimeInterval {
         let set = Store.settings.double(forKey: "sleep.after")
         return set > 0 ? set : 30 * 60
+    }
+
+    /// Tabs kept awake behind the one on screen, or `sleep.awake` — for the
+    /// bench and the measurements.
+    static var awakeMost: Int {
+        let set = Store.settings.integer(forKey: "sleep.awake")
+        return set > 0 ? set : 6
+    }
+
+    /// How long a tab past `awakeMost` is left before it sleeps anyway: two
+    /// minutes, or `sleep.crowded` in seconds.
+    static var crowdedAfter: TimeInterval {
+        let set = Store.settings.double(forKey: "sleep.crowded")
+        return set > 0 ? set : 2 * 60
     }
 
     /// Started once, at launch.
@@ -41,7 +63,13 @@ extension Browser {
         source.setEventHandler { [weak self] in
             MainActor.assumeIsolated {
                 guard let self, let event = self.pressure?.data else { return }
-                self.sleepIdle(within: event.contains(.critical) ? 0 : 5 * 60)
+                let critical = event.contains(.critical)
+                self.sleepIdle(within: critical ? 0 : 5 * 60)
+                // Codegraff's share, if it has been started at all: its pages
+                // are only kept for the next step; graff can be brought back.
+                if AgentTools.shared.browser != nil {
+                    if critical { self.agent.rest() } else if self.agent.phase != .working { AgentTools.shared.dropPages() }
+                }
             }
         }
         source.resume()
@@ -59,6 +87,14 @@ extension Browser {
             .filter { now.timeIntervalSince($0.touched) >= wait && awake(because: $0) == nil }
             .sorted { $0.touched < $1.touched }
         for tab in idle { self.sleep(tab) }
+        // Too many awake: the ones looked at longest ago, past the few kept,
+        // once they have been left a little while.
+        let crowd = (tabs + parkedTabs)
+            .filter { tab in !idle.contains { $0 === tab } && awake(because: tab) == nil }
+            .sorted { $0.touched > $1.touched }
+        for tab in crowd.dropFirst(Browser.awakeMost) where now.timeIntervalSince(tab.touched) >= Browser.crowdedAfter {
+            self.sleep(tab)
+        }
     }
 
     /// Why a tab has to stay awake — nil when nothing keeps it. The clock is
