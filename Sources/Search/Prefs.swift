@@ -140,9 +140,9 @@ final class Preferences: ObservableObject {
     @Published var usesSpaces: Bool {
         didSet { store.set(usesSpaces, forKey: "spaces") }
     }
-    /// A column on the right where codegraff works beside the page, over the
-    /// Agent Client Protocol (see Agent.swift). Off until asked for — ⇧⌘A or
-    /// the address field's Ask Codegraff is asking.
+    /// Codegraff, over the Agent Client Protocol (see Agent.swift): the Ask
+    /// tab at the head of the row, and the column ⇧⌘A opens beside the page.
+    /// On until turned off in Settings › Agent.
     @Published var usesAgent: Bool {
         didSet { store.set(usesAgent, forKey: "agent") }
     }
@@ -218,7 +218,9 @@ final class Preferences: ObservableObject {
         // existed; they are not asked to sit through it.
         welcomed = store.bool(forKey: "welcomed") || store.object(forKey: "glyph") != nil
         usesSpaces = store.bool(forKey: "spaces")
-        usesAgent = store.bool(forKey: "agent")
+        // On until turned off: all it costs unasked is the Ask tab, and graff
+        // only starts once something is asked of it.
+        usesAgent = store.object(forKey: "agent") as? Bool ?? true
         agentPath = store.string(forKey: "agent.path") ?? ""
         agentModel = store.string(forKey: "agent.model") ?? ""
         agentEffort = store.string(forKey: "agent.effort") ?? ""

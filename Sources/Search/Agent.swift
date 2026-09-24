@@ -50,11 +50,11 @@ final class Agent: ObservableObject {
     }
 
     /// One thing said or done.
-    struct Entry: Identifiable, Equatable {
+    struct Entry: Identifiable, Equatable, Codable {
         /// `page`: one graff read through the browser's tools, with its
         /// address in `key`, for the user to open.
-        enum Kind { case you, reply, thought, tool, note, page }
-        let id = UUID()
+        enum Kind: String, Codable { case you, reply, thought, tool, note, page }
+        var id = UUID()
         let kind: Kind
         var text: String
         /// A tool's own id, which its updates arrive under.
@@ -68,6 +68,10 @@ final class Agent: ObservableObject {
         var act = ""
         /// The page that went with something you said.
         var page: String?
+        /// When it began, and when it last changed: a reply grows, a tool
+        /// finishes. How long a turn worked is read from these.
+        var at = Date()
+        var until = Date()
     }
 
     /// graff waiting on you: an answer to a question it asked in the middle
@@ -106,18 +110,104 @@ final class Agent: ObservableObject {
 
         static func == (a: Model, b: Model) -> Bool { a.id == b.id }
 
-        /// "gpt-6-sol" as people say it: "GPT-6 Sol".
+        /// The model's own part of its name: after any "vendor/", without a
+        /// ":free" or ":beta" on the end.
+        private var bare: String {
+            var bare = name
+            if let slash = bare.lastIndex(of: "/") { bare = String(bare[bare.index(after: slash)...]) }
+            if let colon = bare.firstIndex(of: ":") { bare = String(bare[..<colon]) }
+            return bare
+        }
+
+        /// What follows a colon — OpenRouter's "free", "beta", "extended".
+        var tag: String? {
+            name.split(separator: ":").dropFirst().first.map(String.init)
+        }
+
+        /// Whose model it is, when a router carries it: "anthropic/…" is
+        /// Anthropic's.
+        var maker: String? {
+            guard let slash = name.firstIndex(of: "/") else { return nil }
+            return Model.said(String(name[..<slash]))
+        }
+
+        /// "gpt-6-sol" as people say it: "GPT-6 Sol"; "claude-opus-4-8" is
+        /// "Claude Opus 4.8", and a date on the end is left off.
         var label: String {
-            name.split(separator: "-").map { part -> String in
-                let word = String(part)
-                if ["gpt", "glm", "ui", "ai"].contains(word.lowercased()) || word.contains(where: \.isNumber) && word.count <= 3 {
-                    return word.uppercased()
+            var words: [String] = []
+            var dated = false
+            for part in bare.split(whereSeparator: { $0 == "-" || $0 == "_" }).map(String.init) {
+                let lower = part.lowercased()
+                // 20251101, or 2024-05-13: a snapshot's date, not part of
+                // what it's called.
+                if part.count == 8, part.allSatisfy(\.isNumber) { continue }
+                if part.count == 4, part.hasPrefix("20"), part.allSatisfy(\.isNumber) { dated = true; continue }
+                if dated, part.count <= 2, part.allSatisfy(\.isNumber) { continue }
+                dated = false
+                if let cased = Model.cased[lower] {
+                    words.append(cased)
+                    continue
                 }
-                return word.prefix(1).uppercased() + word.dropFirst()
+                if let last = words.last {
+                    // 4-8 → 4.8; GPT 6 → GPT-6.
+                    if part.allSatisfy(\.isNumber), part.count <= 2, last.last?.isNumber == true, !last.hasSuffix("B") {
+                        words[words.count - 1] = last + "." + part
+                        continue
+                    }
+                    if last == "GPT", part.first?.isNumber == true {
+                        words[words.count - 1] = "GPT-" + part
+                        continue
+                    }
+                }
+                if ["gpt", "glm", "ui", "ai", "oss", "vl", "moe", "r1", "v3", "v4", "k2", "k3", "4o"].contains(lower) {
+                    words.append(part.uppercased())
+                } else if lower.range(of: #"^a?\d+(\.\d+)?[bkm]$"#, options: .regularExpression) != nil {
+                    // 72b → 72B, the size of the thing; a10b → A10B.
+                    words.append(part.uppercased())
+                } else if lower.range(of: #"^o\d$"#, options: .regularExpression) != nil {
+                    // OpenAI's o1, o3, o4 are written small.
+                    words.append(lower)
+                } else {
+                    words.append(part.prefix(1).uppercased() + part.dropFirst())
+                }
             }
-            .joined(separator: " ")
-            .replacingOccurrences(of: "GPT 6", with: "GPT-6")
-            .replacingOccurrences(of: "GPT 5", with: "GPT-5")
+            return words.isEmpty ? name : words.joined(separator: " ")
+        }
+
+        /// Words their makers write their own way.
+        private static let cased = [
+            "deepseek": "DeepSeek", "minimax": "MiniMax", "lmstudio": "LM Studio", "hy4": "HY4",
+            "openai": "OpenAI", "chatgpt": "ChatGPT", "gemma": "Gemma", "phi": "Phi",
+        ]
+
+        /// Its window in words a person reads at a glance: "1M", "262K".
+        var window: String? {
+            guard context > 0 else { return nil }
+            if context >= 1_000_000 { return context % 1_000_000 < 100_000 ? "\(context / 1_000_000)M" : String(format: "%.1fM", Double(context) / 1_000_000) }
+            if context >= 1_000 { return "\(context / 1_000)K" }
+            return "\(context)"
+        }
+
+        /// Only for making pictures and sounds, or for batch jobs: nothing to
+        /// talk to.
+        var talks: Bool {
+            let lower = name.lowercased()
+            return !["imagine", "-image", "image-", "video", "lyria", "embedding", "embed-", "tts", "whisper", "transcribe", ":batch"]
+                .contains { lower.contains($0) }
+        }
+
+        /// A provider or maker by the name it goes by.
+        static func said(_ key: String) -> String {
+            let known = [
+                "codegraff": "Codegraff", "codex": "Codex", "openai": "OpenAI", "anthropic": "Anthropic",
+                "xai": "xAI", "x-ai": "xAI", "kimi": "Kimi", "moonshotai": "Moonshot", "deepseek": "DeepSeek",
+                "openrouter": "OpenRouter", "google": "Google", "meta-llama": "Meta", "mistralai": "Mistral",
+                "qwen": "Qwen", "z-ai": "Z.ai", "cerebras": "Cerebras", "mlx": "MLX", "lmstudio": "LM Studio",
+                "fugu": "Fugu", "nvidia": "NVIDIA", "microsoft": "Microsoft", "amazon": "Amazon", "cohere": "Cohere",
+                "minimax": "MiniMax", "baidu": "Baidu", "bytedance": "ByteDance", "ibm-granite": "IBM", "perplexity": "Perplexity",
+            ]
+            if let name = known[key.lowercased()] { return name }
+            return key.split(separator: "-").map { $0.prefix(1).uppercased() + $0.dropFirst() }.joined(separator: " ")
         }
     }
 
@@ -177,13 +267,27 @@ final class Agent: ObservableObject {
     /// Whether this session has been told where it is. Once is enough.
     private var introduced = false
 
+    /// Every conversation so far, for the Ask tab's page (see Chats.swift).
+    let chats = Chats()
+    /// The one on screen, once something has been said in it.
+    @Published private(set) var chatID: UUID?
+    /// Why the last turn went wrong, for its card; nothing once one works.
+    private var stumble: String?
+    /// What was said before, for a graff that couldn't pick the session
+    /// back up: it goes ahead of the next message instead.
+    private var lost: String?
+
     init(prefs: Preferences) {
         self.prefs = prefs
         // graff saves its session when its input ends, and ends with it.
         NotificationCenter.default.addObserver(
             forName: NSApplication.willTerminateNotification, object: nil, queue: .main
         ) { [weak self] _ in
-            MainActor.assumeIsolated { self?.pipe?.stop() }
+            MainActor.assumeIsolated {
+                self?.keep()
+                self?.chats.flush()
+                self?.pipe?.stop()
+            }
         }
     }
 
@@ -235,15 +339,74 @@ final class Agent: ObservableObject {
     /// A clean slate. graff owns one session for as long as it runs, so a
     /// new conversation is a new graff.
     func startOver() {
+        keep()
         entries = []
+        chatID = nil
+        stumble = nil
+        lost = nil
         resuming = nil
         restart()
     }
 
+    /// A conversation from before, back on screen, and graff picking it up
+    /// where it was left: its session loaded again, or — if graff has lost
+    /// it — what was said, sent ahead of the next message.
+    func resume(_ chat: Chat) {
+        guard chat.id != chatID else { return }
+        keep()
+        shutDown()
+        entries = chat.entries
+        chatID = chat.id
+        stumble = nil
+        lost = chat.session == nil ? Agent.transcript(chat.entries) : nil
+        resuming = chat.session
+        start()
+    }
+
+    /// The conversation on screen, saved with the others.
+    func keep() {
+        guard let chatID, entries.contains(where: { $0.kind == .you }) else { return }
+        let before = chats.all.first { $0.id == chatID }
+        // Only when something changed: leaving a chat as it was mustn't
+        // make it the newest.
+        if let before, before.entries == entries, before.failed == stumble,
+           session == nil || before.session == session { return }
+        chats.keep(Chat(
+            id: chatID,
+            session: session ?? before?.session,
+            title: Chat.title(for: entries),
+            started: before?.started ?? entries.first?.at ?? Date(),
+            updated: Date(),
+            entries: entries,
+            failed: stumble
+        ))
+    }
+
+    /// One taken off the list; the one on screen goes back to a clean slate.
+    func forget(_ chat: Chat) {
+        chats.remove(chat.id)
+        if chat.id == chatID {
+            chatID = nil
+            startOver()
+        }
+    }
+
     /// Another model. graff takes it at launch, so graff starts again — and
     /// picks the conversation up where it was.
+    /// The models chosen last, newest first, for the top of the picker.
+    var recentModels: [Model] {
+        (Store.settings.stringArray(forKey: "agent.recent") ?? []).compactMap { id in
+            models.first { $0.id == id }
+        }
+    }
+
     func choose(_ model: Model) {
         guard model != self.model else { return }
+        var recent = Store.settings.stringArray(forKey: "agent.recent") ?? []
+        if let leaving = self.model?.id { recent.removeAll { $0 == leaving }; recent.insert(leaving, at: 0) }
+        recent.removeAll { $0 == model.id }
+        recent.insert(model.id, at: 0)
+        Store.settings.set(Array(recent.prefix(6)), forKey: "agent.recent")
         prefs.agentModel = model.id
         let carried = session
         shutDown()
@@ -325,7 +488,13 @@ final class Agent: ObservableObject {
                 switch result {
                 case .success(let value): self.opened(carried, value)
                 case .failure(let failure):
-                    if Agent.wantsSignIn(failure) { self.stumbled(failure) } else { self.open() }
+                    if Agent.wantsSignIn(failure) {
+                        self.stumbled(failure)
+                    } else {
+                        // A fresh session, told what was said in the old one.
+                        self.lost = Agent.transcript(self.entries)
+                        self.open()
+                    }
                 }
             }
             return
@@ -376,6 +545,8 @@ final class Agent: ObservableObject {
                       !provider.isEmpty, !name.isEmpty
                 else { return nil }
                 let model = Model(provider: provider, name: name, context: row["context"] as? Int ?? 0)
+                // Pictures, video, batch-only: nothing to have a chat with.
+                guard model.talks else { return nil }
                 return seen.insert(model.id).inserted ? model : nil
             }
             if let current = reply["current"] as? [String: Any],
@@ -465,6 +636,8 @@ final class Agent: ObservableObject {
         fail(Failure(code: Int(status), message: why))
         if phase == .signedOut || phase == .missing { return }
         phase = Agent.wantsSignIn(Failure(code: 0, message: why)) ? .signedOut : .broken(why)
+        stumble = why
+        keep()
     }
 
     /// `graff login`, in Terminal — the sign-in graff names for ACP clients.
@@ -525,10 +698,12 @@ final class Agent: ObservableObject {
             return
         }
         draft = ""
+        if chatID == nil { chatID = UUID() }
         entries.append(Entry(kind: .you, text: text, page: pageTitle))
+        keep()
         if phase == .ready { phase = .working }
         Task {
-            var page: (address: String, title: String, text: String)?
+            var page: (address: String, title: String, text: String, tab: String)?
             if let tab { page = await Agent.read(tab) }
             let blocks = Agent.blocks(text, page: page)
             switch phase {
@@ -551,6 +726,10 @@ final class Agent: ObservableObject {
         phase = .working
         prompting = true
         var blocks = blocks
+        if let lost {
+            self.lost = nil
+            blocks.insert(["type": "text", "text": "Earlier in this conversation, before you were restarted:\n\n" + lost], at: 0)
+        }
         if !introduced {
             introduced = true
             blocks.insert(["type": "text", "text": Agent.introduction], at: 0)
@@ -569,14 +748,18 @@ final class Agent: ObservableObject {
                     self.entries.append(Entry(kind: .note, text: "Stopped at its limit for one turn"))
                 }
                 self.settle(reason == "end_turn")
+                self.stumble = nil
             case .failure(let failure):
                 self.settle(false)
                 if Agent.wantsSignIn(failure) {
                     self.phase = .signedOut
+                    self.stumble = failure.message
                 } else if failure.code != -1 {
                     self.entries.append(Entry(kind: .note, text: failure.message))
+                    self.stumble = failure.message
                 }
             }
+            self.keep()
         }
     }
 
@@ -665,6 +848,7 @@ final class Agent: ObservableObject {
         case "tool_call_update":
             let key = update["toolCallId"] as? String ?? ""
             guard let index = entries.lastIndex(where: { $0.kind == .tool && $0.key == key }) else { return }
+            entries[index].until = Date()
             if let status = update["status"] as? String { entries[index].status = status }
             if let title = update["title"] as? String, !title.isEmpty { entries[index].text = title }
             let shown = Agent.shown(update["content"])
@@ -701,6 +885,7 @@ final class Agent: ObservableObject {
         guard !piece.isEmpty else { return }
         if let last = entries.indices.last, entries[last].kind == kind {
             entries[last].text += piece
+            entries[last].until = Date()
         } else {
             entries.append(Entry(kind: kind, text: piece))
         }
@@ -798,12 +983,31 @@ final class Agent: ObservableObject {
     /// terminal.
     private static let introduction = """
     You are Codegraff, running inside Search, the web browser the user is using right now; \
-    they are talking to you from a column beside the page. For anything on the web use the \
-    `search` MCP tools (mcp__search__*): `search`, then `read_pages` with many links at once — \
-    they load in parallel in pages the user doesn't see — and `open` a page to act on it. \
-    The folder you are in is just your scratch space, not a project. Answer plainly and \
-    name your sources.
+    they are talking to you from beside the page, or from a page of its own. For anything on \
+    the web use the `search` MCP tools (mcp__search__*): `search`, then `read_pages` with many \
+    links at once — they load in parallel in pages the user doesn't see — and `open` a page to \
+    act on it. To fill in a form, `form_fields` lists its fields with a selector for each, and \
+    `fill` sets many at once; when it is on the page the user is looking at, act on their tab \
+    (its id comes with the page) so they watch it happen. Fill freely, but ask before \
+    submitting anything that pays, sends, posts, books, deletes or signs them up, and never \
+    make up details about them — ask. The folder you are in is just your scratch space, not a \
+    project. Answer plainly and name your sources, as markdown links.
     """
+
+    /// A conversation as words, for a graff that has lost its own record
+    /// of it: what was asked and what was answered, the newest kept whole.
+    static func transcript(_ entries: [Entry]) -> String? {
+        let said = entries.compactMap { entry -> String? in
+            switch entry.kind {
+            case .you: return "User: " + entry.text
+            case .reply: return "You: " + entry.text
+            default: return nil
+            }
+        }
+        guard !said.isEmpty else { return nil }
+        let whole = said.joined(separator: "\n\n")
+        return whole.count > 12_000 ? "…\n" + String(whole.suffix(12_000)) : whole
+    }
 
     /// graff's folder for anything it makes when nobody said where: inside
     /// Search's own, so nothing lands loose in the home folder.
@@ -881,12 +1085,12 @@ final class Agent: ObservableObject {
 
     /// The prompt: the page, cut to whatever room the words leave in one
     /// line, then the words.
-    private static func blocks(_ text: String, page: (address: String, title: String, text: String)?) -> [[String: Any]] {
+    private static func blocks(_ text: String, page: (address: String, title: String, text: String, tab: String)?) -> [[String: Any]] {
         let words: [String: Any] = ["type": "text", "text": text]
         guard let page else { return [words] }
         func with(_ body: String) -> [[String: Any]] {
             [
-                ["type": "text", "text": "I'm looking at this page in my browser:"],
+                ["type": "text", "text": "I'm looking at this page in my browser (tab \(page.tab)):"],
                 ["type": "resource", "resource": [
                     "uri": page.address,
                     "mimeType": "text/plain",
@@ -897,8 +1101,10 @@ final class Agent: ObservableObject {
         }
         let whole = page.title.isEmpty ? page.text : "\(page.title)\n\n\(page.text)"
         var body = whole
-        // Room for the envelope around it: the method, the session's name.
-        let room = longestLine - 600
+        // Room for the envelope around it — the method, the session's name —
+        // and for the introduction and an earlier conversation, which may
+        // go out ahead of it.
+        let room = longestLine - 16_000
         var size = wire(with(body))
         while size > room, !body.isEmpty {
             let keep = Int(Double(body.count) * Double(room) / Double(size) * 0.95)
@@ -910,8 +1116,9 @@ final class Agent: ObservableObject {
     }
 
     /// The page's words, as a reader would take them: its text, not its
-    /// markup.
-    private static func read(_ tab: Tab) async -> (address: String, title: String, text: String)? {
+    /// markup — and the tab's id as the browser's tools know it, so graff can
+    /// act on the page it was shown.
+    private static func read(_ tab: Tab) async -> (address: String, title: String, text: String, tab: String)? {
         guard let web = tab.built, let address = tab.address else { return nil }
         let title = tab.title
         let text: String = await withCheckedContinuation { done in
@@ -919,7 +1126,7 @@ final class Agent: ObservableObject {
                 done.resume(returning: (value as? String) ?? "")
             }
         }
-        return (address.absoluteString, title, text)
+        return (address.absoluteString, title, text, String(tab.id.uuidString.prefix(8)).lowercased())
     }
 
     private static func quoted(_ path: String) -> String {
@@ -944,6 +1151,13 @@ final class Agent: ObservableObject {
         // The browser's tools come ready to call, not folded away behind
         // graff's search for tools: in a browser they are the point.
         environment["GRAFF_MCP_EAGER"] = "search"
+        // Straight to SSE. graff's codex WebSocket prewarm goes out without a
+        // model, is refused, and the first turn of every session retries a
+        // socket and falls back — ~7 s of a 12 s "hey there", paid again by
+        // each new chat's graff (justrach/codegraff#1250). Over SSE the first
+        // word comes in ~2.5 s; with the fix, WS still takes 4–5 s for a
+        // first turn, its prewarm round trip ahead of it (24 Sep 2026).
+        if environment["GRAFF_CODEX_WS"] == nil { environment["GRAFF_CODEX_WS"] = "off" }
         for key in ["CLAUDECODE", "CLAUDE_CODE_ENTRYPOINT", "CLAUDE_CODE_SSE_PORT", "CLAUDE_AGENT_SDK_VERSION"] {
             environment[key] = nil
         }

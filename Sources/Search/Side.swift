@@ -310,7 +310,7 @@ struct SideBar: View {
                     browser: browser,
                     prefs: prefs,
                     tab: tab,
-                    live: tab.id == browser.activeID,
+                    live: tab.id == browser.activeID && !browser.talkOnStage,
                     pill: pill,
                     width: width,
                     height: height
@@ -398,7 +398,7 @@ struct SideBar: View {
                     browser: browser,
                     prefs: prefs,
                     tab: tab,
-                    live: tab.id == browser.activeID,
+                    live: tab.id == browser.activeID && !browser.talkOnStage,
                     pill: pill,
                     close: { browser.close(tab) }
                 )
@@ -447,6 +447,12 @@ struct SideBar: View {
     /// The loose tabs and the row that makes another, which scroll as one.
     private var rows: some View {
         VStack(alignment: .leading, spacing: 0) {
+            // Codegraff's own tab, ahead of the others (see AskTab).
+            if prefs.usesAgent {
+                AskTab(browser: browser, pill: pill, title: "Ask Codegraff")
+                    .frame(height: SideBar.row)
+                    .padding(.bottom, SideBar.gap)
+            }
             loose
             newTab
         }

@@ -2,10 +2,14 @@ import SwiftUI
 
 /// Codegraff, down the right of the window (see Agent.swift for what it is
 /// talking to) — or the whole stage, the talk as a page of its own, when
-/// the door in its head is pressed. The same ground, hairline and pills as
-/// the rest of the app: what was said, in order, a question when graff has
-/// one, and a field at the foot. The page you are on goes with what you
-/// type unless you take it off.
+/// the door in its head or the Ask tab is pressed. The same ground, hairline
+/// and pills as the rest of the app: what was said, in order, a question
+/// when graff has one, and a field at the foot. The page you are on goes
+/// with what you type unless you take it off.
+///
+/// On the stage, before anything has been said, it is Codegraff's page
+/// instead (see AgentHome.swift); after, each turn is what you asked, the
+/// work folded into one line, and the answer.
 struct AgentColumn: View {
     @ObservedObject var browser: Browser
     @ObservedObject var agent: Agent
@@ -21,17 +25,15 @@ struct AgentColumn: View {
 
     var body: some View {
         VStack(spacing: 0) {
-            head
-            Rectangle().fill(Palette.hairline).frame(height: 1)
             if full && agent.entries.isEmpty {
-                // Nothing said yet, and the whole page to say it on: the
-                // invitation and the field stand in the middle of it, the way
-                // a chat's first page does, rather than reach up from the foot.
-                Spacer(minLength: 0)
-                measure(empty)
-                measure(foot)
-                Spacer(minLength: 0)
+                // Nothing said yet, and the whole page to say it on:
+                // Codegraff's own page, with the chats so far.
+                AgentHome(browser: browser, agent: agent)
             } else {
+                head
+                if !full {
+                    Rectangle().fill(Palette.hairline).frame(height: 1)
+                }
                 said
                 if let ask = agent.asking {
                     measure(
@@ -54,9 +56,21 @@ struct AgentColumn: View {
         }
         .overlay(alignment: .leading) { if !full { edge } }
         .animation(Motion.settle, value: agent.asking?.id)
+        // A link in what graff said opens here, as a tab, not in whichever
+        // browser the Mac would hand it to.
+        .environment(\.openURL, OpenURLAction { url in
+            guard url.scheme?.hasPrefix("http") == true else { return .systemAction }
+            browser.open(url, foreground: true)
+            return .handled
+        })
         .onAppear {
             agent.wake()
             DispatchQueue.main.async { typing = true }
+        }
+        // From Codegraff's page into the talk: the field at the foot takes
+        // the keyboard for what comes next.
+        .onChange(of: agent.entries.isEmpty) { _, empty in
+            if !empty { DispatchQueue.main.async { typing = true } }
         }
     }
 
@@ -64,30 +78,45 @@ struct AgentColumn: View {
 
     private var head: some View {
         HStack(spacing: 8) {
-            Circle()
-                .fill(light)
-                .frame(width: 6, height: 6)
-            Text("Codegraff")
-                .font(.system(size: 13, weight: .semibold))
-                .foregroundStyle(Palette.ink)
-            if !agent.phase.words.isEmpty {
+            if full {
+                // The talk as a page: a new one first, then what this one is
+                // about, as a chat's own page has it.
+                Door(icon: "square.and.pencil", help: "New chat") { agent.startOver() }
+                Text(Chat.title(for: agent.entries))
+                    .font(.system(size: 13.5, weight: .medium))
+                    .foregroundStyle(Palette.ink)
+                    .lineLimit(1)
+                    .truncationMode(.tail)
+            } else {
+                Circle()
+                    .fill(light)
+                    .frame(width: 6, height: 6)
+                Text("Codegraff")
+                    .font(.system(size: 13, weight: .semibold))
+                    .foregroundStyle(Palette.ink)
+            }
+            // Working says how long under the question; the head says only
+            // what is in the way.
+            if !agent.phase.words.isEmpty, agent.phase != .working {
                 Text(agent.phase.words)
                     .font(.system(size: 11.5))
                     .foregroundStyle(Palette.muted)
                     .lineLimit(1)
             }
             Spacer(minLength: 0)
-            Door(icon: "square.and.pencil", help: "New conversation") { agent.startOver() }
-                .disabled(agent.entries.isEmpty)
+            if !full {
+                Door(icon: "square.and.pencil", help: "New conversation") { agent.startOver() }
+                    .disabled(agent.entries.isEmpty)
+            }
             Door(
-                icon: full ? "arrow.down.right.and.arrow.up.left" : "arrow.up.left.and.arrow.down.right",
-                help: full ? "Back to the column" : "Fill the window"
+                icon: full ? "sidebar.right" : "arrow.up.left.and.arrow.down.right",
+                help: full ? "Beside the page" : "Fill the window"
             ) {
-                withAnimation(Motion.glide) { browser.agentFull.toggle() }
+                if full { browser.talkToColumn() } else { browser.takeStage() }
             }
             Door(icon: "xmark", help: "Close   ⇧⌘A") { browser.toggleAgent() }
         }
-        .padding(.leading, 14)
+        .padding(.leading, full ? 10 : 14)
         .padding(.trailing, 8)
         .frame(height: 44)
     }
@@ -98,24 +127,11 @@ struct AgentColumn: View {
     @ViewBuilder
     private var choices: some View {
         HStack(spacing: 10) {
+            // On the stage they sit at the far end, under the send button.
+            if full { Spacer(minLength: 0) }
             if let current = agent.model {
-                Menu {
-                    ForEach(agent.models) { model in
-                        Button {
-                            agent.choose(model)
-                        } label: {
-                            let words = model.context > 0 ? "\(model.label) · \(model.provider) · \(model.context / 1000)k" : "\(model.label) · \(model.provider)"
-                            if model == current {
-                                Label(words, systemImage: "checkmark")
-                            } else {
-                                Text(words)
-                            }
-                        }
-                    }
-                } label: {
-                    Text(current.label)
-                }
-                .help("The model Codegraff uses — changing it carries the conversation over")
+                ModelPicker(agent: agent, current: current)
+                    .help("The model Codegraff uses — changing it carries the conversation over")
             }
             if let effort = agent.effort {
                 Menu {
@@ -135,7 +151,7 @@ struct AgentColumn: View {
                 }
                 .help("How hard it thinks before it answers")
             }
-            Spacer(minLength: 0)
+            if !full { Spacer(minLength: 0) }
         }
         .font(.system(size: 11.5))
         .foregroundStyle(Palette.muted)
@@ -156,29 +172,48 @@ struct AgentColumn: View {
 
     // MARK: - what was said
 
-    /// Everything said, in order, with the pages graff read in a row kept
-    /// together on one card. A plain stack, not a lazy one: a lazy stack
-    /// guesses the height of what it hasn't drawn, and with a reply growing
-    /// at the bottom every guess moved the whole column.
+    /// Everything said, a turn at a time: what you asked, the work graff did
+    /// on it folded into one line, and its answer. A plain stack, not a lazy
+    /// one: a lazy stack guesses the height of what it hasn't drawn, and
+    /// with a reply growing at the bottom every guess moved the whole column.
     private var said: some View {
         ScrollView {
             measure(
-                VStack(alignment: .leading, spacing: 10) {
+                VStack(alignment: .leading, spacing: full ? 20 : 12) {
                     if agent.entries.isEmpty { empty }
-                    ForEach(Agent.grouped(agent.entries), id: \.first?.id) { run in
-                        if run.first?.kind == .page {
-                            PagesCard(pages: run) { url in browser.open(url, foreground: true) }
-                        } else if let entry = run.first {
-                            EntryRow(entry: entry) { url in browser.open(url, foreground: true) }
-                        }
+                    if full, let first = agent.entries.first {
+                        Text(Self.day(first.at))
+                            .font(.system(size: 12))
+                            .foregroundStyle(Palette.muted)
+                            .frame(maxWidth: .infinity)
+                            .padding(.top, 6)
+                    }
+                    let turns = Turn.split(agent.entries)
+                    ForEach(turns) { turn in
+                        TurnView(
+                            turn: turn,
+                            // Working on it — or asked before graff was up,
+                            // and waiting for it to be.
+                            live: turn.id == turns.last?.id && (agent.phase == .working
+                                || (agent.phase == .starting && turn.you != nil && turn.answer.isEmpty)),
+                            full: full
+                        ) { url in browser.open(url, foreground: true) }
                     }
                 }
-                .padding(.horizontal, 14)
+                .padding(.horizontal, full ? 20 : 14)
                 .padding(.vertical, 12)
             )
         }
         .defaultScrollAnchor(.bottom)
         .frame(maxHeight: .infinity)
+    }
+
+    /// "Today 7:44 PM", or the day it was, over a conversation on the stage.
+    private static func day(_ date: Date) -> String {
+        let time = date.formatted(date: .omitted, time: .shortened)
+        if Calendar.current.isDateInToday(date) { return "Today \(time)" }
+        if Calendar.current.isDateInYesterday(date) { return "Yesterday \(time)" }
+        return date.formatted(.dateTime.month(.abbreviated).day()) + " " + time
     }
 
     /// What there is before anything has been said: how to start, or what
@@ -187,44 +222,10 @@ struct AgentColumn: View {
     private var empty: some View {
         VStack(alignment: .leading, spacing: 10) {
             switch agent.phase {
-            case .missing:
-                Text("Codegraff isn't on this Mac")
-                    .font(.system(size: 13, weight: .medium))
-                    .foregroundStyle(Palette.ink)
-                Text("Search runs the `graff` command it installs. Get it, or show Search where yours is in Settings › Agent.")
-                    .font(.system(size: 12))
-                    .foregroundStyle(Palette.muted)
-                    .fixedSize(horizontal: false, vertical: true)
-                HStack(spacing: 6) {
-                    Pill("Get Codegraff", filled: true) {
-                        browser.open(Agent.download, foreground: true)
-                    }
-                    Pill("Try again") { agent.restart() }
-                }
-            case .signedOut:
-                Text("Sign in to Codegraff")
-                    .font(.system(size: 13, weight: .medium))
-                    .foregroundStyle(Palette.ink)
-                Text("`graff login` opens in Terminal. Come back here once it says you're in.")
-                    .font(.system(size: 12))
-                    .foregroundStyle(Palette.muted)
-                    .fixedSize(horizontal: false, vertical: true)
-                HStack(spacing: 6) {
-                    Pill("Sign in…", filled: true) { agent.signIn() }
-                    Pill("I've signed in") { agent.restart() }
-                }
-            case .broken(let why):
-                Text("Codegraff stopped")
-                    .font(.system(size: 13, weight: .medium))
-                    .foregroundStyle(Palette.ink)
-                Text(why)
-                    .font(.system(size: 12))
-                    .foregroundStyle(Palette.muted)
-                    .textSelection(.enabled)
-                    .fixedSize(horizontal: false, vertical: true)
-                Pill("Start it again", filled: true) { agent.restart() }
+            case .missing, .signedOut, .broken:
+                AgentNotice(browser: browser, agent: agent)
             default:
-                Text("Ask about the page you're on, or give Codegraff something to do on your Mac. It runs commands and edits files without stopping to ask.")
+                Text("Ask about the page you're on, have it fill in a form, or give Codegraff something to do on your Mac. It runs commands and edits files without stopping to ask.")
                     .font(.system(size: 12.5))
                     .foregroundStyle(Palette.muted)
                     .fixedSize(horizontal: false, vertical: true)
@@ -254,7 +255,8 @@ struct AgentColumn: View {
                         .focused($typing)
                         .onSubmit(send)
                 }
-                .font(.system(size: 13))
+                .font(.system(size: full ? 14 : 13))
+                .padding(.vertical, full ? 5 : 0)
                 if agent.phase == .working, agent.asking?.isQuestion != true {
                     round(icon: "stop.fill", help: "Stop") { agent.stop() }
                 } else {
@@ -263,10 +265,15 @@ struct AgentColumn: View {
                         .opacity(agent.canSend ? 1 : 0.35)
                 }
             }
-            .padding(.leading, 12)
-            .padding(.trailing, 6)
+            .padding(.leading, full ? 16 : 12)
+            .padding(.trailing, full ? 8 : 6)
             .padding(.vertical, 6)
-            .background(Palette.wash, in: RoundedRectangle(cornerRadius: 12, style: .continuous))
+            .background(full ? Palette.hover : Palette.wash, in: RoundedRectangle(cornerRadius: full ? 18 : 12, style: .continuous))
+            .overlay {
+                if full {
+                    RoundedRectangle(cornerRadius: 18, style: .continuous).strokeBorder(Palette.hairline, lineWidth: 1)
+                }
+            }
             choices
         }
         .padding(.horizontal, 12)
@@ -353,6 +360,222 @@ struct AgentColumn: View {
     }
 }
 
+/// The model graff works on, and a way to change it that holds up with five
+/// hundred of them: a popover with a field that narrows the list as you type
+/// — arrows walk it, Return takes one — the few used last at the top, then
+/// one section per provider, the one you are on first and the long routers
+/// last. Nested menus built from the first word of each name were a heap
+/// once OpenRouter's "anthropic/…" names came in.
+private struct ModelPicker: View {
+    @ObservedObject var agent: Agent
+    let current: Agent.Model
+    @State private var open = false
+
+    var body: some View {
+        Button { open.toggle() } label: {
+            HStack(spacing: 3) {
+                Text(current.label)
+                Image(systemName: "chevron.down")
+                    .font(.system(size: 7.5, weight: .semibold))
+            }
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .popover(isPresented: $open, arrowEdge: .top) {
+            ModelList(agent: agent, current: current) { open = false }
+        }
+    }
+}
+
+private struct ModelList: View {
+    @ObservedObject var agent: Agent
+    let current: Agent.Model
+    let done: () -> Void
+
+    @State private var query = ""
+    /// Where the arrow keys have walked to, in the order rows are drawn.
+    @State private var picked = 0
+    /// Long sections opened with "Show all".
+    @State private var opened: Set<String> = []
+    @FocusState private var typing: Bool
+
+    /// A section: its rows, each with its place among all the rows drawn,
+    /// and how many there are before any are held back.
+    struct Section: Identifiable {
+        let id: String
+        let title: String
+        var rows: [(index: Int, model: Agent.Model)]
+        let total: Int
+    }
+
+    /// A long provider shows this many until opened or searched.
+    private static let glimpse = 6
+
+    private var sections: [Section] {
+        let words = query.lowercased().split(separator: " ").map(String.init)
+        func matches(_ model: Agent.Model) -> Bool {
+            guard !words.isEmpty else { return true }
+            let hay = "\(model.label) \(model.name) \(Agent.Model.said(model.provider)) \(model.maker ?? "")".lowercased()
+            return words.allSatisfy { hay.contains($0) }
+        }
+        var out: [Section] = []
+        var index = 0
+        func add(_ id: String, _ title: String, _ models: [Agent.Model], total: Int) {
+            guard !models.isEmpty else { return }
+            let rows = models.map { model -> (Int, Agent.Model) in
+                defer { index += 1 }
+                return (index, model)
+            }
+            out.append(Section(id: id, title: title, rows: rows, total: total))
+        }
+        if words.isEmpty {
+            let recent = [current] + agent.recentModels.filter { $0 != current }
+            add("recent", "Recent", Array(recent.prefix(5)), total: min(5, recent.count))
+        }
+        let byProvider = Dictionary(grouping: agent.models.filter(matches), by: \.provider)
+        for provider in byProvider.keys.sorted(by: { (rank($0), $0) < (rank($1), $1) }) {
+            let all = byProvider[provider] ?? []
+            let held = words.isEmpty && all.count > Self.glimpse + 2 && !opened.contains(provider)
+            add(provider, Agent.Model.said(provider), held ? Array(all.prefix(Self.glimpse)) : all, total: all.count)
+        }
+        return out
+    }
+
+    /// The provider you are on first, the ones people pick by name next,
+    /// and the routers that carry hundreds last.
+    private func rank(_ provider: String) -> Int {
+        if provider == current.provider { return 0 }
+        let first = ["codegraff", "codex", "anthropic", "openai", "xai", "kimi", "deepseek"]
+        if let at = first.firstIndex(of: provider) { return at + 1 }
+        return provider == "openrouter" ? 99 : 50
+    }
+
+    var body: some View {
+        let sections = sections
+        let rows = sections.flatMap { $0.rows.map(\.model) }
+        VStack(spacing: 0) {
+            HStack(spacing: 8) {
+                Image(systemName: "magnifyingglass")
+                    .font(.system(size: 11, weight: .medium))
+                    .foregroundStyle(Palette.muted)
+                TextField("Search \(agent.models.count) models", text: $query)
+                    .textFieldStyle(.plain)
+                    .font(.system(size: 13))
+                    .focused($typing)
+                    .onSubmit { if rows.indices.contains(picked) { choose(rows[picked]) } }
+                    .onKeyPress(.downArrow) {
+                        picked = min(picked + 1, max(0, rows.count - 1))
+                        return .handled
+                    }
+                    .onKeyPress(.upArrow) {
+                        picked = max(picked - 1, 0)
+                        return .handled
+                    }
+            }
+            .padding(.horizontal, 12)
+            .padding(.vertical, 10)
+            Rectangle().fill(Palette.hairline).frame(height: 1)
+            ScrollViewReader { reader in
+                ScrollView {
+                    LazyVStack(alignment: .leading, spacing: 0, pinnedViews: [.sectionHeaders]) {
+                        ForEach(sections) { section in
+                            SwiftUI.Section {
+                                ForEach(section.rows, id: \.index) { row in
+                                    line(row.model, lit: row.index == picked)
+                                        .id(row.index)
+                                        .onTapGesture { choose(row.model) }
+                                        .onHover { if $0 { picked = row.index } }
+                                }
+                                if section.rows.count < section.total {
+                                    Button {
+                                        opened.insert(section.id)
+                                    } label: {
+                                        Text("Show all \(section.total)")
+                                            .font(.system(size: 12))
+                                            .foregroundStyle(Palette.muted)
+                                            .padding(.horizontal, 12)
+                                            .padding(.vertical, 6)
+                                            .contentShape(Rectangle())
+                                    }
+                                    .buttonStyle(.plain)
+                                }
+                            } header: {
+                                Text(section.title)
+                                    .font(.system(size: 11, weight: .semibold))
+                                    .foregroundStyle(Palette.muted)
+                                    .frame(maxWidth: .infinity, alignment: .leading)
+                                    .padding(.horizontal, 12)
+                                    .padding(.top, 10)
+                                    .padding(.bottom, 4)
+                                    .background(.regularMaterial)
+                            }
+                        }
+                        if rows.isEmpty {
+                            Text("No model matches “\(query)”")
+                                .font(.system(size: 12.5))
+                                .foregroundStyle(Palette.muted)
+                                .padding(16)
+                        }
+                    }
+                    .padding(.bottom, 6)
+                }
+                .onChange(of: picked) { _, now in reader.scrollTo(now) }
+            }
+            .frame(height: 400)
+        }
+        .frame(width: 360)
+        .onAppear { DispatchQueue.main.async { typing = true } }
+        .onChange(of: query) { _, _ in picked = 0 }
+    }
+
+    private func line(_ model: Agent.Model, lit: Bool) -> some View {
+        HStack(spacing: 8) {
+            Image(systemName: "checkmark")
+                .font(.system(size: 9.5, weight: .bold))
+                .foregroundStyle(Palette.ink)
+                .opacity(model == current ? 1 : 0)
+                .frame(width: 12)
+            Text(model.label)
+                .font(.system(size: 13))
+                .foregroundStyle(Palette.ink)
+                .lineLimit(1)
+                .truncationMode(.tail)
+            if let tag = model.tag {
+                Text(tag)
+                    .font(.system(size: 10, weight: .medium))
+                    .foregroundStyle(Palette.muted)
+                    .padding(.horizontal, 5)
+                    .padding(.vertical, 1)
+                    .background(Palette.wash, in: Capsule())
+            }
+            Spacer(minLength: 8)
+            if let maker = model.maker {
+                Text(maker)
+                    .font(.system(size: 11))
+                    .foregroundStyle(Palette.muted)
+                    .lineLimit(1)
+            }
+            if let window = model.window {
+                Text(window)
+                    .font(.system(size: 11))
+                    .monospacedDigit()
+                    .foregroundStyle(Palette.muted.opacity(0.8))
+                    .frame(minWidth: 34, alignment: .trailing)
+            }
+        }
+        .padding(.horizontal, 8)
+        .padding(.vertical, 5)
+        .background(RoundedRectangle(cornerRadius: 7, style: .continuous).fill(lit ? Palette.hover : .clear))
+        .padding(.horizontal, 4)
+        .contentShape(Rectangle())
+    }
+
+    private func choose(_ model: Agent.Model) {
+        done()
+        agent.choose(model)
+    }
+}
+
 /// The pages graff read in a row, on one card: each its icon, title and
 /// site, and a click away from being a tab of yours.
 private struct PagesCard: View {
@@ -409,19 +632,213 @@ private struct PagesCard: View {
     }
 }
 
+/// One exchange: what was asked, the work graff did on it — thinking, tools,
+/// pages read — and the answer it ended on. What came before anything was
+/// asked is a turn with no question.
+private struct Turn: Identifiable {
+    let id: UUID
+    var you: Agent.Entry?
+    var work: [Agent.Entry] = []
+    var answer: [Agent.Entry] = []
+
+    /// The answer is what it said last, after the last thing it did; all
+    /// that came before is work. While a reply is still coming it is the
+    /// answer, and moves into the work if graff goes on to do something.
+    static func split(_ entries: [Agent.Entry]) -> [Turn] {
+        var turns: [Turn] = []
+        var said: [Agent.Entry] = []
+        var asked: Agent.Entry?
+        func close() {
+            guard asked != nil || !said.isEmpty else { return }
+            let tail = said.reversed().prefix { $0.kind == .reply || $0.kind == .note }.count
+            turns.append(Turn(
+                id: asked?.id ?? said.first?.id ?? UUID(),
+                you: asked,
+                work: Array(said.dropLast(tail)),
+                answer: Array(said.suffix(tail))
+            ))
+        }
+        for entry in entries {
+            if entry.kind == .you {
+                close()
+                asked = entry
+                said = []
+            } else {
+                said.append(entry)
+            }
+        }
+        close()
+        return turns
+    }
+
+    var started: Date? { you?.at ?? work.first?.at }
+    var ended: Date? { (work + answer).map(\.until).max() }
+}
+
+/// A turn drawn: the question, the work as one line — "Working for 7s" over
+/// the step it is on while it works, "Worked for 58s" once it is done, that
+/// opens to show every step — and the answer with its copy and time.
+private struct TurnView: View {
+    let turn: Turn
+    let live: Bool
+    let full: Bool
+    let visit: (URL) -> Void
+
+    /// Opened by hand. Closed otherwise: while it works, only the step it
+    /// is on shows, and each gives way to the next.
+    @State private var unfolded = false
+    @State private var copied = false
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: full ? 12 : 10) {
+            if let you = turn.you {
+                EntryRow(entry: you, full: full, visit: visit)
+            }
+            if !turn.work.isEmpty || (live && turn.answer.isEmpty) {
+                VStack(alignment: .leading, spacing: 6) {
+                    fold
+                    if unfolded, !turn.work.isEmpty {
+                        steps
+                    } else if live, turn.answer.isEmpty {
+                        now
+                    }
+                }
+            }
+            ForEach(turn.answer) { entry in
+                EntryRow(entry: entry, full: full, visit: visit)
+            }
+            if !live, let reply = turn.answer.last(where: { $0.kind == .reply }) {
+                foot(reply)
+            }
+        }
+        .animation(Motion.settle, value: unfolded)
+        .animation(Motion.settle, value: live)
+    }
+
+    /// Every step, in order, down a hairline.
+    private var steps: some View {
+        VStack(alignment: .leading, spacing: 4) {
+            ForEach(Agent.grouped(turn.work), id: \.first?.id) { run in
+                if run.first?.kind == .page {
+                    PagesCard(pages: run, open: visit)
+                } else if let entry = run.first {
+                    EntryRow(entry: entry, full: full, visit: visit)
+                }
+            }
+        }
+        .padding(.leading, 12)
+        .overlay(alignment: .leading) {
+            Rectangle().fill(Palette.hairline).frame(width: 1).padding(.leading, 4)
+        }
+        .transition(.opacity)
+    }
+
+    /// The one step it is on, under the line that says how long.
+    private var now: some View {
+        let last = Agent.grouped(turn.work).last
+        let icon: String
+        let words: String
+        if let run = last, run.first?.kind == .page {
+            let hosts = run.compactMap { URL(string: $0.key)?.host()?.replacingOccurrences(of: "www.", with: "") }
+            icon = "globe"
+            words = (run.count == 1 ? "Read a page" : "Read \(run.count) pages") + (hosts.isEmpty ? "" : " · " + Array(Set(hosts)).sorted().prefix(3).joined(separator: ", "))
+        } else if let entry = last?.first, entry.kind == .tool {
+            icon = EntryRow.icon(entry)
+            words = EntryRow.said(entry)
+        } else {
+            icon = "sparkle"
+            words = "Thinking"
+        }
+        return HStack(spacing: 7) {
+            Image(systemName: icon)
+                .font(.system(size: 10, weight: .medium))
+                .frame(width: 14)
+            Text(words)
+                .lineLimit(1)
+                .truncationMode(.tail)
+        }
+        .font(.system(size: full ? 12.5 : 12))
+        .foregroundStyle(Palette.muted)
+        .padding(.leading, 2)
+        .id(words)
+        .transition(.opacity)
+        .animation(Motion.quick, value: words)
+    }
+
+    private var fold: some View {
+        Button { if !turn.work.isEmpty { unfolded.toggle() } } label: {
+            HStack(spacing: 6) {
+                if live {
+                    Ring(size: 9)
+                    TimelineView(.periodic(from: .now, by: 1)) { context in
+                        Text("Working for " + Self.span(from: turn.started, to: context.date))
+                            .monospacedDigit()
+                    }
+                } else {
+                    Text(turn.started.flatMap { start in turn.ended.map { "Worked for " + Self.span(from: start, to: $0) } } ?? "Worked")
+                }
+                if !turn.work.isEmpty {
+                    Image(systemName: unfolded ? "chevron.down" : "chevron.right")
+                        .font(.system(size: 8.5, weight: .semibold))
+                }
+            }
+            .font(.system(size: full ? 13 : 12))
+            .foregroundStyle(Palette.muted)
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .help(unfolded ? "Hide the steps" : "Show each step")
+    }
+
+    /// Copy, and when it was said.
+    private func foot(_ reply: Agent.Entry) -> some View {
+        HStack(spacing: 12) {
+            Button {
+                let all = turn.answer.filter { $0.kind == .reply }.map(\.text).joined(separator: "\n\n")
+                NSPasteboard.general.clearContents()
+                NSPasteboard.general.setString(all, forType: .string)
+                copied = true
+                DispatchQueue.main.asyncAfter(deadline: .now() + 1.2) { copied = false }
+            } label: {
+                Image(systemName: copied ? "checkmark" : "square.on.square")
+                    .font(.system(size: 11, weight: .medium))
+                    .frame(width: 16, height: 16)
+                    .contentShape(Rectangle())
+            }
+            .buttonStyle(.plain)
+            .help("Copy")
+            Text(reply.until.formatted(date: .omitted, time: .shortened))
+                .font(.system(size: 11.5))
+        }
+        .foregroundStyle(Palette.muted)
+    }
+
+    /// "58s", "2m 5s".
+    private static func span(from start: Date?, to end: Date) -> String {
+        let seconds = max(0, Int(end.timeIntervalSince(start ?? end).rounded()))
+        return seconds < 60 ? "\(seconds)s" : "\(seconds / 60)m \(seconds % 60)s"
+    }
+}
+
 /// One thing said, by you or by it, or one thing it did.
 private struct EntryRow: View {
     let entry: Agent.Entry
+    /// On the stage, where the words are set larger.
+    var full = false
     let visit: (URL) -> Void
     @State private var open = false
 
-    init(entry: Agent.Entry, visit: @escaping (URL) -> Void) {
+    init(entry: Agent.Entry, full: Bool = false, visit: @escaping (URL) -> Void) {
         self.entry = entry
+        self.full = full
         self.visit = visit
     }
 
+    private var said: String { EntryRow.said(entry) }
+    private var icon: String { EntryRow.icon(entry) }
+
     /// A tool's name as graff gives it, said the way a person would.
-    private var said: String {
+    static func said(_ entry: Agent.Entry) -> String {
         let prefix = "mcp__search__"
         guard entry.text.hasPrefix(prefix) else { return entry.text }
         let tool = String(entry.text.dropFirst(prefix.count))
@@ -430,6 +847,7 @@ private struct EntryRow: View {
             "read": "Reading the page", "links": "Looking at the links", "go": "Going to a page",
             "back": "Going back", "forward": "Going forward", "reload": "Reloading",
             "click": "Clicking", "type": "Typing", "submit": "Submitting a form",
+            "form_fields": "Reading the form", "fill": "Filling in the form",
             "run_js": "Running a script on the page", "screenshot": "Looking at the page",
             "tabs": "Looking at your tabs", "show": "Showing you a page", "close": "Closing a page",
         ][tool] ?? tool
@@ -446,26 +864,23 @@ private struct EntryRow: View {
                         .lineLimit(1)
                 }
                 Text(entry.text)
-                    .font(.system(size: 13))
+                    .font(.system(size: full ? 14.5 : 13))
                     .foregroundStyle(Palette.ink)
                     .textSelection(.enabled)
-                    .padding(.horizontal, 11)
-                    .padding(.vertical, 7)
-                    .background(Palette.wash, in: RoundedRectangle(cornerRadius: 12, style: .continuous))
+                    .padding(.horizontal, full ? 15 : 11)
+                    .padding(.vertical, full ? 9 : 7)
+                    .background(Palette.wash, in: RoundedRectangle(cornerRadius: full ? 18 : 12, style: .continuous))
             }
             .frame(maxWidth: .infinity, alignment: .trailing)
-            .padding(.leading, 28)
+            .padding(.leading, full ? 80 : 28)
         case .reply:
-            Text(Agent.rich(entry.text))
-                .font(.system(size: 13))
-                .foregroundStyle(Palette.ink)
-                .textSelection(.enabled)
-                .fixedSize(horizontal: false, vertical: true)
+            ReplyText(text: entry.text, size: full ? 14.5 : 13)
         case .thought:
             Button { open.toggle() } label: {
-                HStack(alignment: .firstTextBaseline, spacing: 6) {
-                    Image(systemName: open ? "chevron.down" : "chevron.right")
-                        .font(.system(size: 8, weight: .semibold))
+                HStack(alignment: .firstTextBaseline, spacing: 7) {
+                    Image(systemName: "sparkle")
+                        .font(.system(size: 10, weight: .medium))
+                        .frame(width: 14)
                     Text(open ? entry.text : "Thinking")
                         .font(.system(size: 12))
                         .italic(open)
@@ -515,9 +930,8 @@ private struct EntryRow: View {
                     .frame(maxHeight: 180)
                 }
             }
-            .padding(.horizontal, 10)
-            .padding(.vertical, 7)
-            .background(RoundedRectangle(cornerRadius: 9, style: .continuous).strokeBorder(Palette.hairline, lineWidth: 1))
+            // A step among steps, down the fold's hairline: no box of its own.
+            .padding(.vertical, 3)
         case .note:
             Text(entry.text)
                 .font(.system(size: 11.5))
@@ -531,7 +945,7 @@ private struct EntryRow: View {
 
     /// What it did, at a glance: searched, fetched, read, changed, ran — or
     /// worked in the browser, through Search's own tools.
-    private var icon: String {
+    static func icon(_ entry: Agent.Entry) -> String {
         let title = entry.text.lowercased()
         if title.contains("search__") || title.hasPrefix("search.") || title.hasPrefix("search:") { return "safari" }
         switch entry.act {
@@ -555,6 +969,96 @@ private struct EntryRow: View {
         default:
             Ring(size: 9)
         }
+    }
+}
+
+/// A reply's markdown a block at a time — paragraphs, lists, headings, code —
+/// with bold, code and links inside each line (Agent.rich). SwiftUI's own
+/// reading of markdown is inline only, and a list read that way is a run of
+/// dashes.
+private struct ReplyText: View {
+    let text: String
+    var size: CGFloat = 13
+
+    enum Block {
+        case words(String)
+        case item(String, mark: String, depth: Int)
+        case heading(String)
+        case code(String)
+    }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: size * 0.7) {
+            ForEach(Array(Self.blocks(text).enumerated()), id: \.offset) { _, block in
+                switch block {
+                case .words(let words):
+                    Text(Agent.rich(words))
+                        .lineSpacing(size * 0.2)
+                case .item(let words, let mark, let depth):
+                    HStack(alignment: .firstTextBaseline, spacing: 8) {
+                        Text(mark)
+                            .foregroundStyle(Palette.muted)
+                            .frame(minWidth: 10, alignment: .trailing)
+                        Text(Agent.rich(words))
+                            .lineSpacing(size * 0.2)
+                    }
+                    .padding(.leading, 4 + CGFloat(depth) * 16)
+                case .heading(let words):
+                    Text(Agent.rich(words))
+                        .font(.system(size: size + 1, weight: .semibold))
+                case .code(let code):
+                    Text(code)
+                        .font(.system(size: size - 1.5, design: .monospaced))
+                        .padding(10)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                        .background(Palette.wash, in: RoundedRectangle(cornerRadius: 8, style: .continuous))
+                }
+            }
+        }
+        .font(.system(size: size))
+        .foregroundStyle(Palette.ink)
+        .textSelection(.enabled)
+        .fixedSize(horizontal: false, vertical: true)
+    }
+
+    static func blocks(_ text: String) -> [Block] {
+        var out: [Block] = []
+        var words: [String] = []
+        var code: [String]?
+        func flush() {
+            if !words.isEmpty { out.append(.words(words.joined(separator: "\n"))) }
+            words = []
+        }
+        for raw in text.components(separatedBy: "\n") {
+            let line = raw.trimmingCharacters(in: .whitespaces)
+            if code != nil {
+                if line.hasPrefix("```") {
+                    out.append(.code((code ?? []).joined(separator: "\n")))
+                    code = nil
+                } else {
+                    code?.append(raw)
+                }
+                continue
+            }
+            if line.hasPrefix("```") { flush(); code = []; continue }
+            if line.isEmpty || line == "---" || line == "***" { flush(); continue }
+            let depth = raw.prefix { $0 == " " }.count / 2
+            if let mark = line.range(of: #"^[-*•+]\s+"#, options: .regularExpression) {
+                flush()
+                out.append(.item(String(line[mark.upperBound...]), mark: "•", depth: depth))
+            } else if let mark = line.range(of: #"^\d+[.)]\s+"#, options: .regularExpression) {
+                flush()
+                out.append(.item(String(line[mark.upperBound...]), mark: line[..<mark.upperBound].trimmingCharacters(in: .whitespaces), depth: depth))
+            } else if let mark = line.range(of: #"^#{1,6}\s+"#, options: .regularExpression) {
+                flush()
+                out.append(.heading(String(line[mark.upperBound...])))
+            } else {
+                words.append(line.hasPrefix("> ") ? String(line.dropFirst(2)) : line)
+            }
+        }
+        if let code { out.append(.code(code.joined(separator: "\n"))) }
+        flush()
+        return out
     }
 }
 
@@ -624,8 +1128,8 @@ struct AgentPage: View {
     var body: some View {
         Card {
             Line(
-                "Codegraff beside the page",
-                "A column on the right where Codegraff reads the page you're on and works on your Mac with all its tools — commands, file edits, codedb — without stopping to ask. ⇧⌘A shows and hides it; ⌘↩ in the address field asks it"
+                "Codegraff",
+                "The Ask tab at the head of the row, with your chats, and a column beside the page. Codegraff reads the page you're on, fills in forms, and works on your Mac with all its tools — commands, file edits, codedb — without stopping to ask. ⇧⌘A shows and hides the column; ⌘↩ in the address field asks it"
             ) {
                 Switch(on: Binding(
                     get: { prefs.usesAgent },

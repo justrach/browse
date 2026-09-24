@@ -11,10 +11,14 @@ final class Browser: NSObject, ObservableObject {
     @Published private(set) var tabs: [Tab] = []
     @Published var activeID: Tab.ID? {
         didSet {
+            guard oldValue != activeID else { return }
+            // Another tab picked, opened or come to the front while the talk
+            // fills the stage is a page wanted: the stage goes back to it.
+            if talkOnStage { leaveStage() }
             // The tab just left is the tab just looked at. Whether a tab has
             // gone unwatched long enough to sleep is counted from here, not
             // from when it was first picked.
-            guard oldValue != activeID, let old = oldValue else { return }
+            guard let old = oldValue else { return }
             tabs.first { $0.id == old }?.touch()
         }
     }
@@ -45,30 +49,91 @@ final class Browser: NSObject, ObservableObject {
         AgentTools.shared.browser = self
         return Agent(prefs: prefs)
     }()
-    /// Its column, down the right.
+    /// Its column, down the right — only when asked for by the door in the
+    /// talk's head. Codegraff fills the stage otherwise.
     @Published var consulting = false
     /// The same talk filling the stage instead, as a page of its own (see
-    /// AgentColumn.swift). Only where it is drawn; nothing remembers it.
+    /// AgentColumn.swift): where it opens unless the column is already up.
     @Published var agentFull = false
 
-    /// ⇧⌘A. Asking for the column is turning it on; Settings › Agent turns
-    /// it off again.
+    /// The talk on the stage where a page would be: the Ask tab is the one
+    /// in front (see AskTab in TabBar.swift).
+    var talkOnStage: Bool { consulting && agentFull && prefs.usesAgent }
+
+    /// ⇧⌘A. Codegraff over the whole tab, or — if it is up, on the stage or
+    /// down the side — gone again. Settings › Agent turns it off for good.
     func toggleAgent() {
         if !prefs.usesAgent { prefs.usesAgent = true }
-        withAnimation(Motion.glide) { consulting.toggle() }
+        if consulting {
+            withAnimation(Motion.glide) {
+                agentFull = false
+                consulting = false
+            }
+        } else {
+            takeStage()
+        }
+    }
+
+    /// The Ask tab: Codegraff's page on the stage — the chats so far and a
+    /// field for a new one (see AgentHome.swift) — or, pressed again, the
+    /// page that was there.
+    func toggleStage() {
+        if talkOnStage { leaveStage() } else { takeStage() }
+    }
+
+    func takeStage() {
+        guard !talkOnStage else { return }
+        if !prefs.usesAgent { prefs.usesAgent = true }
+        editing = false
+        withAnimation(Motion.glide) {
+            consulting = true
+            agentFull = true
+        }
+    }
+
+    /// Back to the page, and only the page: a tab picked, ⌘T, or somewhere
+    /// typed is a page wanted, not the talk squeezed down the side of it.
+    func leaveStage() {
+        guard agentFull else { return }
+        withAnimation(Motion.glide) {
+            agentFull = false
+            consulting = false
+        }
+    }
+
+    /// From the stage's own head: the same talk, down the side of the page.
+    func talkToColumn() {
+        withAnimation(Motion.glide) { agentFull = false }
+    }
+
+    /// What was typed into the Ask page's field with Search chosen: the
+    /// place, or a search for it, in the empty tab if there is one and a new
+    /// tab otherwise — and the stage goes back to the page.
+    @discardableResult
+    func visit(_ typed: String) -> Bool {
+        guard let url = destination(for: typed.trimmingCharacters(in: .whitespacesAndNewlines)) else { return false }
+        if let tab = active, tab.isBlank {
+            tab.go(to: url)
+            leaveStage()
+        } else {
+            // Opening it brings it to the front, and that leaves the stage.
+            open(url, foreground: true)
+        }
+        return true
     }
 
     /// Words from the address field, for Codegraff rather than for a page:
-    /// the Ask Codegraff row, or ⌘↩. The column opens beside the page and the
-    /// words go with the page you're on, unless it was left out there.
+    /// the Ask Codegraff row, or ⌘↩. The talk takes the stage — or stays down
+    /// the side, if that is where it already is — and the words go with the
+    /// page you're on, unless it was left out there.
     func ask(_ words: String) {
         let text = words.trimmingCharacters(in: .whitespacesAndNewlines)
         summoning = false
         picked = nil
         typed = ""
-        if active?.isBlank == false { editing = false }
+        editing = false
         if !prefs.usesAgent { prefs.usesAgent = true }
-        withAnimation(Motion.glide) { consulting = true }
+        if !consulting { takeStage() }
         guard !text.isEmpty else { return }
         agent.draft = text
         // Still busy with the last one: the words wait in its field.
@@ -1007,6 +1072,8 @@ final class Browser: NSObject, ObservableObject {
     // MARK: - tabs
 
     func newTab() {
+        // ⌘T over the talk: a page is wanted, even the empty tab already in front.
+        leaveStage()
         // An extension's new tab page, if one asked and you said yes.
         if #available(macOS 15.4, *), let page = Extensions.shared.newTabPage {
             open(page, foreground: true)
@@ -1060,6 +1127,9 @@ final class Browser: NSObject, ObservableObject {
         cancelTabEdit()
         summoning = false
         suggesting = nil
+        // The tab already in front, picked while the talk has the stage: its
+        // page comes back.
+        if talkOnStage, tab.id == activeID { leaveStage() }
         guard tab.id != activeID else { return }
         // Coming back to the tab whose video is out brings it home first, so
         // it is never lifted and landed in the same breath.
@@ -1612,6 +1682,11 @@ final class Browser: NSObject, ObservableObject {
         // hands them to Codegraff, with the page you're on.
         if Address.url(from: typed) == nil, typed.contains(where: { !$0.isWhitespace }) {
             list.append(.ask(typed.trimmingCharacters(in: .whitespaces)))
+            // Words that read like a question: graff starts now, while they
+            // are still being typed, rather than after ⌘↩ — a second saved,
+            // and the first word of the answer is that much sooner. One word
+            // might be a site's name, not worth a process.
+            if prefs.usesAgent, typed.trimmingCharacters(in: .whitespaces).contains(" ") { agent.wake() }
         }
         offers = list
         ending = history.completion(for: typed, among: offers.filter { $0.kind != .open && $0.kind != .ask })
@@ -1755,6 +1830,8 @@ final class Browser: NSObject, ObservableObject {
             return
         }
         (active ?? tabs.first)?.go(to: url)
+        // Somewhere typed with ⌘L over the talk: the page is what was asked for.
+        leaveStage()
         editing = false
         typed = ""
     }

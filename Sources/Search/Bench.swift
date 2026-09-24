@@ -1046,6 +1046,12 @@ final class Bench {
                 browser.consulting = on
             }
             if let on = request["agentfull"] as? Bool { browser.agentFull = on }
+            // One of the chats so far back on screen, by its place on the
+            // Ask tab's page (0 the newest) — or none, for the page itself.
+            if let which = request["chat"] as? String {
+                let chats = browser.agent.chats.all
+                if let n = Int(which), chats.indices.contains(n) { browser.agent.resume(chats[n]) } else { browser.agent.startOver() }
+            }
             if let look = (request["look"] as? String).flatMap(Look.init) { browser.prefs.look = look }
             if let on = request["sidebar"] as? Bool { browser.prefs.sidebar = on }
             if let on = request["spaces"] as? Bool { browser.prefs.usesSpaces = on }

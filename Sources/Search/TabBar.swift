@@ -41,6 +41,8 @@ struct TabBar: View {
                 HStack(spacing: Metrics.tabGap) {
                     // The space on screen, first, when there are spaces.
                     if browser.prefs.usesSpaces { SpaceDot(browser: browser) }
+                    // Codegraff's own tab, a square ahead of the others.
+                    if browser.prefs.usesAgent { AskTab(browser: browser, pill: pill) }
 
                     // The tabs, in a run of their own. While they fit, it is
                     // exactly as wide as they are and nothing about the row
@@ -69,7 +71,7 @@ struct TabBar: View {
                                                 browser: browser,
                                                 prefs: browser.prefs,
                                                 tab: tab,
-                                                live: tab.id == browser.activeID,
+                                                live: tab.id == browser.activeID && !browser.talkOnStage,
                                                 width: width(in: geo.size.width),
                                                 room: geo.size.width - Metrics.lights - 12,
                                                 pill: pill,
@@ -298,8 +300,12 @@ struct TabBar: View {
         return max(0, strip - Metrics.lights - dot - 12 - Metrics.plusWidth - far - 3 * Metrics.tabGap)
     }
 
-    /// What the space's dot takes before the tabs, when there are spaces.
-    private var dot: CGFloat { browser.prefs.usesSpaces ? SpaceDot.width + Metrics.tabGap : 0 }
+    /// What goes before the tabs: the space's dot, when there are spaces,
+    /// and the Ask tab, while Codegraff is on.
+    private var dot: CGFloat {
+        (browser.prefs.usesSpaces ? SpaceDot.width + Metrics.tabGap : 0)
+            + (browser.prefs.usesAgent ? Metrics.pinWidth + Metrics.tabGap : 0)
+    }
 
     /// Every loose tab is the same width, so the cross is always in the same
     /// place. Past a dozen or so they start giving ground; too narrow for a
@@ -317,6 +323,56 @@ struct TabBar: View {
         let spent = pinned * Metrics.pinWidth
             + CGFloat(max(0, count - 1)) * Metrics.tabGap
         return max(Metrics.tabMinWidth, min(Metrics.tabWidth, (room(in: strip) - spent) / loose))
+    }
+}
+
+/// Codegraff's tab: a square the size of a pinned one at the head of the row,
+/// that puts its page on the stage — the chats so far and a field for a new
+/// one (see AgentHome.swift) — and, pressed again, gives the stage back. The
+/// grey of the tab in front slides onto it while its page is up.
+struct AskTab: View {
+    @ObservedObject var browser: Browser
+    let pill: Namespace.ID
+    /// Wider in the column of tabs, where it is a row.
+    var width: CGFloat = Metrics.pinWidth
+    var title: String?
+
+    @State private var hovering = false
+
+    var body: some View {
+        let live = browser.talkOnStage
+        Button { browser.toggleStage() } label: {
+            HStack(spacing: 8) {
+                Image(systemName: "sparkle")
+                    .font(.system(size: 11, weight: .medium))
+                    .frame(width: 16, height: 16)
+                if let title {
+                    Text(title)
+                        .font(.system(size: 12.5))
+                    Spacer(minLength: 0)
+                }
+            }
+            .foregroundStyle(live ? Palette.ink : (hovering ? Palette.ink.opacity(0.7) : Palette.muted))
+            .padding(.horizontal, title == nil ? 7 : 10)
+            .padding(.vertical, 6)
+            .frame(width: title == nil ? width : nil)
+            .frame(maxWidth: title == nil ? nil : .infinity, alignment: .leading)
+            .background {
+                if live {
+                    RoundedRectangle(cornerRadius: 9, style: .continuous)
+                        .fill(Palette.wash)
+                        .matchedGeometryEffect(id: "live", in: pill)
+                } else {
+                    RoundedRectangle(cornerRadius: 9, style: .continuous)
+                        .fill(hovering ? Palette.hover : (title == nil ? Palette.wash.opacity(0.55) : .clear))
+                }
+            }
+            .contentShape(RoundedRectangle(cornerRadius: 9, style: .continuous))
+        }
+        .buttonStyle(.plain)
+        .onHover { hovering = $0 }
+        .help(live ? "Back to the page" : "Ask Codegraff")
+        .animation(Motion.quick, value: hovering)
     }
 }
 
