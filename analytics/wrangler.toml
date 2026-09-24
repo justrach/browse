@@ -1,0 +1,13 @@
+name = "search-codegraff-stats"
+main = "src/index.js"
+compatibility_date = "2026-05-01"
+workers_dev = true
+
+# Requests are not logged: no observability, no logpush. The Worker never
+# reads the address a request came from.
+[observability]
+enabled = false
+
+[[kv_namespaces]]
+binding = "KV"
+id = "48eac934e97a42dc996194d6aae911f1"

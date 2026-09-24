@@ -368,6 +368,7 @@ struct SettingsPanel: View {
                     Pill("Forget choices") { browser.forgetCaptureChoices() }
                 }
             }
+            StatsCard(browser: browser, prefs: prefs)
             Card {
                 Line("History", "Every address you have been to") {
                     Pill("Clear") { browser.clearHistory() }

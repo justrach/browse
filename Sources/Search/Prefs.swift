@@ -146,6 +146,11 @@ final class Preferences: ObservableObject {
     @Published var usesAgent: Bool {
         didSet { store.set(usesAgent, forKey: "agent") }
     }
+    /// Anonymous stats about this Mac, sent once a day (see Stats.swift).
+    /// Off unless switched on.
+    @Published var shareStats: Bool {
+        didSet { store.set(shareStats, forKey: "stats.share") }
+    }
     /// Whether Codegraff brings up every MCP server the user's config and
     /// other apps name, rather than only the browser's tools and its own.
     /// Off: each of those is a process, for every chat (see Agent.environment).
@@ -227,6 +232,7 @@ final class Preferences: ObservableObject {
         // On until turned off: all it costs unasked is the Ask tab, and graff
         // only starts once something is asked of it.
         usesAgent = store.object(forKey: "agent") as? Bool ?? true
+        shareStats = store.bool(forKey: "stats.share")
         agentAllTools = store.bool(forKey: "agent.alltools")
         agentPath = store.string(forKey: "agent.path") ?? ""
         agentModel = store.string(forKey: "agent.model") ?? ""

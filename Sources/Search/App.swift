@@ -427,6 +427,8 @@ struct ContentView: View {
             // Addresses from other apps have somewhere to go from here on.
             Links.hand(to: browser)
             BookmarkMenu.shared.start(for: browser)
+            // Anonymous stats, if they have been switched on (Stats.swift).
+            Stats.shared.start(for: browser)
         }
     }
 
