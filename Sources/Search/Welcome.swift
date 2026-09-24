@@ -60,7 +60,7 @@ struct WelcomePanel: View {
         VStack(spacing: 22) {
             Plate(size: 72)
             VStack(spacing: 10) {
-                Text("Search")
+                Text("Search by Codegraff")
                     .font(.system(size: 34, weight: .medium))
                     .foregroundStyle(Palette.ink)
                 Text("A browser with nothing in the way. Four megabytes, the engine already in your Mac, and as little around the page as we could manage.")
@@ -143,12 +143,12 @@ struct WelcomePanel: View {
                     HStack(spacing: 8) {
                         Image(systemName: "checkmark")
                             .font(.system(size: 11, weight: .medium))
-                        Text("Search is the default browser")
+                        Text("Search by Codegraff is the default browser")
                     }
                     .font(.system(size: 13))
                     .foregroundStyle(Palette.ink)
                 } else {
-                    Big("Make Search the default", filled: true) {
+                    Big("Make Search by Codegraff the default", filled: true) {
                         asked = true
                         Links.becomeDefault { _ in isDefault = Links.isDefault }
                     }
@@ -277,15 +277,11 @@ struct WelcomePanel: View {
 
     // MARK: - pieces
 
-    /// The mark alone, at whatever height the page wants — no plate behind
-    /// it, the same as everywhere else it's drawn.
+    /// The Codegraff artwork at the size the page wants.
     private struct Plate: View {
         let size: CGFloat
         var body: some View {
-            Logomark()
-                .fill(Palette.ink, style: FillStyle(eoFill: true))
-                .aspectRatio(Logomark.canvas.width / Logomark.canvas.height, contentMode: .fit)
-                .frame(height: size * 0.56)
+            BrandMark().frame(width: size, height: size)
         }
     }
 

@@ -1,31 +1,30 @@
 #!/bin/bash
-# Points Homebrew at the version just released: the cask in
-# github.com/driceroland/homebrew-tap gets this version and the checksum of
-# the disk image on its GitHub release, so that
-#
-#   brew install --cask driceroland/tap/search
-#
-# installs it, and brew upgrade brings it. Run it once the release is on
-# GitHub (tag vX.Y.Z, Search.dmg attached); it reads the version from VERSION.
+# Update a fork-owned Homebrew tap after publishing a Codegraff release.
+# Required environment:
+#   CODEGRAFF_TAP_REPO   Git URL of a tap you control
+#   CODEGRAFF_CASK_PATH  Cask path within that tap (for example Casks/search-by-codegraff.rb)
+#   CODEGRAFF_RELEASE_URL  URL of this version's Search-by-Codegraff.dmg
+# No upstream Office Commun repository or tap is a default.
 set -euo pipefail
 
 cd "$(dirname "$0")"
+: "${CODEGRAFF_TAP_REPO:?set CODEGRAFF_TAP_REPO to a fork-owned tap}"
+: "${CODEGRAFF_CASK_PATH:?set CODEGRAFF_CASK_PATH within that tap}"
+: "${CODEGRAFF_RELEASE_URL:?set CODEGRAFF_RELEASE_URL to this fork's DMG}"
 VERSION="$(tr -d '[:space:]' < VERSION)"
-URL="https://github.com/driceroland/Search/releases/download/v$VERSION/Search.dmg"
 WORK="$(mktemp -d)"
 trap 'rm -rf "$WORK"' EXIT
 
-curl -fsSL -o "$WORK/Search.dmg" "$URL" \
-  || { echo "no Search.dmg on the v$VERSION release yet — publish the release first" >&2; exit 1; }
-SHA="$(shasum -a 256 "$WORK/Search.dmg" | cut -d' ' -f1)"
-
-git clone -q https://github.com/driceroland/homebrew-tap.git "$WORK/tap"
-CASK="$WORK/tap/Casks/search.rb"
+curl -fsSL -o "$WORK/Search-by-Codegraff.dmg" "$CODEGRAFF_RELEASE_URL"
+SHA="$(shasum -a 256 "$WORK/Search-by-Codegraff.dmg" | cut -d' ' -f1)"
+git clone -q "$CODEGRAFF_TAP_REPO" "$WORK/tap"
+CASK="$WORK/tap/$CODEGRAFF_CASK_PATH"
+[ -f "$CASK" ] || { echo "missing cask: $CODEGRAFF_CASK_PATH" >&2; exit 1; }
 sed -i '' -E "s/^  version \".*\"/  version \"$VERSION\"/; s/^  sha256 \".*\"/  sha256 \"$SHA\"/" "$CASK"
 if git -C "$WORK/tap" diff --quiet; then
-  echo "the tap already has Search $VERSION"
+  echo "the tap already has Search by Codegraff $VERSION"
   exit 0
 fi
-git -C "$WORK/tap" commit -qam "Search $VERSION"
+git -C "$WORK/tap" commit -qam "Search by Codegraff $VERSION"
 git -C "$WORK/tap" push -q
-echo "tap: Search $VERSION, sha256 $SHA"
+echo "tap: Search by Codegraff $VERSION, sha256 $SHA"

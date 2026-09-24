@@ -4,9 +4,8 @@
 # fetches.
 #
 #   ./build.sh                 debug-free release build, ad-hoc signed: runs here
-#   ./build.sh release dmg     + build/Search.dmg, build/Search.zip and
-#                                build/appcast.json, signed with Developer ID
-#                                if there is one in the keychain
+#   ./build.sh release dmg     + branded DMG and ZIP; with
+#                                SEARCH_DOWNLOAD_URL, also appcast.json
 #   ./build.sh release ship    + both notarised, the DMG stapled
 #
 # Same shape as the one next door: SwiftPM builds the executable, and a macOS
@@ -24,9 +23,8 @@
 #     (SEARCH_SIGN_IDENTITY names it; otherwise the first one found is used)
 #   - a notarytool profile: xcrun notarytool store-credentials "search"
 #     (SEARCH_NOTARY_PROFILE names it; default "search")
-#   - SEARCH_DOWNLOAD_URL, the https folder the three files are served from,
-#     for the appcast. Default https://officecommun.com/search, which is
-#     where Updater.feed in Updater.swift looks.
+#   - SEARCH_DOWNLOAD_URL, the https folder the artifacts are served from,
+#     for the appcast. No upstream release address is used by this fork.
 #
 # NOTES.md, next to this script, is what's new: newest release first, one
 # paragraph each. The first paragraph goes into the appcast, and from there
@@ -36,8 +34,9 @@ set -euo pipefail
 cd "$(dirname "$0")"
 CONFIG="${1:-release}"
 STEP="${2:-app}"
-APP="build/Search.app"
-NAME="Search"
+NAME="Search by Codegraff"
+SLUG="Search-by-Codegraff"
+APP="build/$NAME.app"
 VERSION="$(tr -d '[:space:]' < VERSION)"
 # A build number that only ever goes up, so the updater can tell newer from
 # older without parsing version strings.
@@ -51,26 +50,37 @@ BINARY=".build/$CONFIG/Search"
 
 rm -rf "$APP"
 mkdir -p "$APP/Contents/MacOS" "$APP/Contents/Resources"
-cp "$BINARY" "$APP/Contents/MacOS/$NAME"
+cp "$BINARY" "$APP/Contents/MacOS/Search"
 
 # Symbols stay out of the app. The linker leaves every function's name and a
 # map back to the source in the binary — 15,000 entries, more than half of
 # what the app weighed (6.5 MB of binary, 2.7 without them), and nothing the
 # app reads while it runs. They are kept beside the build instead, as a dSYM
 # that turns the addresses in a crash report back into names (Console, or
-# atos -o build/Search.app.dSYM/Contents/Resources/DWARF/Search).
+# atos -o "build/Search by Codegraff.app.dSYM/Contents/Resources/DWARF/Search").
 if [ "$CONFIG" = "release" ]; then
   rm -rf "$APP.dSYM"
   dsymutil "$BINARY" -o "$APP.dSYM" 2>/dev/null || echo "no dSYM this time" >&2
-  strip -x "$APP/Contents/MacOS/$NAME"
+  strip -x "$APP/Contents/MacOS/Search"
 fi
 
-# The icon, drawn fresh each time — it is thirty lines of Swift, not an asset
-# to keep in step with anything.
+# Build the macOS icon from the Codegraff artwork used in the app.
 ICONSET="build/AppIcon.iconset"
 rm -rf "$ICONSET"
-swift Icon/icon.swift "$ICONSET" > /dev/null
+mkdir -p "$ICONSET"
+SOURCE_ICON="Icon/search-by-codegraff.png"
+[ -f "$SOURCE_ICON" ] || { echo "missing $SOURCE_ICON" >&2; exit 1; }
+for POINTS in 16 32 128 256 512; do
+  for SCALE in 1 2; do
+    PIXELS=$((POINTS * SCALE))
+    SUFFIX=""
+    [ "$SCALE" -eq 2 ] && SUFFIX="@2x"
+    sips -s format png -z "$PIXELS" "$PIXELS" "$SOURCE_ICON" \
+      --out "$ICONSET/icon_${POINTS}x${POINTS}${SUFFIX}.png" >/dev/null
+  done
+done
 iconutil -c icns "$ICONSET" -o "$APP/Contents/Resources/AppIcon.icns"
+cp "$SOURCE_ICON" "$APP/Contents/Resources/BrandMark.png"
 rm -rf "$ICONSET"
 
 cat > "$APP/Contents/Info.plist" <<PLIST
@@ -80,15 +90,15 @@ cat > "$APP/Contents/Info.plist" <<PLIST
 <dict>
   <key>CFBundleName</key><string>$NAME</string>
   <key>CFBundleDisplayName</key><string>$NAME</string>
-  <key>CFBundleExecutable</key><string>$NAME</string>
-  <key>CFBundleIdentifier</key><string>com.officecommun.search</string>
+  <key>CFBundleExecutable</key><string>Search</string>
+  <key>CFBundleIdentifier</key><string>com.codegraff.search</string>
   <key>CFBundlePackageType</key><string>APPL</string>
   <key>CFBundleShortVersionString</key><string>$VERSION</string>
   <key>CFBundleVersion</key><string>$BUILD</string>
   <key>CFBundleIconFile</key><string>AppIcon</string>
   <key>LSMinimumSystemVersion</key><string>$MINIMUM</string>
   <key>LSApplicationCategoryType</key><string>public.app-category.productivity</string>
-  <key>NSHumanReadableCopyright</key><string>© Office Commun · Search</string>
+  <key>NSHumanReadableCopyright</key><string>Search by Codegraff. Based on Search © 2026 Office Commun (MIT).</string>
   <key>NSHighResolutionCapable</key><true/>
   <!-- Owning http and https is what lets macOS offer this app as the default
        browser, and what sends a link clicked in Mail here. -->
@@ -117,9 +127,9 @@ cat > "$APP/Contents/Info.plist" <<PLIST
        still wants a sentence to put in its own prompt, and touching the APIs
        without one is a crash rather than a refusal. -->
   <key>NSCameraUsageDescription</key>
-  <string>Websites you visit can ask to use your camera. Search asks you first, every time, for each site.</string>
+  <string>Websites you visit can ask to use your camera. Search by Codegraff asks you first, every time, for each site.</string>
   <key>NSMicrophoneUsageDescription</key>
-  <string>Websites you visit can ask to use your microphone. Search asks you first, every time, for each site.</string>
+  <string>Websites you visit can ask to use your microphone. Search by Codegraff asks you first, every time, for each site.</string>
   <key>NSDownloadsFolderUsageDescription</key>
   <string>Files you download are saved to your Downloads folder.</string>
 </dict>
@@ -137,11 +147,8 @@ IDENTITY="${SEARCH_SIGN_IDENTITY:-$(security find-identity -v -p codesigning 2>/
 # this script, both go in; without it, the app is signed as before, because
 # a restricted entitlement with no profile behind it is an app that won't open.
 ENTITLEMENTS="Search.entitlements"
-if [ -f "Search.provisionprofile" ]; then
-  cp "Search.provisionprofile" "$APP/Contents/embedded.provisionprofile"
-  ENTITLEMENTS="Search.passkeys.entitlements"
-  echo "passkeys: profile embedded"
-fi
+# The upstream passkey profile belongs to Office Commun's bundle identifier.
+# A Codegraff-specific profile and matching entitlements are needed here.
 if [ -n "$IDENTITY" ]; then
   codesign --force --deep --timestamp --options runtime \
     --entitlements "$ENTITLEMENTS" \
@@ -161,7 +168,7 @@ echo "built: $APP ($VERSION, build $BUILD)"
 # layout file itself, so no Finder is scripted and no window opens mid-build.
 # dmgbuild is installed into .build the first time, and needs Python 3 and a
 # network then; without it the image is the plain one it always was.
-DMG="build/$NAME.dmg"
+DMG="build/$SLUG.dmg"
 ART="build/installer"
 rm -rf "$ART" "$DMG"
 DMGBUILD=".build/dmgbuild/bin/dmgbuild"
@@ -191,7 +198,7 @@ echo "packed: $DMG"
 
 # The ZIP is what the updater fetches, and its hash is what the updater
 # checks before opening it.
-ZIP="build/$NAME.zip"
+ZIP="build/$SLUG.zip"
 rm -f "$ZIP"
 ditto -c -k --keepParent "$APP" "$ZIP"
 SHA="$(shasum -a 256 "$ZIP" | cut -d' ' -f1)"
@@ -199,25 +206,30 @@ echo "packed: $ZIP"
 
 # What the updater reads. The first paragraph of NOTES.md, with the two
 # characters JSON minds escaped, is the line under the version in Settings.
-BASE="${SEARCH_DOWNLOAD_URL:-https://officecommun.com/search}"
+BASE="${SEARCH_DOWNLOAD_URL:-}"
 BASE="${BASE%/}"
 NOTES=""
 if [ -f NOTES.md ]; then
   NOTES="$(awk 'NF { printf "%s%s", (n++ ? " " : ""), $0; next } n { exit }' NOTES.md \
     | sed -e 's/\\/\\\\/g' -e 's/"/\\"/g')"
 fi
+if [ -n "$BASE" ]; then
 cat > build/appcast.json <<JSON
 {
   "version": "$VERSION",
   "build": $BUILD,
-  "url": "$BASE/$NAME.zip",
-  "dmg": "$BASE/$NAME.dmg",
+  "url": "$BASE/$SLUG.zip",
+  "dmg": "$BASE/$SLUG.dmg",
   "sha256": "$SHA",
   "notes": "$NOTES",
   "minimumSystemVersion": "$MINIMUM"
 }
 JSON
-echo "wrote: build/appcast.json ($VERSION, build $BUILD)"
+  echo "wrote: build/appcast.json ($VERSION, build $BUILD)"
+else
+  rm -f build/appcast.json
+  echo "no appcast: set SEARCH_DOWNLOAD_URL for a fork-owned release feed"
+fi
 [ "$STEP" = "dmg" ] && exit 0
 
 # Notarisation: Apple looks both over. The ticket is stapled to the image,

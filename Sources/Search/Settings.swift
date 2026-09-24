@@ -158,7 +158,7 @@ struct SettingsPanel: View {
         Card {
             Line(
                 "Open links from other apps",
-                isDefault ? "Search is the default browser on this Mac" : "Mail, Slack and the rest still send links elsewhere"
+                isDefault ? "Search by Codegraff is the default browser on this Mac" : "Mail, Slack and the rest still send links elsewhere"
             ) {
                 if isDefault {
                     Image(systemName: "checkmark")
@@ -389,15 +389,12 @@ struct SettingsPanel: View {
     private var about: some View {
         VStack(alignment: .leading, spacing: 18) {
             HStack(spacing: 14) {
-                Logomark()
-                    .fill(Palette.ink, style: FillStyle(eoFill: true))
-                    .aspectRatio(Logomark.canvas.width / Logomark.canvas.height, contentMode: .fit)
-                    .frame(height: 34)
+                BrandMark().frame(width: 34, height: 34)
                 VStack(alignment: .leading, spacing: 3) {
-                    Text("Search")
+                    Text("Search by Codegraff")
                         .font(.system(size: 15, weight: .semibold))
                         .foregroundStyle(Palette.ink)
-                    Text("by Office Commun · version \(Updater.version)")
+                    Text("Based on Search by Office Commun · version \(Updater.version)")
                         .font(.system(size: 12))
                         .foregroundStyle(Palette.muted)
                 }
@@ -439,21 +436,22 @@ struct SettingsPanel: View {
     private var versionTitle: String {
         switch updater.stage {
         case .none: return "Updates"
-        case .fetching(let next): return "Search \(next.version) is downloading…"
-        case .ready(let next): return "Search \(next.version) is ready"
-        case .offered(let next): return "Search \(next.version) is out"
+        case .fetching(let next): return "Search by Codegraff \(next.version) is downloading…"
+        case .ready(let next): return "Search by Codegraff \(next.version) is ready"
+        case .offered(let next): return "Search by Codegraff \(next.version) is out"
         }
     }
 
     private var versionDetail: String {
         switch updater.stage {
         case .none:
+            if !Updater.configured { return "No update feed configured for this fork" }
             return updater.lastChecked.map { "Checked \($0.formatted(.relative(presentation: .named))) — once a day on its own" }
                 ?? "Checked once a day on its own"
         case .fetching(let next):
             return next.notes ?? "Quietly, in the background — nothing you have set is touched"
         case .ready(let next):
-            return next.notes ?? "It's there the next time you open Search"
+            return next.notes ?? "It's there the next time you open Search by Codegraff"
         case .offered(let next):
             return next.notes ?? "Open the disk image, the same as the first time"
         }
@@ -463,12 +461,14 @@ struct SettingsPanel: View {
     private var versionControl: some View {
         switch updater.stage {
         case .none:
-            Pill(updater.checking ? "Checking…" : "Check now") {
-                updater.check { found in
-                    if found == nil { browser.announce("This is the latest one") }
+            if Updater.configured {
+                Pill(updater.checking ? "Checking…" : "Check now") {
+                    updater.check { found in
+                        if found == nil { browser.announce("This is the latest one") }
+                    }
                 }
+                .disabled(updater.checking)
             }
-            .disabled(updater.checking)
         case .fetching:
             Ring(size: 12)
         case .ready:

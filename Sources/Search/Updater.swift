@@ -14,8 +14,8 @@ import Security
 // newer.
 //
 // What the updater leaves alone, on purpose: everything in
-// ~/Library/Application Support/Search, the defaults under
-// com.officecommun.search, and the keychain. The session, the pins, the
+// ~/Library/Application Support/Search by Codegraff, the defaults under
+// com.codegraff.search, and the keychain. The session, the pins, the
 // history, the passwords — none of it is read, moved or rewritten here. Only
 // the bundle changes hands, and it keeps its bundle id and its signing
 // identity, so the keychain items the old build made open for the new one.
@@ -29,15 +29,10 @@ import Security
 final class Updater: ObservableObject {
     static let shared = Updater()
 
-    /// Where the file lives. SEARCH_FEED, for a test run, points somewhere
-    /// else — and is the only way plain http is accepted, so a build that
-    /// was not handed the variable only ever listens to the real site.
-    static let feed: URL = {
-        if let set = ProcessInfo.processInfo.environment["SEARCH_FEED"], let url = URL(string: set) {
-            return url
-        }
-        return URL(string: "https://officecommun.com/search/appcast.json")!
-    }()
+    /// This fork has no release feed until its distributor configures one.
+    /// Never ask the upstream Search feed to replace a Codegraff build.
+    static let feed: URL? = ProcessInfo.processInfo.environment["SEARCH_FEED"].flatMap(URL.init(string:))
+    static var configured: Bool { feed != nil }
 
     private static var overridden: Bool {
         ProcessInfo.processInfo.environment["SEARCH_FEED"] != nil
@@ -129,6 +124,7 @@ final class Updater: ObservableObject {
     private var clock: Timer?
 
     private func checkIfDue() {
+        guard Updater.configured else { return }
         let last = Store.settings.object(forKey: lastKey) as? Date ?? .distantPast
         guard Updater.overridden || Date().timeIntervalSince(last) > 60 * 60 * 20 else { return }
         check { _ in }
@@ -217,6 +213,7 @@ final class Updater: ObservableObject {
     }
 
     private static func fetch() async -> Release? {
+        guard let feed else { return nil }
         var request = URLRequest(url: feed)
         request.cachePolicy = .reloadIgnoringLocalCacheData
         request.timeoutInterval = 12
