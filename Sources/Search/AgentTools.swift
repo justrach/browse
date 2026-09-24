@@ -278,7 +278,7 @@ final class AgentTools {
                     "type": "object",
                     "properties": [
                         "selector": ["type": "string", "description": "From form_fields."],
-                        "value": ["description": "Text; an option's value or words; true or false for a checkbox."],
+                        "value": ["description": "Text; an option's value or words; true or false for a checkbox, or a list of the boxes to tick in a checkbox group."],
                     ],
                     "required": ["selector", "value"],
                 ],
@@ -590,7 +590,7 @@ final class AgentTools {
     /// Shared by `form_fields` and `fill`: a field's words as a person reads
     /// them, and a selector that finds it and nothing else.
     private static let formKit = """
-    function clean(t) { return (t || '').replace(/\\s+/g, ' ').trim().slice(0, 140); }
+    function clean(t) { return String(t == null ? '' : t).replace(/\\s+/g, ' ').trim().slice(0, 140); }
     function esc(v) { return window.CSS && CSS.escape ? CSS.escape(v) : String(v).replace(/["\\\\]/g, '\\\\$&'); }
     function one(s) { try { return document.querySelectorAll(s).length === 1; } catch (e) { return false; } }
     function selector(el) {
@@ -738,12 +738,32 @@ final class AgentTools {
             fire(el, ['change']);
           }
           var out = [];
+          // One field at a time, each on its own: a value a field can't take
+          // is said about that field, and the rest are still filled.
           \(json).forEach(function (item) {
+            try { fillOne(item); } catch (e) { out.push((item.selector || '?') + ': ' + (e && e.message ? e.message : 'could not be filled')); }
+          });
+          function fillOne(item) {
             var el = null;
             try { el = document.querySelector(item.selector); } catch (e) { out.push(item.selector + ': not a selector'); return; }
             if (!el) { out.push(item.selector + ': nothing matches'); return; }
             if (el.scrollIntoView) el.scrollIntoView({ block: 'center', inline: 'nearest' });
             var v = item.value, kind = (el.type || el.getAttribute('role') || '').toLowerCase(), name = label(el) || item.selector;
+            // A list for a group of checkboxes: those named are ticked, the
+            // rest of the group left clear.
+            if (Array.isArray(v) && kind === 'checkbox' && el.name) {
+              var boxes = document.querySelectorAll('input[type=checkbox][name="' + esc(el.name) + '"]'), ticked = [];
+              for (var b = 0; b < boxes.length; b++) {
+                var box = boxes[b], want = v.some(function (w) { return same(box.value, w) || same(label(box), w); });
+                if (box.checked !== want) box.click();
+                if (box.checked !== want) { box.checked = want; fire(box, ['input', 'change']); }
+                if (box.checked) ticked.push(clean(label(box)));
+              }
+              var set = el.closest('fieldset'), legend = set && set.querySelector('legend');
+              out.push(clean(legend ? legend.innerText : el.name) + ' → ' + (ticked.length ? ticked.join(', ') : 'none ticked'));
+              return;
+            }
+            if (Array.isArray(v)) v = v.join(', ');
             if (el.tagName === 'SELECT') {
               var hit = null, want = String(v);
               for (var i = 0; i < el.options.length && !hit; i++) if (same(el.options[i].value, want) || same(el.options[i].text, want)) hit = el.options[i];
@@ -776,7 +796,7 @@ final class AgentTools {
             } else {
               out.push(name + ': not something to fill');
             }
-          });
+          }
           if (document.activeElement && document.activeElement.blur) document.activeElement.blur();
           return out.join('\\n');
         })()

@@ -238,7 +238,8 @@ struct AgentColumn: View {
 
     private var foot: some View {
         VStack(alignment: .leading, spacing: 8) {
-            if let tab = browser.active, !tab.isBlank, agent.asking?.isQuestion != true {
+            // On the stage the page is out of sight, so it doesn't go along.
+            if !full, let tab = browser.active, !tab.isBlank, agent.asking?.isQuestion != true {
                 pageChip(tab)
             }
             HStack(alignment: .bottom, spacing: 8) {
@@ -321,7 +322,7 @@ struct AgentColumn: View {
 
     private func send() {
         guard agent.canSend else { return }
-        agent.send(page: agent.withPage ? browser.active : nil)
+        agent.send(page: agent.withPage && !full ? browser.active : nil)
     }
 
     /// Everything the talk draws is held to one measure and centred on the

@@ -133,12 +133,15 @@ final class Browser: NSObject, ObservableObject {
         typed = ""
         editing = false
         if !prefs.usesAgent { prefs.usesAgent = true }
+        // The page goes along only if it was the one in view when asked: from
+        // Codegraff's own page there is none.
+        let page = talkOnStage ? nil : active
         if !consulting { takeStage() }
         guard !text.isEmpty else { return }
         agent.draft = text
         // Still busy with the last one: the words wait in its field.
         guard agent.canSend else { return }
-        agent.send(page: agent.withPage ? active : nil)
+        agent.send(page: agent.withPage ? page : nil)
     }
 
     // MARK: - bookmarks

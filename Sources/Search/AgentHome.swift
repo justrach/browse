@@ -220,7 +220,7 @@ private struct ChatCard: View {
     var body: some View {
         Button(action: open) {
             VStack(alignment: .leading, spacing: 6) {
-                Text(Self.ago.localizedString(for: chat.updated, relativeTo: Date()))
+                Text(abs(chat.updated.timeIntervalSinceNow) < 60 ? "Just now" : Self.ago.localizedString(for: chat.updated, relativeTo: Date()))
                     .font(.system(size: 11.5))
                     .foregroundStyle(Palette.muted)
                 Text(chat.title.isEmpty ? "Untitled" : chat.title)
@@ -291,6 +291,8 @@ private struct ChatCard: View {
             }
             .filter { !$0.isEmpty && !$0.hasPrefix("```") }
             .joined(separator: " ")
+            // A reply that opens with a list shouldn't open with its dot.
+            .replacingOccurrences(of: #"^· "#, with: "", options: .regularExpression)
     }
 }
 
