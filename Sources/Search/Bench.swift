@@ -1046,6 +1046,10 @@ final class Bench {
                 browser.consulting = on
             }
             if let on = request["agentfull"] as? Bool { browser.agentFull = on }
+            // graff put to rest now, as ten quiet minutes would (Agent.rest).
+            if request["rest"] as? Bool == true { browser.agent.rest() }
+            // Words for Codegraff, as ⌘↩ in the address field sends them.
+            if let words = request["ask"] as? String, Store.testing { browser.ask(words) }
             // One of the chats so far back on screen, by its place on the
             // Ask tab's page (0 the newest) — or none, for the page itself.
             if let which = request["chat"] as? String {

@@ -1143,6 +1143,16 @@ struct AgentPage: View {
                 ))
             }
             Rule()
+            Line(
+                "Your other MCP servers",
+                "The tools your Codegraff, Claude, Cursor and Codex configs name, as well as the browser's. Each is a process of its own for every chat, so they are left out unless you want them. Takes effect with the next chat"
+            ) {
+                Switch(on: Binding(
+                    get: { prefs.agentAllTools },
+                    set: { prefs.agentAllTools = $0 }
+                ))
+            }
+            Rule()
             Line("graff", location) {
                 HStack(spacing: 6) {
                     if !prefs.agentPath.isEmpty {

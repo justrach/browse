@@ -41,8 +41,10 @@ final class AgentTools {
 
     /// graff's cap on one answer is a MiB; kept clear of it.
     private static let largest = 900_000
-    /// Pages kept at once. The oldest goes when another is wanted.
-    private static let most = 16
+    /// Pages kept at once. The oldest goes when another is wanted. Each is a
+    /// WebKit process of its own, tens of MB; pages only read close as soon
+    /// as they are read, so these are the ones graff is acting on.
+    private static let most = 6
 
     // MARK: - the server
 
@@ -92,7 +94,9 @@ final class AgentTools {
     }
 
     /// The .mcp.json in graff's folder: this server, under the name graff
-    /// will show its tools by.
+    /// will show its tools by. The same goes in `own`, which graff reads
+    /// instead of the user's own MCP config when it runs lean (see
+    /// Agent.environment): then these are the only tools it adds to its own.
     private func announce() -> Bool {
         guard let port else { return false }
         let config: [String: Any] = [
@@ -103,7 +107,24 @@ final class AgentTools {
                 ],
             ],
         ]
-        let file = Agent.folder.appendingPathComponent(".mcp.json")
+        return AgentTools.write(config, to: Agent.folder.appendingPathComponent(".mcp.json"))
+            && AgentTools.write(config, to: AgentTools.own)
+    }
+
+    /// graff's MCP config when it runs lean: this server, or — if it couldn't
+    /// be started — none at all, which graff reads as MCP switched off.
+    nonisolated static var own: URL {
+        Store.folder.appendingPathComponent("Agent", isDirectory: true).appendingPathComponent("mcp.json")
+    }
+
+    /// Nothing to connect to: the lean config says so, and the folder's
+    /// .mcp.json goes, so no graff comes knocking on a closed port.
+    static func withdraw() {
+        try? FileManager.default.removeItem(at: Agent.folder.appendingPathComponent(".mcp.json"))
+        _ = write(["mcpServers": [String: Any]()], to: own)
+    }
+
+    private static func write(_ config: [String: Any], to file: URL) -> Bool {
         guard let data = try? JSONSerialization.data(withJSONObject: config, options: [.prettyPrinted, .withoutEscapingSlashes]) else { return false }
         do {
             try data.write(to: file, options: .atomic)
@@ -462,6 +483,16 @@ final class AgentTools {
         await sheet.settled()
         seen(sheet, as: label)
         return sheet
+    }
+
+    /// Every page graff has open, gone: it has stopped (Agent.rest), and a
+    /// page kept for a graff that isn't there holds memory for no one. The
+    /// off-screen window goes with them.
+    func dropPages() {
+        pages.forEach { $0.drop() }
+        pages = []
+        room?.close()
+        room = nil
     }
 
     /// A page of graff's put away once it has been read.

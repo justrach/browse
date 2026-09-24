@@ -146,6 +146,12 @@ final class Preferences: ObservableObject {
     @Published var usesAgent: Bool {
         didSet { store.set(usesAgent, forKey: "agent") }
     }
+    /// Whether Codegraff brings up every MCP server the user's config and
+    /// other apps name, rather than only the browser's tools and its own.
+    /// Off: each of those is a process, for every chat (see Agent.environment).
+    @Published var agentAllTools: Bool {
+        didSet { store.set(agentAllTools, forKey: "agent.alltools") }
+    }
     /// Where `graff` is, when it isn't anywhere Search already looks.
     @Published var agentPath: String {
         didSet { store.set(agentPath, forKey: "agent.path") }
@@ -221,6 +227,7 @@ final class Preferences: ObservableObject {
         // On until turned off: all it costs unasked is the Ask tab, and graff
         // only starts once something is asked of it.
         usesAgent = store.object(forKey: "agent") as? Bool ?? true
+        agentAllTools = store.bool(forKey: "agent.alltools")
         agentPath = store.string(forKey: "agent.path") ?? ""
         agentModel = store.string(forKey: "agent.model") ?? ""
         agentEffort = store.string(forKey: "agent.effort") ?? ""

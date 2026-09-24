@@ -276,6 +276,13 @@ final class Agent: ObservableObject {
     /// What was said before, for a graff that couldn't pick the session
     /// back up: it goes ahead of the next message instead.
     private var lost: String?
+    /// When graff last did something or was asked something.
+    private var lastActive = Date()
+    private var idleWatch: Task<Void, Never>?
+    /// graff and its pages hold ~40 MB and more for as long as it runs. With
+    /// nothing to do for this long it goes, and the next message brings the
+    /// same conversation back with `session/load`.
+    private static let idleLimit: TimeInterval = 10 * 60
 
     init(prefs: Preferences) {
         self.prefs = prefs
@@ -287,6 +294,8 @@ final class Agent: ObservableObject {
                 self?.keep()
                 self?.chats.flush()
                 self?.pipe?.stop()
+                // The port dies with the app; nothing should be told of it.
+                AgentTools.withdraw()
             }
         }
     }
@@ -311,7 +320,36 @@ final class Agent: ObservableObject {
 
     /// The column opened: start graff if it isn't already.
     func wake() {
+        lastActive = Date()
         if phase == .asleep { start() }
+    }
+
+    /// graff stopped after a long quiet, to give back what it holds: the
+    /// conversation stays on screen and its session is picked up again
+    /// with the next message (see idleLimit).
+    func rest() {
+        guard pipe != nil, phase == .ready, asking == nil, !prompting else { return }
+        let carried = session
+        keep()
+        shutDown()
+        resuming = carried
+        AgentTools.shared.dropPages()
+    }
+
+    /// Checks once a minute, while graff runs, whether it has been quiet
+    /// for idleLimit.
+    private func watchIdle() {
+        idleWatch?.cancel()
+        idleWatch = Task { [weak self] in
+            while !Task.isCancelled {
+                try? await Task.sleep(nanoseconds: 60 * 1_000_000_000)
+                guard let self, self.pipe != nil else { return }
+                if Date().timeIntervalSince(self.lastActive) > Agent.idleLimit {
+                    self.rest()
+                    return
+                }
+            }
+        }
     }
 
     /// graff afresh: after signing in, after it stopped, after the path to
@@ -424,7 +462,7 @@ final class Agent: ObservableObject {
             // Without them graff still has its own; a file left from an
             // earlier launch would only send it knocking on a closed port.
             if !(await AgentTools.shared.start()) {
-                try? FileManager.default.removeItem(at: Agent.folder.appendingPathComponent(".mcp.json"))
+                AgentTools.withdraw()
             }
             Agent.leaveKuriOut()
             let found = await Agent.locate(custom: custom)
@@ -441,7 +479,7 @@ final class Agent: ObservableObject {
         self.program = program
         var arguments = ["acp", "--yolo"]
         if !prefs.agentModel.isEmpty { arguments += ["--model", prefs.agentModel] }
-        let pipe = AcpPipe(program: program, arguments: arguments, environment: Agent.environment(for: program, path: path), folder: Agent.folder)
+        let pipe = AcpPipe(program: program, arguments: arguments, environment: Agent.environment(for: program, path: path, lean: !prefs.agentAllTools), folder: Agent.folder)
         pipe.onMessage = { [weak self, weak pipe] message in
             guard let self, let pipe, self.pipe === pipe else { return }
             self.take(message)
@@ -517,6 +555,8 @@ final class Agent: ObservableObject {
     private func opened(_ id: String, _ reply: Any) {
         session = id
         phase = .ready
+        lastActive = Date()
+        watchIdle()
         introduced = false
         adopt(reply)
         // The level last chosen, where this model offers it.
@@ -698,6 +738,7 @@ final class Agent: ObservableObject {
             return
         }
         draft = ""
+        lastActive = Date()
         if chatID == nil { chatID = UUID() }
         entries.append(Entry(kind: .you, text: text, page: pageTitle))
         keep()
@@ -804,6 +845,7 @@ final class Agent: ObservableObject {
     // MARK: - what graff says
 
     private func take(_ message: [String: Any]) {
+        lastActive = Date()
         let method = message["method"] as? String
         let id = message["id"]
         if let method, let id, !(id is NSNull) {
@@ -1139,7 +1181,7 @@ final class Agent: ObservableObject {
     /// own folder first. It stays in the folder it is given rather than
     /// making itself a worktree, and nothing Claude Code left in the
     /// environment makes it think it is running inside that.
-    nonisolated private static func environment(for program: URL, path: String?) -> [String: String] {
+    nonisolated private static func environment(for program: URL, path: String?, lean: Bool) -> [String: String] {
         var environment = ProcessInfo.processInfo.environment
         var folders: [String] = [program.deletingLastPathComponent().path]
         folders += (environment["PATH"] ?? "").split(separator: ":").map(String.init)
@@ -1158,6 +1200,17 @@ final class Agent: ObservableObject {
         // word comes in ~2.5 s; with the fix, WS still takes 4–5 s for a
         // first turn, its prewarm round trip ahead of it (24 Sep 2026).
         if environment["GRAFF_CODEX_WS"] == nil { environment["GRAFF_CODEX_WS"] = "off" }
+        // Lean, unless Settings says otherwise: the browser's tools and
+        // graff's own, not every MCP server the user's other apps name. Those
+        // come up with every graff — a node REPL, code indexes — and took a
+        // chat from ~40 MB to ~200 MB (25 Sep 2026). graff reads Search's
+        // config (AgentTools.own) in place of its own, and leaves Claude's,
+        // Cursor's and Codex's alone (GRAFF_NO_PLUGINS; honoured before MCP
+        // starts from the graff after justrach/codegraff 0.0.302.4).
+        if lean {
+            environment["GRAFF_MCP_CONFIG"] = AgentTools.own.path
+            environment["GRAFF_NO_PLUGINS"] = "1"
+        }
         for key in ["CLAUDECODE", "CLAUDE_CODE_ENTRYPOINT", "CLAUDE_CODE_SSE_PORT", "CLAUDE_AGENT_SDK_VERSION"] {
             environment[key] = nil
         }
