@@ -133,6 +133,10 @@ struct Omnibox: View {
                     Image(systemName: "magnifyingglass")
                         .font(.system(size: 10, weight: .medium))
                         .foregroundStyle(Palette.muted)
+                case .ask:
+                    Image(systemName: "sparkle")
+                        .font(.system(size: 10, weight: .medium))
+                        .foregroundStyle(Palette.muted)
                 case .open:
                     // Already open: naming it takes you back to it rather than
                     // opening a second copy.
@@ -156,6 +160,11 @@ struct Omnibox: View {
                         .truncationMode(.tail)
                 }
                 Spacer(minLength: 0)
+                if offer.kind == .ask {
+                    Text("⌘↩")
+                        .font(.system(size: 11, design: .rounded))
+                        .foregroundStyle(Palette.muted.opacity(0.8))
+                }
             }
             .padding(.horizontal, 12)
             .padding(.vertical, 9)
@@ -269,7 +278,7 @@ struct AddressField: NSViewRepresentable {
         // SwiftUI picks its own colour for a placeholder, and on a pale ground
         // that colour was near-white.
         field.placeholderAttributedString = NSAttributedString(
-            string: "Enter a web address",
+            string: "Enter a web address, or ask Codegraff",
             attributes: [
                 .font: NSFont.systemFont(ofSize: 15.5),
                 .foregroundColor: NSColor(Palette.ink.opacity(0.3)),

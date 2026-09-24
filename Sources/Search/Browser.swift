@@ -37,6 +37,42 @@ final class Browser: NSObject, ObservableObject {
     /// The first-launch walk-through, over everything. Also from the menu.
     @Published var welcoming = false
 
+    // MARK: - the agent
+
+    /// Codegraff, started the first time its column opens (see Agent.swift),
+    /// with this window's tabs to work in (see AgentTools.swift).
+    lazy var agent: Agent = {
+        AgentTools.shared.browser = self
+        return Agent(prefs: prefs)
+    }()
+    /// Its column, down the right.
+    @Published var consulting = false
+
+    /// ⇧⌘A. Asking for the column is turning it on; Settings › Agent turns
+    /// it off again.
+    func toggleAgent() {
+        if !prefs.usesAgent { prefs.usesAgent = true }
+        withAnimation(Motion.glide) { consulting.toggle() }
+    }
+
+    /// Words from the address field, for Codegraff rather than for a page:
+    /// the Ask Codegraff row, or ⌘↩. The column opens beside the page and the
+    /// words go with the page you're on, unless it was left out there.
+    func ask(_ words: String) {
+        let text = words.trimmingCharacters(in: .whitespacesAndNewlines)
+        summoning = false
+        picked = nil
+        typed = ""
+        if active?.isBlank == false { editing = false }
+        if !prefs.usesAgent { prefs.usesAgent = true }
+        withAnimation(Motion.glide) { consulting = true }
+        guard !text.isEmpty else { return }
+        agent.draft = text
+        // Still busy with the last one: the words wait in its field.
+        guard agent.canSend else { return }
+        agent.send(page: agent.withPage ? active : nil)
+    }
+
     // MARK: - bookmarks
 
     let bookmarks = Bookmarks()
@@ -1569,8 +1605,13 @@ final class Browser: NSObject, ObservableObject {
                 Suggestion(key: typed, title: prefs.engine.name(custom: prefs.customEngine), url: asked, kind: .search)
             )
         }
+        // Words that aren't a place can be a question instead: the last row
+        // hands them to Codegraff, with the page you're on.
+        if Address.url(from: typed) == nil, typed.contains(where: { !$0.isWhitespace }) {
+            list.append(.ask(typed.trimmingCharacters(in: .whitespaces)))
+        }
         offers = list
-        ending = history.completion(for: typed, among: offers.filter { $0.kind != .open })
+        ending = history.completion(for: typed, among: offers.filter { $0.kind != .open && $0.kind != .ask })
         // A row that was picked stops being the right row the moment the
         // question changes.
         picked = nil
@@ -1607,6 +1648,10 @@ final class Browser: NSObject, ObservableObject {
     /// same question but must not share an answer: a list that appears under a
     /// resting cursor would otherwise rewrite the field before you had moved.
     func take(_ offer: Suggestion) {
+        if offer.kind == .ask {
+            ask(offer.key)
+            return
+        }
         summoning = false
         if let id = offer.tab, let tab = tabs.first(where: { $0.id == id }) {
             select(tab)
@@ -1665,6 +1710,11 @@ final class Browser: NSObject, ObservableObject {
     /// finishing for you wins; otherwise what you actually typed. If none of
     /// those is a place, nothing happens and the field says so.
     func submit() {
+        if let picked, offers.indices.contains(picked), offers[picked].kind == .ask {
+            ask(offers[picked].key)
+            return
+        }
+
         // A page already open is switched to, not opened again.
         if let picked, offers.indices.contains(picked),
            let id = offers[picked].tab,

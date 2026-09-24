@@ -125,6 +125,10 @@ enum Metrics {
     static let side: CGFloat = 232
     static let sideMin: CGFloat = 176
     static let sideMax: CGFloat = 440
+    /// The agent's column down the right, when it is on (see Agent.swift).
+    static let agent: CGFloat = 360
+    static let agentMin: CGFloat = 280
+    static let agentMax: CGFloat = 640
 }
 
 // One spring for anything that moves between two places, one for anything that

@@ -22,9 +22,19 @@ struct Suggestion: Identifiable, Equatable {
         case known
         /// Not a place at all — words, and an engine to ask.
         case search
+        /// The same words, for Codegraff instead (see Agent.swift).
+        case ask
     }
 
-    var id: String { key }
+    /// The words to ask Codegraff, as a row. It goes nowhere of its own; the
+    /// browser hands the words over instead of opening an address.
+    static func ask(_ words: String) -> Suggestion {
+        Suggestion(key: words, title: "Ask Codegraff", url: URL(fileURLWithPath: "/"), kind: .ask)
+    }
+
+    /// The same words can be both a search and a question; the list tells
+    /// the two rows apart.
+    var id: String { kind == .ask ? "ask:" + key : key }
 }
 
 private struct Visit: Codable {

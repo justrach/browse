@@ -140,6 +140,28 @@ final class Preferences: ObservableObject {
     @Published var usesSpaces: Bool {
         didSet { store.set(usesSpaces, forKey: "spaces") }
     }
+    /// A column on the right where codegraff works beside the page, over the
+    /// Agent Client Protocol (see Agent.swift). Off until asked for — ⇧⌘A or
+    /// the address field's Ask Codegraff is asking.
+    @Published var usesAgent: Bool {
+        didSet { store.set(usesAgent, forKey: "agent") }
+    }
+    /// Where `graff` is, when it isn't anywhere Search already looks.
+    @Published var agentPath: String {
+        didSet { store.set(agentPath, forKey: "agent.path") }
+    }
+    /// The conversation panel's width, remembered between launches.
+    /// The model it runs, as `provider/name`. Empty leaves it to graff.
+    @Published var agentModel: String {
+        didSet { store.set(agentModel, forKey: "agent.model") }
+    }
+    /// How hard it thinks, as graff names the level. Empty leaves it to graff.
+    @Published var agentEffort: String {
+        didSet { store.set(agentEffort, forKey: "agent.effort") }
+    }
+    @Published var agentWidth: CGFloat {
+        didSet { store.set(Double(agentWidth), forKey: "agent.width") }
+    }
 
     init() {
         // Carried over from when there were four ways of holding the browser
@@ -196,6 +218,12 @@ final class Preferences: ObservableObject {
         // existed; they are not asked to sit through it.
         welcomed = store.bool(forKey: "welcomed") || store.object(forKey: "glyph") != nil
         usesSpaces = store.bool(forKey: "spaces")
+        usesAgent = store.bool(forKey: "agent")
+        agentPath = store.string(forKey: "agent.path") ?? ""
+        agentModel = store.string(forKey: "agent.model") ?? ""
+        agentEffort = store.string(forKey: "agent.effort") ?? ""
+        let agentWide = store.object(forKey: "agent.width") as? Double ?? Double(Metrics.agent)
+        agentWidth = min(Metrics.agentMax, max(Metrics.agentMin, CGFloat(agentWide)))
         let scrolls = store.bool(forKey: "autoscroll")
         autoScroll = scrolls
         AutoScroll.on = scrolls
