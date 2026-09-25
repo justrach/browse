@@ -1,0 +1,92 @@
+#!/bin/bash
+# The line from this repo to graff's: a bug that is graff's, filed where graff
+# is made (justrach/codegraff), in the shape that tracker allows, and kept in
+# a list here until the release that fixes it is out.
+#
+#   ./graff-issue check "Title" < body.md    only the checks below
+#   ./graff-issue file "Title" < body.md     checks, duplicates, files it
+#   ./graff-issue file --anyway "Title" ...  files it past likely duplicates
+#   ./graff-issue list                       what Search is waiting on, and its state
+#
+# codegraff's tracker is public, and its AGENTS.md keeps an issue to the bare
+# minimum: the symptom, graff's own error text, the cause in code terms, the
+# fix. The checks refuse what it forbids — local paths, trace and session
+# material, performance numbers, model and provider names, attribution —
+# because a post that breaks the rule has to be deleted, not edited, and is
+# public until it is. Evidence goes to a live codegraff session instead (see
+# AGENTS.md), never the tracker.
+set -euo pipefail
+
+cd "$(dirname "$0")"
+REPO="justrach/codegraff"
+LEDGER="docs/graff-issues.md"
+
+usage() { sed -n '6,9p' "$0" | sed 's/^# *//' >&2; exit 1; }
+
+# Everything codegraff's tracker rules keep out, one pattern a line.
+FORBIDDEN=(
+  '~/|/Users/|/home/|/private/var/'                   # local paths
+  '\.graff/|\.harness/|trace|transcript|jsonl'        # traces and sessions
+  '"jsonrpc"|session[_-]?id|[0-9a-f]{8}-[0-9a-f]{4}-' # protocol dumps, session ids
+  '[0-9]+(\.[0-9]+)? ?(ms|s|sec|secs|seconds|MB|GB|KB|MiB|GiB|tok/s|tokens)\b' # performance numbers
+  'claude|anthropic|openai|gpt-|codex|gemini|openrouter|sonnet|opus|haiku|llama|qwen|deepseek|mistral|grok' # models, providers
+  'co-authored-by|generated with|🤖'                  # attribution
+  'officecommun|zigrepper|gateway|codegraff\.com/'    # other projects' internals
+)
+
+check() {
+  local text="$1" bad=0 line
+  for pattern in "${FORBIDDEN[@]}"; do
+    if line="$(printf '%s\n' "$text" | grep -Ein -- "$pattern" | head -3)" && [ -n "$line" ]; then
+      echo "refused — codegraff's tracker doesn't take this (/$pattern/):" >&2
+      echo "$line" | sed 's/^/  /' >&2
+      bad=1
+    fi
+  done
+  [ "$(printf '%s' "$text" | wc -l)" -le 40 ] || { echo "refused — over 40 lines; an issue there is the bare minimum" >&2; bad=1; }
+  return $bad
+}
+
+case "${1:-}" in
+  check|file)
+    MODE="$1"; shift
+    ANYWAY=0
+    [ "${1:-}" = "--anyway" ] && { ANYWAY=1; shift; }
+    [ $# -eq 1 ] || usage
+    TITLE="$1"
+    BODY="$(cat)"
+    [ -n "$BODY" ] || { echo "the body comes on stdin" >&2; exit 1; }
+    check "$TITLE
+$BODY"
+    [ "$MODE" = "check" ] && { echo "ok — nothing codegraff's tracker forbids"; exit 0; }
+
+    # Someone may have filed it already, from here or from anywhere.
+    WORDS="$(printf '%s' "$TITLE" | tr -cs '[:alnum:]' ' ' | tr '[:upper:]' '[:lower:]' \
+      | awk '{ for (i = 1; i <= NF; i++) if (length($i) > 3) printf "%s ", $i }')"
+    SAME="$(gh issue list -R "$REPO" --state open --search "$WORDS in:title" --limit 5 \
+      --json number,title -q '.[] | "  #\(.number) \(.title)"' || true)"
+    if [ -n "$SAME" ] && [ $ANYWAY -eq 0 ]; then
+      echo "open issues that may be this one:" >&2
+      echo "$SAME" >&2
+      echo "comment on one of them, or run again with --anyway" >&2
+      exit 2
+    fi
+
+    URL="$(gh issue create -R "$REPO" --title "$TITLE" --body "$BODY" --label bug)"
+    NUMBER="${URL##*/}"
+    [ -f "$LEDGER" ] || printf '# Waiting on graff\n\nBugs in graff that Search found, filed on %s by ./graff-issue.\nA line goes when the release that fixes it is out and any workaround here is gone.\n\n' "$REPO" > "$LEDGER"
+    printf -- '- [#%s](%s) %s — filed %s\n' "$NUMBER" "$URL" "$TITLE" "$(date +%Y-%m-%d)" >> "$LEDGER"
+    echo "$URL"
+    echo "added to $LEDGER — commit it with the change that works around it, if there is one"
+    ;;
+  list)
+    [ -f "$LEDGER" ] || { echo "nothing filed yet"; exit 0; }
+    NUMBERS="$(sed -n 's/^- \[#\([0-9]*\)\].*/\1/p' "$LEDGER")"
+    [ -n "$NUMBERS" ] || { echo "nothing filed yet"; exit 0; }
+    for NUMBER in $NUMBERS; do
+      gh issue view "$NUMBER" -R "$REPO" --json number,state,title,closedAt \
+        -q '"#\(.number)  \(.state | ascii_downcase)\(if .closedAt then " " + .closedAt[:10] else "" end)  \(.title)"'
+    done
+    ;;
+  *) usage ;;
+esac
