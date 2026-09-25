@@ -232,6 +232,9 @@ final class AgentTools {
         ]
     }
 
+    private static let themeRoles: [String: Any] = Dictionary(uniqueKeysWithValues:
+        ["ground", "ink", "muted", "faint", "hairline", "wash", "hover", "accent", "onAccent"].map { ($0, ["type": "string"] as [String: Any]) })
+
     private static let page: [String: Any] = ["type": "string", "description": "A page's id: one of yours (p1, p2…) or a tab of the user's from `tabs`. Leave out for your latest page."]
 
     private static let tools: [[String: Any]] = [
@@ -294,6 +297,11 @@ final class AgentTools {
             "steps": ["type": "integer", "description": "Most steps to take. 25 unless asked."],
             "page": page,
         ], required: ["goal"]),
+        tool("theme", "Make a colour theme for this browser, save it, and switch to it. Colours are #rrggbb, for light and for dark: ground (the window and panels), ink (text; must read on ground and wash, contrast 4.5+), muted (secondary text), faint (dots, a switch that's off), hairline (thin lines), wash (the selected tab), hover (under the pointer), accent (a switch that's on, the main button), onAccent (text on the accent, contrast 3+). Keep ground, wash and hover close; the accent is the one colour that stands out. Says what's wrong if a colour doesn't read.", [
+            "name": ["type": "string", "description": "A short name for the theme."],
+            "light": ["type": "object", "description": "The nine colours for a light window.", "properties": AgentTools.themeRoles],
+            "dark": ["type": "object", "description": "The nine colours for a dark window.", "properties": AgentTools.themeRoles],
+        ], required: ["name", "light", "dark"]),
         tool("run_js", "Run JavaScript in a page and return its value.", [
             "script": ["type": "string", "description": "An expression, or a function called at once."],
             "page": page,
@@ -441,6 +449,19 @@ final class AgentTools {
                 self.seen(target)
                 return failed ? AgentTools.failed(said) : AgentTools.text("\(target.id) · " + said)
             }
+
+        case "theme":
+            var raw = arguments
+            raw["id"] = UUID().uuidString
+            raw["author"] = "Codegraff"
+            guard JSONSerialization.isValidJSONObject(raw),
+                  let data = try? JSONSerialization.data(withJSONObject: raw),
+                  let theme = try? JSONDecoder().decode(Theme.self, from: data)
+            else { return AgentTools.failed("theme needs a name, and light and dark each with ground, ink, muted, faint, hairline, wash and hover as #rrggbb") }
+            if let trouble = Themes.save(theme) { return AgentTools.failed(trouble + ". Adjust those colours and call theme again.") }
+            browser.prefs.theme = theme.id
+            NotificationCenter.default.post(name: Themes.changed, object: nil)
+            return AgentTools.text("Saved “\(theme.name)” and switched to it. It's in Settings › Themes.")
 
         case "run_js":
             guard let script = arguments["script"] as? String else { return AgentTools.failed("run_js needs a script") }

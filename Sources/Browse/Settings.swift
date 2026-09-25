@@ -15,11 +15,12 @@ struct SettingsPanel: View {
     @State private var page: Page = Page(rawValue: Store.settings.string(forKey: "settings.page") ?? "") ?? .general
 
     enum Page: String, CaseIterable, Identifiable {
-        case general, tabs, extensions, agent, passwords, downloads, privacy, sync, about
+        case general, themes, tabs, extensions, agent, passwords, downloads, privacy, sync, about
         var id: String { rawValue }
         var title: String {
             switch self {
             case .general: return "General"
+            case .themes: return "Themes"
             case .tabs: return "Tabs"
             case .extensions: return "Extensions"
             case .agent: return "Agent"
@@ -33,6 +34,7 @@ struct SettingsPanel: View {
         var icon: String {
             switch self {
             case .general: return "macwindow"
+            case .themes: return "paintpalette"
             case .tabs: return "rectangle.split.3x1"
             case .extensions: return "puzzlepiece.extension"
             case .agent: return "sparkle"
@@ -136,6 +138,7 @@ struct SettingsPanel: View {
                 VStack(alignment: .leading, spacing: 18) {
                     switch page {
                     case .general: general
+                    case .themes: ThemesPage(browser: browser, prefs: prefs)
                     case .tabs: tabs
                     case .extensions: ExtensionsPage(browser: browser)
                     case .agent: AgentPage(browser: browser, prefs: prefs, agent: browser.agent)
@@ -570,7 +573,7 @@ struct Switch: View {
 
     var body: some View {
         Capsule()
-            .fill(on ? Palette.ink : Palette.faint)
+            .fill(on ? Palette.accent : Palette.faint)
             .frame(width: 30, height: 18)
             .overlay(alignment: on ? .trailing : .leading) {
                 Circle()
@@ -605,10 +608,10 @@ struct Pill: View {
         Button(action: action) {
             Text(title)
                 .font(.system(size: 11.5))
-                .foregroundStyle(filled ? Palette.ground : tint)
+                .foregroundStyle(filled ? Palette.onAccent : tint)
                 .padding(.horizontal, 10)
                 .padding(.vertical, 5)
-                .background(filled ? Palette.ink : (hovering ? Palette.hover : Palette.ground), in: Capsule())
+                .background(filled ? Palette.accent : (hovering ? Palette.hover : Palette.ground), in: Capsule())
                 .overlay(Capsule().strokeBorder(filled ? .clear : Palette.hairline, lineWidth: 1))
                 .contentShape(Capsule())
         }

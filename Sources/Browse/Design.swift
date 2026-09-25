@@ -9,7 +9,8 @@ import AppKit
 // resolves itself against whatever appearance the window has. The window
 // takes its appearance from the app, and the app from Settings › Appearance:
 // light, dark, or whatever the Mac is doing. Nothing else in the code knows
-// which it is.
+// which it is. The pairs themselves come from the theme in use (Theme.swift);
+// the default one is the white and greys this always was.
 enum Palette {
     static let ground = Color(nsColor: NS.ground)
     static let ink = Color(nsColor: NS.ink)             // neutral-900 · neutral-100
@@ -18,25 +19,39 @@ enum Palette {
     static let hairline = Color(nsColor: NS.hairline)   // neutral-200 · neutral-800
     static let wash = Color(nsColor: NS.wash)           // the live tab
     static let hover = Color(nsColor: NS.hover)         // the one under the pointer
+    /// What should stand out: a switch that's on, the button that matters.
+    /// The ink, in a theme that has no colour of its own.
+    static let accent = Color(nsColor: NS.accent)
+    /// Words on the accent.
+    static let onAccent = Color(nsColor: NS.onAccent)
 
     /// The same colours for the AppKit corners of the app — a text field's
     /// ink, a window's background — which want an NSColor and keep it.
     enum NS {
-        static let ground = pair(1.0, 0.11)
-        static let ink = pair(0.09, 0.93)
-        static let muted = pair(0.55, 0.58)
-        static let faint = pair(0.83, 0.32)
-        static let hairline = pair(0.91, 0.20)
-        static let wash = pair(0.937, 0.175)
-        static let hover = pair(0.965, 0.15)
+        static let ground = role(\.ground)
+        static let ink = role(\.ink)
+        static let muted = role(\.muted)
+        static let faint = role(\.faint)
+        static let hairline = role(\.hairline)
+        static let wash = role(\.wash)
+        static let hover = role(\.hover)
+        static let accent = NSColor(name: nil) { appearance in
+            let colors = Themes.current.colors(dark: dim(appearance))
+            return Themes.color(colors.accent ?? colors.ink)
+        }
+        static let onAccent = NSColor(name: nil) { appearance in
+            let colors = Themes.current.colors(dark: dim(appearance))
+            return Themes.color(colors.onAccent ?? colors.ground)
+        }
         /// The resting traffic lights, drawn by hand when the app is behind.
-        static let resting = pair(0.80, 0.30)
+        static let resting = role(\.faint)
 
-        private static func pair(_ light: CGFloat, _ dark: CGFloat) -> NSColor {
-            NSColor(name: nil) { appearance in
-                let dim = appearance.bestMatch(from: [.aqua, .darkAqua]) == .darkAqua
-                return NSColor(white: dim ? dark : light, alpha: 1)
-            }
+        private static func role(_ role: KeyPath<Theme.Colors, String>) -> NSColor {
+            NSColor(name: nil) { appearance in Themes.color(role, dark: dim(appearance)) }
+        }
+
+        private static func dim(_ appearance: NSAppearance) -> Bool {
+            appearance.bestMatch(from: [.aqua, .darkAqua]) == .darkAqua
         }
     }
 }

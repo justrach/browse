@@ -13,6 +13,7 @@ in [ROADMAP.md](ROADMAP.md).
 
 ### Added
 
+- Themes, in Settings › Themes: browse's own, Codegraff and Codegraff Paper (the Codegraff app's and codegraff.com's colours), Nord and Forest, each for light and dark. A theme is a small JSON file — add one, or describe one in a sentence and Codegraff makes it, checks that everything reads, and switches to it. Themes you add or make sync between your Macs with sync on.
 - Sign in with Codegraff from inside the browser, on the welcome screens or in Settings: a code, a page on codegraff.com to approve it, and you're in. One sign-in serves Codegraff beside the page, Jev and sync, and it's the same one `graff login` makes, so graff in a terminal is signed in too.
 - Sync, off until you switch it on in Settings › Sync: history and bookmarks, the same on every Mac you sign in to Codegraff on. Everything is sealed on your Mac first, with a key only your Macs have (a sync code carries it to the next one), so Codegraff stores it without being able to read it — the addresses included. Forgetting a page or clearing history does it on every Mac; a bookmark moved, renamed or deleted on one is on all of them. Settings › Sync also deletes everything synced from Codegraff.
 - The app is called browse now: the window, Settings, the welcome screens and the downloads (browse.dmg). Your tabs, history, passwords and settings stay where they were.

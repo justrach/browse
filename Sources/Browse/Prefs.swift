@@ -32,6 +32,13 @@ final class Preferences: ObservableObject {
     @Published var bench: Bool {
         didSet { store.set(bench, forKey: "bench") }
     }
+    /// The theme in use, by id (see Theme.swift). browse's own unless chosen.
+    @Published var theme: String {
+        didSet {
+            store.set(theme, forKey: "theme")
+            Themes.use(theme)
+        }
+    }
     /// Light, dark, or the Mac's own.
     @Published var look: Look {
         didSet {
@@ -244,6 +251,10 @@ final class Preferences: ObservableObject {
         usesAgent = store.object(forKey: "agent") as? Bool ?? true
         shareStats = store.bool(forKey: "stats.share")
         agentAllTools = store.bool(forKey: "agent.alltools")
+        let chosenTheme = store.string(forKey: "theme") ?? Themes.plain.id
+        theme = chosenTheme
+        // Before anything is drawn, so nothing is drawn twice.
+        Themes.start(chosenTheme)
         agentJev = store.object(forKey: "agent.jev") as? Bool ?? true
         sync = store.bool(forKey: "sync.on")
         agentPath = store.string(forKey: "agent.path") ?? ""

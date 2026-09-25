@@ -388,6 +388,7 @@ final class Bench {
                 "offering": browser.offering != nil,
                 "modal": NSApp.modalWindow.map { "\(type(of: $0)) “\($0.title)”" } ?? "",
                 "look": browser.prefs.look.rawValue,
+                "theme": browser.prefs.theme,
                 "appearance": NSApp.appearance?.name.rawValue ?? "system",
                 "key": NSApp.keyWindow.map { "\(type(of: $0)) “\($0.title)”" } ?? "",
             ]
@@ -1071,6 +1072,7 @@ final class Bench {
                 }
             }
             if let look = (request["look"] as? String).flatMap(Look.init) { browser.prefs.look = look }
+            if let theme = request["theme"] as? String { browser.prefs.theme = theme }
             if let on = request["sidebar"] as? Bool { browser.prefs.sidebar = on }
             if let on = request["spaces"] as? Bool { browser.prefs.usesSpaces = on }
             if let on = request["hides"] as? Bool { browser.prefs.sideHides = on }

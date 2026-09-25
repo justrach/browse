@@ -223,6 +223,7 @@ final class Sync: ObservableObject {
         do {
             try await history(keys, login: login, history: browser.history)
             try await bookmarks(keys, login: login, bookmarks: browser.bookmarks)
+            try await themes(keys, login: login, prefs: browser.prefs)
             state.save()
             phase = .synced(Date())
         } catch {
@@ -327,6 +328,52 @@ final class Sync: ObservableObject {
         try await push("bookmarks", out.map { ($0.id, $0.body) }, login: login) { sent in
             for item in out[sent] { self.state.pushedBookmarks[item.id] = item.signature }
         }
+    }
+
+    // MARK: - themes
+
+    /// The theme files that aren't built in, each a record under its id.
+    private func themes(_ keys: Keys, login: String, prefs: Preferences) async throws {
+        var pushed = state.pushedThemes ?? [:]
+        var local = Dictionary(uniqueKeysWithValues: Themes.installed().map { ($0.id, $0) })
+        var changed = false
+        try await pull("themes", login: login) { id, body in
+            // Changed here since the last round: this Mac's wins.
+            if let mine = local[id], Sync.signature(mine) != pushed[id] { return }
+            if let body {
+                guard let data = keys.open(body, as: "themes", id: id),
+                      let theme = try? Sync.decoder.decode(Theme.self, from: data),
+                      theme.id == id, Themes.check(theme) == nil
+                else { return }
+                local[id] = theme
+                pushed[id] = Sync.signature(theme)
+            } else {
+                local[id] = nil
+                pushed[id] = nil
+            }
+            changed = true
+        }
+        if changed {
+            applying = true
+            let before = Set(Themes.installed().map(\.id))
+            for theme in local.values { Themes.save(theme) }
+            for id in before where local[id] == nil { Themes.remove(id, prefs: prefs) }
+            applying = false
+            NotificationCenter.default.post(name: Themes.changed, object: nil)
+        }
+
+        var out: [(id: String, body: String?, signature: String?)] = []
+        let now = Dictionary(uniqueKeysWithValues: Themes.installed().map { ($0.id, $0) })
+        for id in pushed.keys.sorted() where now[id] == nil { out.append((id, nil, nil)) }
+        for (id, theme) in now.sorted(by: { $0.key < $1.key }) where Themes.validID(id) {
+            let signature = Sync.signature(theme)
+            guard pushed[id] != signature, let data = try? Sync.encoder.encode(theme) else { continue }
+            out.append((id, try keys.seal(data, as: "themes", id: id), signature))
+        }
+        try await push("themes", out.map { ($0.id, $0.body) }, login: login) { sent in
+            for item in out[sent] { pushed[item.id] = item.signature }
+        }
+        state.pushedThemes = pushed
     }
 
     /// The tree as records: every node by its id, with its folder and its
@@ -488,6 +535,9 @@ final class Sync: ObservableObject {
         /// whose signature differs has changed here since.
         var pushedHistory: [String: String] = [:]
         var pushedBookmarks: [String: String] = [:]
+        /// The same for theme files; optional so a file from before themes
+        /// synced still reads.
+        var pushedThemes: [String: String]? = [:]
         /// Pages forgotten here and not yet forgotten everywhere.
         var forgotten: Set<String> = []
         /// The key was checked against the account's.
