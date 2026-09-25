@@ -53,7 +53,23 @@ final class AgentTools {
     func start() async -> Bool {
         if port != nil { return true }
         if listener == nil { listen() }
+        strip()
         return await withCheckedContinuation { waiting.append($0) }
+    }
+
+    /// For a page opened only to be read, then closed (search, read_pages):
+    /// no pictures, video or fonts, which are most of what a page fetches
+    /// and none of its text. Style sheets stay; they decide what is shown,
+    /// and so what innerText has. Not for a page graff acts on, which it
+    /// may want a screenshot of.
+    private var bare: WKContentRuleList?
+
+    private func strip() {
+        guard bare == nil, let store = WKContentRuleListStore.default() else { return }
+        let rules = #"[{"trigger": {"url-filter": ".*", "resource-type": ["image", "media", "font"]}, "action": {"type": "block"}}]"#
+        store.compileContentRuleList(forIdentifier: "graff-reading", encodedContentRuleList: rules) { [weak self] list, _ in
+            MainActor.assumeIsolated { self?.bare = list }
+        }
     }
 
     private func listen() {
@@ -324,7 +340,7 @@ final class AgentTools {
             guard let query = arguments["query"] as? String, let url = browser.searchURL(for: query) else {
                 return AgentTools.failed("search needs a query")
             }
-            let sheet = await load(url, as: "Search: \(query)")
+            let sheet = await load(url, as: "Search: \(query)", reading: true)
             let (text, error) = await sheet.run("document.body ? document.body.innerText : ''")
             if let error { return AgentTools.failed(error) }
             let (found, _) = await sheet.run(AgentTools.results(excluding: url.host() ?? ""))
@@ -346,7 +362,7 @@ final class AgentTools {
             let read = await withTaskGroup(of: (Int, String).self) { group in
                 for (index, url) in chosen.enumerated() {
                     group.addTask { @MainActor in
-                        let sheet = await self.load(url, as: nil)
+                        let sheet = await self.load(url, as: nil, reading: true)
                         let (text, error) = await sheet.run("document.body ? document.body.innerText : ''")
                         let body = error.map { "(couldn't read it: \($0))" } ?? AgentTools.cut(text as? String ?? "", each)
                         let said = "## \(sheet.title)\n\(sheet.address)\n\n\(body)"
@@ -524,9 +540,10 @@ final class AgentTools {
 
     // MARK: - graff's pages
 
-    /// A page of graff's own, loaded and listed in its column.
-    private func load(_ url: URL, as label: String?) async -> Sheet {
-        let sheet = make()
+    /// A page of graff's own, loaded and listed in its column. One only
+    /// `reading` is to be read and closed, and loads without its pictures.
+    private func load(_ url: URL, as label: String?, reading: Bool = false) async -> Sheet {
+        let sheet = make(reading: reading)
         sheet.go(url)
         await sheet.settled()
         seen(sheet, as: label)
@@ -549,10 +566,10 @@ final class AgentTools {
         sheet.drop()
     }
 
-    private func make() -> Sheet {
+    private func make(reading: Bool) -> Sheet {
         made += 1
         let window = room ?? makeRoom()
-        let sheet = Sheet(id: "p\(made)", in: window)
+        let sheet = Sheet(id: "p\(made)", in: window, bare: reading ? bare : nil)
         pages.append(sheet)
         while pages.count > AgentTools.most { pages.removeFirst().drop() }
         return sheet
@@ -920,16 +937,19 @@ extension Target {
     /// Then a beat for its own scripts. Fifteen seconds at most. Waiting for
     /// the last tracker cost a read 15 s on a page whose text was there in
     /// two (25 Sep 2026); stopping at the first words read a tenth short on
-    /// pages that fill in their stories just after.
+    /// pages that fill in their stories just after, and so did stopping at
+    /// the first pause, one look long, between two of them.
     func settled() async {
         let limit = Date().addingTimeInterval(15)
         try? await Task.sleep(nanoseconds: 250_000_000)
         var last = -1
+        var still = 0
         while web.isLoading, Date() < limit {
             let (state, _) = await run("document.readyState + '|' + (document.body ? document.body.innerText.length : 0)")
             let parts = (state as? String)?.split(separator: "|") ?? []
             let length = parts.count == 2 ? Int(parts[1]) ?? 0 : 0
-            if parts.count == 2, parts[0] != "loading", length > 400, length == last { break }
+            still = length == last ? still + 1 : 0
+            if parts.count == 2, parts[0] != "loading", length > 400, still >= 2 { break }
             last = length
             try? await Task.sleep(nanoseconds: 150_000_000)
         }
@@ -944,14 +964,18 @@ private final class Sheet: Target {
     let id: String
     let web: WKWebView
 
-    init(id: String, in room: NSWindow) {
+    init(id: String, in room: NSWindow, bare: WKContentRuleList?) {
         self.id = id
         let config = WKWebViewConfiguration()
         config.websiteDataStore = Store.websites
         config.applicationNameForUserAgent = Web.userAgentName
+        // Nobody is watching or listening: a video on a page graff opened
+        // plays when graff clicks it, not on its own.
+        config.mediaTypesRequiringUserActionForPlayback = .all
         // The ad blocker, as a tab has it: a page still fetching its ads and
         // trackers is a page settled() is still waiting on.
         Shield.shared.protect(config.userContentController)
+        if let bare { config.userContentController.add(bare) }
         web = WKWebView(frame: room.contentView?.bounds ?? NSRect(x: 0, y: 0, width: 1280, height: 900), configuration: config)
         web.autoresizingMask = [.width, .height]
         room.contentView?.addSubview(web)
