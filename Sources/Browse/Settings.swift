@@ -86,7 +86,7 @@ struct SettingsPanel: View {
         .padding(8)
         .frame(width: SettingsPanel.rail, alignment: .leading)
         .frame(maxHeight: .infinity, alignment: .top)
-        .background(Palette.wash.opacity(0.45))
+        .background(Palette.wash.opacity(0.45), in: Rectangle())
     }
 
     private struct PageRow: View {
@@ -217,8 +217,36 @@ struct SettingsPanel: View {
                 Switch(on: $prefs.autocorrect)
             }
             Rule()
+            Line("Peek at a link with a shift-click", "Its page opens in a panel over the one you're reading. Escape puts it away; the other button keeps it as a tab") {
+                Switch(on: $prefs.peeksLinks)
+            }
+            Rule()
+            Line("Open links from other apps in a small window", "To read and close, or keep with Open in browse (⌘O)") {
+                Switch(on: $prefs.littleLinks)
+            }
+            Rule()
+            Line("Show where links go", "Point at a link and its address shows at the bottom of the page") {
+                Switch(on: $prefs.showsLinks)
+            }
+            Rule()
             Line("Scroll with the middle button", "Click the wheel on a page, then move the mouse up or down to scroll, as on Windows. Click again to stop") {
                 Switch(on: $prefs.autoScroll)
+            }
+            Rule()
+            Line("Pages at 120 Hz", "Animations and scrolling in pages at up to 120 frames a second on a screen that can, instead of 60 as in Safari. Uses more battery. Open tabs follow when reloaded") {
+                Switch(on: $prefs.fastPages)
+            }
+            Rule()
+            Line("Flick the floating video to a corner", "Two fingers on it send it to the corner or edge they point at, instead of pushing it along. Dragging still puts it anywhere") {
+                Switch(on: $prefs.floatFlicks)
+            }
+            Rule()
+            Line("Float the video when you switch tabs", "A video playing on YouTube and the like comes out into its floating window when you go to another tab, and back when you return. ⇧⌘P still floats one by hand") {
+                Switch(on: $prefs.floatsOnLeave)
+            }
+            Rule()
+            Line("Float the video when you switch apps", "A video playing on the site you're on comes out into its floating window as another app comes to the front, and goes back into its tab when you return") {
+                Switch(on: $prefs.floatsAway)
             }
             Rule()
             Line("Let a script drive browse", "A local socket for testing. Its tabs open beside yours with a flask on them and never take over — see ./bench") {
@@ -254,6 +282,10 @@ struct SettingsPanel: View {
             Rule()
             Line("Tabs show", "Beside the title, and on a pinned square") {
                 Segmented(options: Glyph.allCases.map { ($0, $0.title) }, selection: $prefs.glyph)
+            }
+            Rule()
+            Line("Show the bookmarks bar", "Your bookmarks in a row above the page, folders opening as menus. It folds away with the tabs") {
+                Switch(on: $prefs.bookmarksBar)
             }
             Rule()
             Line("Show how far you've read", "The tab you're on fills with grey as you scroll down the page") {
@@ -411,6 +443,10 @@ struct SettingsPanel: View {
             Card {
                 Line(versionTitle, versionDetail) { versionControl }
                 Rule()
+                Line("Install updates on its own", "Off, browse still looks once a day and tells you, and installs only when you press Install") {
+                    Switch(on: $prefs.installsUpdates)
+                }
+                Rule()
                 Line("Found something wrong?", "Opens a draft with the version already in it") {
                     Pill("Send Feedback") { Links.writeFeedback() }
                 }
@@ -422,6 +458,10 @@ struct SettingsPanel: View {
                 Shortcut("⌘K", "Switch tab")
                 Rule()
                 Shortcut("⌘T  ⌘W  ⇧⌘T", "New, close, reopen tab")
+                Rule()
+                Shortcut("⇧⌘V", "Paste and go")
+                Rule()
+                Shortcut("⇧⌘C", "Copy address")
                 Rule()
                 Shortcut("⌃⇥  ⌘1–9", "Next tab, a tab by its place")
                 Rule()
@@ -445,14 +485,13 @@ struct SettingsPanel: View {
         case .none: return "Updates"
         case .fetching(let next): return "browse \(next.version) is downloading…"
         case .ready(let next): return "browse \(next.version) is ready"
-        case .offered(let next): return "browse \(next.version) is out"
+        case .offered(let next), .waiting(let next): return "browse \(next.version) is out"
         }
     }
 
     private var versionDetail: String {
         switch updater.stage {
         case .none:
-            if !Updater.configured { return "No update feed configured for this fork" }
             return updater.lastChecked.map { "Checked \($0.formatted(.relative(presentation: .named))) — once a day on its own" }
                 ?? "Checked once a day on its own"
         case .fetching(let next):
@@ -461,6 +500,8 @@ struct SettingsPanel: View {
             return next.notes ?? "It's there the next time you open browse"
         case .offered(let next):
             return next.notes ?? "Open the disk image, the same as the first time"
+        case .waiting(let next):
+            return next.notes ?? "Checked and put in place when you press Install"
         }
     }
 
@@ -468,14 +509,12 @@ struct SettingsPanel: View {
     private var versionControl: some View {
         switch updater.stage {
         case .none:
-            if Updater.configured {
-                Pill(updater.checking ? "Checking…" : "Check now") {
-                    updater.check { found in
-                        if found == nil { browser.announce("This is the latest one") }
-                    }
+            Pill(updater.checking ? "Checking…" : "Check now") {
+                updater.check { found in
+                    if found == nil { browser.announce("This is the latest one") }
                 }
-                .disabled(updater.checking)
             }
+            .disabled(updater.checking)
         case .fetching:
             Ring(size: 12)
         case .ready:
@@ -485,6 +524,8 @@ struct SettingsPanel: View {
                 browser.tuning = false
                 browser.open(next.dmg, foreground: true)
             }
+        case .waiting:
+            Pill("Install", filled: true) { updater.install() }
         }
     }
 

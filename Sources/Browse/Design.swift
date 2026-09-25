@@ -24,6 +24,10 @@ enum Palette {
     static let accent = Color(nsColor: NS.accent)
     /// Words on the accent.
     static let onAccent = Color(nsColor: NS.onAccent)
+    /// The only two that aren't grey: a connection nobody can read on the
+    /// way, and one anybody can (see SiteCard.swift).
+    static let safe = Color(nsColor: NS.safe)           // green-700 · green-400
+    static let unsafe = Color(nsColor: NS.unsafe)       // amber-700 · amber-400
 
     /// The same colours for the AppKit corners of the app — a text field's
     /// ink, a window's background — which want an NSColor and keep it.
@@ -45,6 +49,15 @@ enum Palette {
         }
         /// The resting traffic lights, drawn by hand when the app is behind.
         static let resting = role(\.faint)
+        static let safe = tint(light: (0.08, 0.50, 0.24), dark: (0.29, 0.87, 0.50))
+        static let unsafe = tint(light: (0.71, 0.33, 0.04), dark: (0.98, 0.75, 0.14))
+
+        private static func tint(light: (CGFloat, CGFloat, CGFloat), dark: (CGFloat, CGFloat, CGFloat)) -> NSColor {
+            NSColor(name: nil) { appearance in
+                let c = appearance.bestMatch(from: [.aqua, .darkAqua]) == .darkAqua ? dark : light
+                return NSColor(srgbRed: c.0, green: c.1, blue: c.2, alpha: 1)
+            }
+        }
 
         private static func role(_ role: KeyPath<Theme.Colors, String>) -> NSColor {
             NSColor(name: nil) { appearance in Themes.color(role, dark: dim(appearance)) }

@@ -13,8 +13,11 @@ struct WelcomePanel: View {
     @State private var page = Store.testing ? Store.settings.integer(forKey: "welcome.start") : 0
     @State private var forward = true
 
-    // Bringing things over.
-    @State private var source: Chromium.Source? = Chromium.installed().first
+    // Bringing things over. Nil until one is picked, which means the first:
+    // finding them looks through each browser's folders, and as an initial
+    // value that ran every time the panel was made, the first window's
+    // included, for a page that isn't showing yet.
+    @State private var source: Chromium.Source?
     @State private var wantsPasswords = true
     @State private var wantsHistory = true
     @State private var wantsBookmarks = true
@@ -182,6 +185,7 @@ struct WelcomePanel: View {
                 Key("⌘K", "Every open tab, by name.")
                 Key("⌘,", "Settings, including passwords and updates.")
                 Key("⌃1", "Spaces: separate tabs and sign-ins. Turn them on in Settings › Tabs.")
+                Key("⌘O", "Links from other apps can open in a small window. Settings › General.")
             }
         }
     }
@@ -221,7 +225,7 @@ struct WelcomePanel: View {
     // MARK: - doing
 
     private func bringAll() {
-        guard let source else { return }
+        guard let source = source ?? Chromium.installed().first else { return }
         bringing = true
         var lines: [String] = []
         let group = DispatchGroup()
@@ -234,7 +238,7 @@ struct WelcomePanel: View {
                     case .success(let found):
                         var kept = 0
                         for login in found.logins
-                        where Vault.save(host: login.host, user: login.user, password: login.password, used: login.used) {
+                        where Vault.save(host: login.host, user: login.user, password: login.password, used: login.used, clear: login.clear) {
                             kept += 1
                         }
                         var never = Vault.never
