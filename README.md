@@ -49,7 +49,7 @@ The model picker under the field searches every model your Codegraff account rea
 
 The browser doesn't ship an agent. It runs the `graff` command already on your Mac, the one the [Codegraff](https://github.com/justrach/codegraff) app installs, and uses your own Codegraff sign-in. Without it the browser works as normal, and the Ask tab offers to get it for you.
 
-- **What leaves your Mac:** what you type to Codegraff, and the text of the page when you ask about it, go to the model provider your Codegraff account uses. When Jev takes the steps, the page's visible words and controls go to Jev through Codegraff. Password fields never go. Nothing else leaves.
+- **What leaves your Mac:** what you type to Codegraff, and the text of the page when you ask about it, go to the model provider your Codegraff account uses. When Jev takes the steps, the page's visible words and controls go to Jev through Codegraff. Password fields never go. With sync on (Settings › Sync, off until you switch it on), your history and bookmarks go to Codegraff sealed with a key only your Macs hold, so Codegraff can't read them. Nothing else leaves.
 - **It stays light:** by default it runs with the browser's tools and its own, not every MCP server your other apps know about (Settings › Agent can include them). After ten quiet minutes it stops, and your next message picks the same conversation up.
 - **It acts without stopping to ask** before each step, as `graff acp --yolo` does, including commands and file edits on your Mac. Treat it as you would any agent with those powers.
 

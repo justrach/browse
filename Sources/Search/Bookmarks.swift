@@ -216,7 +216,15 @@ final class Bookmarks: ObservableObject {
         roots = list
     }
 
+    /// The tree as sync put it together from every Mac's (see Sync.swift).
+    func adopt(_ nodes: [Bookmark]) {
+        guard nodes != roots else { return }
+        roots = nodes
+        save()
+    }
+
     private func save() {
+        Sync.shared.nudge()
         let snapshot = roots
         let file = Bookmarks.file
         DispatchQueue.global(qos: .utility).async {

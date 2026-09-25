@@ -157,6 +157,11 @@ final class Preferences: ObservableObject {
     @Published var agentAllTools: Bool {
         didSet { store.set(agentAllTools, forKey: "agent.alltools") }
     }
+    /// History and bookmarks sealed and kept in step across the Macs signed
+    /// in to Codegraff (see Sync.swift). Off unless switched on.
+    @Published var sync: Bool {
+        didSet { store.set(sync, forKey: "sync.on") }
+    }
     /// Whether Codegraff's `drive` tool may ask Jev to pick its steps on a
     /// page, through the Codegraff sign-in (see Jev.swift).
     @Published var agentJev: Bool {
@@ -240,6 +245,7 @@ final class Preferences: ObservableObject {
         shareStats = store.bool(forKey: "stats.share")
         agentAllTools = store.bool(forKey: "agent.alltools")
         agentJev = store.object(forKey: "agent.jev") as? Bool ?? true
+        sync = store.bool(forKey: "sync.on")
         agentPath = store.string(forKey: "agent.path") ?? ""
         agentModel = store.string(forKey: "agent.model") ?? ""
         agentEffort = store.string(forKey: "agent.effort") ?? ""

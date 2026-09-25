@@ -383,6 +383,7 @@ final class Bench {
                 "bookmarks": browser.bookmarking,
                 "field": browser.editing,
                 "suggesting": browser.suggesting != nil,
+                "sync": Store.testing ? Sync.shared.probe : [:],
                 "offering": browser.offering != nil,
                 "modal": NSApp.modalWindow.map { "\(type(of: $0)) “\($0.title)”" } ?? "",
                 "look": browser.prefs.look.rawValue,
@@ -1055,6 +1056,15 @@ final class Bench {
             if let which = request["chat"] as? String {
                 let chats = browser.agent.chats.all
                 if let n = Int(which), chats.indices.contains(n) { browser.agent.resume(chats[n]) } else { browser.agent.startOver() }
+            }
+            // Sync, as Settings › Sync drives it — test runs only: a code
+            // entered as if pasted, a round now, a page forgotten.
+            if Store.testing {
+                if let code = request["syncjoin"] as? String { Task { _ = await Sync.shared.join(code) } }
+                if request["syncnow"] as? Bool == true { Sync.shared.now() }
+                if let url = (request["forget"] as? String).flatMap(URL.init(string:)) {
+                    browser.history.forget(Address.pretty(url).lowercased())
+                }
             }
             if let look = (request["look"] as? String).flatMap(Look.init) { browser.prefs.look = look }
             if let on = request["sidebar"] as? Bool { browser.prefs.sidebar = on }

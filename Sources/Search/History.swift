@@ -43,6 +43,19 @@ private struct Visit: Codable {
     var title: String
     var count: Int
     var last: Date
+    /// Visits by Mac, when history syncs (see Sync.swift): each Mac only
+    /// ever raises its own number, so the same visit synced back and forth
+    /// is still counted once. `count` is their sum. Nil in a history from
+    /// before sync, where every visit was this Mac's.
+    var counts: [String: Int]?
+
+    /// Visited again, `by` times, here.
+    mutating func bump(_ by: Int = 1) {
+        var mine = counts ?? [Sync.device: count]
+        mine[Sync.device, default: 0] += by
+        counts = mine
+        count = mine.values.reduce(0, +)
+    }
 }
 
 @MainActor
@@ -78,13 +91,13 @@ final class History: ObservableObject {
             var home = visits[root] ?? Visit(
                 url: "https://" + root + "/", key: root, title: "", count: 0, last: Date()
             )
-            home.count += 1
+            home.bump()
             home.last = Date()
             visits[root] = home
         }
 
         if var seen = visits[key] {
-            seen.count += 1
+            seen.bump()
             seen.last = Date()
             seen.url = url.absoluteString
             if !title.isEmpty { seen.title = title }
@@ -95,7 +108,8 @@ final class History: ObservableObject {
                 key: key,
                 title: title,
                 count: 1,
-                last: Date()
+                last: Date(),
+                counts: [Sync.device: 1]
             )
         }
         save()
@@ -109,12 +123,12 @@ final class History: ObservableObject {
         let key = Address.pretty(url).lowercased()
         guard !key.isEmpty else { return }
         if var seen = visits[key] {
-            seen.count += count
+            seen.bump(count)
             if last > seen.last { seen.last = last }
             if seen.title.isEmpty { seen.title = title }
             visits[key] = seen
         } else {
-            visits[key] = Visit(url: url.absoluteString, key: key, title: title, count: count, last: last)
+            visits[key] = Visit(url: url.absoluteString, key: key, title: title, count: count, last: last, counts: [Sync.device: count])
         }
     }
 
@@ -131,6 +145,7 @@ final class History: ObservableObject {
     }
 
     func forget() {
+        Sync.shared.forgotAll()
         visits = [:]
         save()
     }
@@ -174,6 +189,7 @@ final class History: ObservableObject {
     }
 
     func forget(_ key: String) {
+        Sync.shared.forgot([key])
         visits[key] = nil
         save()
     }
@@ -185,6 +201,50 @@ final class History: ObservableObject {
         let made = Array(everything().prefix(8))
         recentCache = made
         return made
+    }
+
+    // MARK: - syncing
+
+    /// One place as it travels between Macs, sealed (see Sync.swift).
+    struct Synced: Codable, Equatable {
+        var key: String
+        var url: String
+        var title: String
+        var last: Date
+        var counts: [String: Int]
+    }
+
+    /// Every place, with each Mac's visits apart.
+    func synced() -> [Synced] {
+        visits.values.map { Synced(key: $0.key, url: $0.url, title: $0.title, last: $0.last, counts: $0.counts ?? [Sync.device: $0.count]) }
+    }
+
+    /// Another Mac's view of a place, taken in: each Mac's count the higher
+    /// of the two, the latest visit, and the title from whoever saw it last.
+    /// Taking the same one twice changes nothing.
+    func merge(_ other: Synced) {
+        guard var seen = visits[other.key] else {
+            visits[other.key] = Visit(url: other.url, key: other.key, title: other.title,
+                                      count: other.counts.values.reduce(0, +), last: other.last, counts: other.counts)
+            return
+        }
+        var counts = seen.counts ?? [Sync.device: seen.count]
+        for (mac, count) in other.counts { counts[mac] = max(counts[mac] ?? 0, count) }
+        seen.counts = counts
+        seen.count = counts.values.reduce(0, +)
+        if other.last > seen.last {
+            seen.last = other.last
+            seen.url = other.url
+            if !other.title.isEmpty { seen.title = other.title }
+        } else if seen.title.isEmpty {
+            seen.title = other.title
+        }
+        visits[other.key] = seen
+    }
+
+    /// Forgotten on another Mac.
+    func drop(_ key: String) {
+        visits[key] = nil
     }
 
     // MARK: - reading
@@ -297,6 +357,7 @@ final class History: ObservableObject {
     /// Coalesced: a busy minute of browsing writes the file once, not thirty
     /// times, and never on the main thread.
     private func save() {
+        Sync.shared.nudge()
         guard !saving else { return }
         saving = true
         DispatchQueue.main.asyncAfter(deadline: .now() + 1.5) { [weak self] in

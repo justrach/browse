@@ -429,6 +429,7 @@ struct ContentView: View {
             BookmarkMenu.shared.start(for: browser)
             // Anonymous stats, if they have been switched on (Stats.swift).
             Stats.shared.start(for: browser)
+            Sync.shared.start(for: browser)
         }
     }
 
