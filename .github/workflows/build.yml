@@ -1,0 +1,36 @@
+# Every push and pull request: the app builds, clean, and the stats Worker's
+# tests pass. Nothing is signed or published here — see release.yml.
+name: build
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  app:
+    runs-on: macos-15
+    steps:
+      - uses: actions/checkout@v4
+      - name: Xcode 16
+        run: sudo xcode-select -s /Applications/Xcode_16.4.app || sudo xcode-select -s "$(ls -d /Applications/Xcode_16*.app | tail -1)"
+      - name: Build
+        run: swift build -c release
+      - name: Bundle, signed for this runner only
+        run: ./build.sh release
+      - name: The bundle is what it says
+        run: |
+          plutil -p build/browse.app/Contents/Info.plist | grep -E 'CFBundleName|CFBundleExecutable|CFBundleIdentifier'
+          test -x build/browse.app/Contents/MacOS/Browse
+
+  stats:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - run: node analytics/test.mjs

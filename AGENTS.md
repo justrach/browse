@@ -74,12 +74,11 @@ lines, in commits or pull requests. Commits carry the owner's git identity.
   free of warnings you introduced.
 - `./bench --world NAME …` drives a test copy with a profile of its own. Never
   drive or quit the installed app unless asked.
-- A release: raise `VERSION`, put a paragraph for it at the top of NOTES.md
-  and move CHANGELOG's Unreleased under it, then
-  `SEARCH_NOTARY_PROFILE=<profile> ./build.sh release ship` and
-  `./publish.sh github`. The release carries the DMG, the ZIP and
-  `appcast.json`; every installed copy reads
+- A release: `./release.sh X.Y.Z "What's new."` bumps the version, writes
+  the notes, tags and pushes; `.github/workflows/release.yml` builds, signs,
+  notarises and publishes the GitHub release with the DMG, the ZIP and
+  `appcast.json`. Every installed copy reads
   `releases/latest/download/appcast.json` and swaps the new build in for its
-  next launch (`Updater.swift`). A build that isn't signed with the same
-  Developer ID team is never swapped in.
+  next launch (`Updater.swift`); one not signed by the same Developer ID
+  team is never swapped in. docs/releasing.md has the secrets it needs.
 - The Keychain: never dump it or walk every item.

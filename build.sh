@@ -239,8 +239,15 @@ fi
 # so it opens on a Mac that has never seen this app and is offline; the ZIP
 # is fetched by an app that already trusts it, and is left as hashed.
 [ -z "$IDENTITY" ] && { echo "can't ship without a Developer ID certificate" >&2; exit 1; }
+# CI keeps its notary profile in a keychain of its own (SEARCH_NOTARY_KEYCHAIN).
+NOTARY=(--keychain-profile "${SEARCH_NOTARY_PROFILE:-search}")
+[ -n "${SEARCH_NOTARY_KEYCHAIN:-}" ] && NOTARY+=(--keychain "$SEARCH_NOTARY_KEYCHAIN")
 for FILE in "$DMG" "$ZIP"; do
-  xcrun notarytool submit "$FILE" --keychain-profile "${SEARCH_NOTARY_PROFILE:-search}" --wait
+  # notarytool waits, and then exits 0 whatever Apple decided — so the
+  # answer is read, and anything but Accepted stops here.
+  OUT="$(xcrun notarytool submit "$FILE" "${NOTARY[@]}" --wait 2>&1)" || { echo "$OUT" >&2; exit 1; }
+  echo "$OUT"
+  echo "$OUT" | grep -q "status: Accepted" || { echo "Apple didn't accept $FILE" >&2; exit 1; }
 done
 xcrun stapler staple "$DMG"
-echo "shipped: $DMG, $ZIP and build/appcast.json — ./publish.sh <folder> puts them on the site"
+echo "shipped: $DMG, $ZIP and build/appcast.json — ./publish.sh github puts them in a release"
