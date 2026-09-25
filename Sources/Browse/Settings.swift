@@ -443,6 +443,8 @@ struct SettingsPanel: View {
             Card {
                 Line(versionTitle, versionDetail) { versionControl }
                 Rule()
+                WebKitLine()
+                Rule()
                 Line("Install updates on its own", "Off, browse still looks once a day and tells you, and installs only when you press Install") {
                     Switch(on: $prefs.installsUpdates)
                 }

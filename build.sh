@@ -241,6 +241,9 @@ if [ -f NOTES.md ]; then
   NOTES="$(awk 'NF { printf "%s%s", (n++ ? " " : ""), $0; next } n { exit }' NOTES.md \
     | sed -e 's/\\/\\\\/g' -e 's/"/\\"/g')"
 fi
+# The oldest WebKit build, per macOS, that has every security fix that
+# matters (WebKitCheck.swift); ./webkit-floor raises one on the live release.
+WEBKIT="$(python3 -c 'import json,sys; print(json.dumps(json.load(open("webkit-floor.json"))))' 2>/dev/null || echo '{}')"
 if [ -n "$BASE" ]; then
 cat > build/appcast.json <<JSON
 {
@@ -250,7 +253,8 @@ cat > build/appcast.json <<JSON
   "dmg": "$BASE/$SLUG.dmg",
   "sha256": "$SHA",
   "notes": "$NOTES",
-  "minimumSystemVersion": "$MINIMUM"
+  "minimumSystemVersion": "$MINIMUM",
+  "webkit": $WEBKIT
 }
 JSON
   echo "wrote: build/appcast.json ($VERSION, build $BUILD)"

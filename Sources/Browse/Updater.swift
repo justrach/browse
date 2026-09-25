@@ -157,6 +157,9 @@ final class Updater: ObservableObject {
             guard let self else { return }
             checking = false
             lastChecked = Date()
+            if WebKitCheck.shared.behind {
+                say?("This Mac's web engine is missing security fixes — update macOS in Software Update")
+            }
             Store.settings.set(Date(), forKey: lastKey)
             guard let found, found.build > Updater.build, found.runsHere else {
                 // A build already swapped in stays ready whatever the feed
@@ -248,8 +251,12 @@ final class Updater: ObservableObject {
         request.timeoutInterval = 12
         guard let (data, response) = try? await URLSession.shared.data(for: request),
               (response as? HTTPURLResponse).map({ (200..<300).contains($0.statusCode) }) ?? true,
-              let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
-              let version = json["version"] as? String,
+              let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any]
+        else { return nil }
+        // Whatever else it says: how up to date this Mac's WebKit ought to be
+        // (WebKitCheck.swift).
+        if let floors = json["webkit"] as? [String: String] { WebKitCheck.shared.take(floors) }
+        guard let version = json["version"] as? String,
               let build = (json["build"] as? Int) ?? Int(json["build"] as? String ?? ""),
               let archive = link(json["url"]),
               let dmg = link(json["dmg"])

@@ -446,6 +446,7 @@ final class Bench {
                 "suggesting": browser.suggesting != nil,
                 "sync": Store.testing ? Sync.shared.probe : [:],
                 "account": Store.testing ? CodegraffAccount.shared.probe : [:],
+                "engine": Store.testing ? WebKitCheck.shared.probe : [:],
                 "offering": browser.offering != nil,
                 "modal": NSApp.modalWindow.map { "\(type(of: $0)) “\($0.title)”" } ?? "",
                 "look": browser.prefs.look.rawValue,

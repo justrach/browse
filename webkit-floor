@@ -1,0 +1,52 @@
+#!/bin/bash
+# The newest WebKit that has the security fixes Apple has shipped, for one
+# macOS: raised here and, at once, on the live release — so every installed
+# copy tells a Mac that's behind within a day, without a new build.
+#
+#   ./webkit-floor                    what the floors are now
+#   ./webkit-floor 22625.1.29.11.27   raise the floor of that build's macOS
+#
+# A build's first number over a thousand is its macOS (22625 → 22). Take the
+# number from a Mac that has the fix — /System/Library/Frameworks/
+# WebKit.framework/Resources/Info.plist, CFBundleVersion — after Apple's
+# security notes say which Safari or macOS carries it.
+set -euo pipefail
+
+cd "$(dirname "$0")"
+REPO="justrach/browse"
+if [ $# -eq 0 ]; then cat webkit-floor.json; exit 0; fi
+BUILD="$1"
+[[ "$BUILD" =~ ^[0-9]+(\.[0-9]+)+$ ]] || { echo "a WebKit build is dotted numbers, like 22625.1.29.11.27" >&2; exit 1; }
+
+python3 - "$BUILD" <<'PY'
+import json, sys
+build = sys.argv[1]
+line = str(int(build.split(".")[0]) // 1000)
+floors = json.load(open("webkit-floor.json"))
+old = floors.get(line)
+older = lambda a, b: [int(x) for x in a.split(".")] < [int(x) for x in b.split(".")]
+if old and not older(old, build):
+    sys.exit(f"the floor for {line} is already {old}")
+floors[line] = build
+open("webkit-floor.json", "w").write(json.dumps(floors, indent=2, sort_keys=True) + "\n")
+print(f"floor for macOS line {line}: {old or 'none'} → {build}")
+PY
+
+# The live release's appcast, if it has one, gets the same floors.
+TAG="$(gh release view -R "$REPO" --json tagName -q .tagName 2>/dev/null || true)"
+WORK="$(mktemp -d)"
+trap 'rm -rf "$WORK"' EXIT
+if [ -n "$TAG" ] && gh release download "$TAG" -R "$REPO" -p appcast.json -D "$WORK" 2>/dev/null; then
+  python3 - "$WORK/appcast.json" <<'PY'
+import json, sys
+path = sys.argv[1]
+cast = json.load(open(path))
+cast["webkit"] = json.load(open("webkit-floor.json"))
+open(path, "w").write(json.dumps(cast, indent=2) + "\n")
+PY
+  gh release upload "$TAG" "$WORK/appcast.json" -R "$REPO" --clobber
+  echo "$TAG's appcast.json now carries it — installed copies see it at their next check"
+else
+  echo "the latest release has no appcast.json yet — the floor goes out with the next release"
+fi
+echo "commit webkit-floor.json so the next release keeps it"

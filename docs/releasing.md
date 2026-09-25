@@ -79,3 +79,25 @@ passkeys); only the signing needs it.
 5. For CI: `base64 -i browse.provisionprofile | gh secret set MACOS_PROVISION_PROFILE -R justrach/browse`.
 
 The profile expires after some years; a new one goes in the same way.
+
+## WebKit's security fixes
+
+browse runs on the WebKit built into macOS, so Apple's fixes reach it
+through Software Update — nothing to rebuild here. What browse adds is a
+nudge for a Mac that's behind: every appcast carries `webkit`, the oldest
+WebKit build per macOS line that has the fixes that matter (from
+`webkit-floor.json`), and a Mac under it is told so at each update check and
+in Settings › About, with a button to Software Update (WebKitCheck.swift).
+
+When Apple ships a WebKit security fix (support.apple.com/100100 lists them):
+
+1. On a Mac that has the fix, read the build:
+   `/usr/libexec/PlistBuddy -c 'Print :CFBundleVersion' /System/Library/Frameworks/WebKit.framework/Resources/Info.plist`
+2. `./webkit-floor 22625.1.29.11.27` (that build) — it raises the floor for
+   that macOS line in `webkit-floor.json` and on the live release's
+   `appcast.json`, so installed copies see it within a day.
+3. Commit `webkit-floor.json`.
+
+A build's first number over a thousand is its macOS (22625 → 22); floors
+are only compared within their own line, and a line with no floor is never
+warned about.
