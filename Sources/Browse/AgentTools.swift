@@ -104,7 +104,10 @@ final class AgentTools {
                 "browse": [
                     "url": "http://127.0.0.1:\(port)/mcp",
                     "headers": ["Authorization": "Bearer \(token)"],
-                ],
+                    // Served in full up front, not behind graff's tool
+                    // search: in a browser these tools are the point.
+                    "eager": true,
+                ] as [String: Any],
             ],
         ]
         return AgentTools.write(config, to: Agent.folder.appendingPathComponent(".mcp.json"))

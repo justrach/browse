@@ -11,6 +11,12 @@ in [ROADMAP.md](ROADMAP.md).
 
 ## Unreleased
 
+### Changed
+
+- Codegraff's answers read cleaner: a source it cites becomes a small number, the same number each time, and the sources sit once under the answer as chips you can click. The field holds everything in one box — what you type, the model, how hard it thinks, and a send button in the theme's accent.
+- Codegraff answers what it knows, and from the page you sent, without going to the web first; it searches when something is current or checkable, or when you ask for sources, and keeps answers brief unless asked for more.
+- Less memory with many tabs: three stay awake behind the one you're on (it was six), the rest sleep after a minute, and any tab after a quarter of an hour. With ten ordinary sites open that's about 280 MB less.
+
 ## 1.0.2 — 25 September 2026
 
 ### Added

@@ -6,7 +6,7 @@ import WebKit
 // A page open in a tab keeps its whole content process — a hundred to three
 // hundred megabytes, running its timers, holding its sockets — for as long as
 // the tab exists. Twenty tabs is two or three gigabytes spent on the nineteen
-// nobody is looking at. So a tab left alone for half an hour gives its page
+// nobody is looking at. So a tab left alone for a quarter of an hour gives its page
 // back, and keeps what it takes to come back exactly where it was: its
 // history, its scroll position, and a picture to show while the page is
 // rebuilt underneath (see Tab.sleep).
@@ -16,7 +16,7 @@ import WebKit
 // with ⌘W), a tab playing sound, on a call, sending a download, holding its
 // video out in the little window, or holding something typed and not sent.
 //
-// When macOS says memory is short, the half hour shrinks: to five minutes on
+// When macOS says memory is short, the quarter hour shrinks: to five minutes on
 // a warning, to nothing when it is critical — and Codegraff lets go of what it
 // holds too: its own pages on a warning, graff itself when it is critical.
 //
@@ -24,29 +24,30 @@ import WebKit
 // tabs opened in a burst were twenty content processes for half an hour —
 // five real pages measured 400 MB between them, 65 MB once four slept (25 Sep
 // 2026). Past `awakeMost`, the ones looked at longest ago sleep once they have
-// been left a couple of minutes, so going back and forth between a few tabs
-// never reloads anything.
+// been left a minute, so going back and forth between a few tabs never
+// reloads anything. Three kept awake rather than six saved 280 MB of 1.7 GB
+// with ten ordinary sites open (Wikipedia, YouTube, the news; 25 Sep 2026).
 
 extension Browser {
-    /// How long a tab has to go without being looked at. Half an hour, or
-    /// `sleep.after` in seconds — for the bench and the measurements.
+    /// How long a tab has to go without being looked at. A quarter of an
+    /// hour, or `sleep.after` in seconds — for the bench and the measurements.
     static var sleepAfter: TimeInterval {
         let set = Store.settings.double(forKey: "sleep.after")
-        return set > 0 ? set : 30 * 60
+        return set > 0 ? set : 15 * 60
     }
 
     /// Tabs kept awake behind the one on screen, or `sleep.awake` — for the
     /// bench and the measurements.
     static var awakeMost: Int {
         let set = Store.settings.integer(forKey: "sleep.awake")
-        return set > 0 ? set : 6
+        return set > 0 ? set : 3
     }
 
-    /// How long a tab past `awakeMost` is left before it sleeps anyway: two
-    /// minutes, or `sleep.crowded` in seconds.
+    /// How long a tab past `awakeMost` is left before it sleeps anyway: a
+    /// minute, or `sleep.crowded` in seconds.
     static var crowdedAfter: TimeInterval {
         let set = Store.settings.double(forKey: "sleep.crowded")
-        return set > 0 ? set : 2 * 60
+        return set > 0 ? set : 60
     }
 
     /// Started once, at launch.

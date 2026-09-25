@@ -126,9 +126,7 @@ struct AgentColumn: View {
     /// that model takes (as Harness asks graff for them).
     @ViewBuilder
     private var choices: some View {
-        HStack(spacing: 10) {
-            // On the stage they sit at the far end, under the send button.
-            if full { Spacer(minLength: 0) }
+        HStack(spacing: 12) {
             if let current = agent.model {
                 ModelPicker(agent: agent, current: current)
                     .help("The model Codegraff uses — changing it carries the conversation over")
@@ -147,18 +145,30 @@ struct AgentColumn: View {
                         }
                     }
                 } label: {
-                    Text("Reasoning: \(effort.currentName)")
+                    HStack(spacing: 4) {
+                        Image(systemName: "brain")
+                            .font(.system(size: 9.5))
+                        Text(effort.currentName)
+                        Image(systemName: "chevron.down")
+                            .font(.system(size: 7.5, weight: .semibold))
+                    }
+                    .font(.system(size: 11.5))
+                    .foregroundStyle(Palette.muted)
+                    .contentShape(Rectangle())
                 }
+                // Drawn as given, the same as the model's menu beside it —
+                // a borderless menu sets its own size and ink.
+                .menuStyle(.button)
+                .buttonStyle(.plain)
+                .menuIndicator(.hidden)
                 .help("How hard it thinks before it answers")
             }
-            if !full { Spacer(minLength: 0) }
         }
         .font(.system(size: 11.5))
         .foregroundStyle(Palette.muted)
         .menuStyle(.borderlessButton)
-        .fixedSize(horizontal: false, vertical: true)
+        .fixedSize()
         .disabled(agent.phase == .working)
-        .padding(.horizontal, 4)
     }
 
     private var light: Color {
@@ -242,7 +252,9 @@ struct AgentColumn: View {
             if !full, let tab = browser.active, !tab.isBlank, agent.asking?.isQuestion != true {
                 pageChip(tab)
             }
-            HStack(alignment: .bottom, spacing: 8) {
+            // One box: the words, and under them in the same box what
+            // they go to — the model, how hard it thinks — and the button.
+            VStack(alignment: .leading, spacing: full ? 10 : 8) {
                 ZStack(alignment: .topLeading) {
                     if agent.draft.isEmpty {
                         Text(prompt)
@@ -256,26 +268,30 @@ struct AgentColumn: View {
                         .focused($typing)
                         .onSubmit(send)
                 }
-                .font(.system(size: full ? 14 : 13))
-                .padding(.vertical, full ? 5 : 0)
-                if agent.phase == .working, agent.asking?.isQuestion != true {
-                    round(icon: "stop.fill", help: "Stop") { agent.stop() }
-                } else {
-                    round(icon: "arrow.up", help: "Send   ↩") { send() }
-                        .disabled(!agent.canSend)
-                        .opacity(agent.canSend ? 1 : 0.35)
+                .font(.system(size: full ? 14.5 : 13.5))
+                HStack(alignment: .center, spacing: 8) {
+                    choices
+                    Spacer(minLength: 0)
+                    if agent.phase == .working, agent.asking?.isQuestion != true {
+                        round(icon: "stop.fill", help: "Stop", live: true) { agent.stop() }
+                    } else {
+                        round(icon: "arrow.up", help: "Send   ↩", live: agent.canSend) { send() }
+                            .disabled(!agent.canSend)
+                    }
                 }
             }
-            .padding(.leading, full ? 16 : 12)
-            .padding(.trailing, full ? 8 : 6)
-            .padding(.vertical, 6)
-            .background(full ? Palette.hover : Palette.wash, in: RoundedRectangle(cornerRadius: full ? 18 : 12, style: .continuous))
-            .overlay {
-                if full {
-                    RoundedRectangle(cornerRadius: 18, style: .continuous).strokeBorder(Palette.hairline, lineWidth: 1)
-                }
-            }
-            choices
+            .padding(.leading, full ? 16 : 13)
+            .padding(.trailing, full ? 10 : 8)
+            .padding(.top, full ? 13 : 11)
+            .padding(.bottom, full ? 9 : 8)
+            .background(Palette.ground, in: RoundedRectangle(cornerRadius: full ? 20 : 16, style: .continuous))
+            .overlay(
+                RoundedRectangle(cornerRadius: full ? 20 : 16, style: .continuous)
+                    .strokeBorder(typing ? Palette.accent.opacity(0.45) : Palette.hairline, lineWidth: 1)
+            )
+            .shadow(color: .black.opacity(0.06), radius: 10, y: 3)
+            .animation(Motion.quick, value: typing)
+            .onTapGesture { typing = true }
         }
         .padding(.horizontal, 12)
         .padding(.top, 4)
@@ -308,15 +324,18 @@ struct AgentColumn: View {
         .help(agent.withPage ? "This page goes with your message. Click to leave it out" : "Click to send this page with your message")
     }
 
-    private func round(icon: String, help: String, act: @escaping () -> Void) -> some View {
+    /// The send (or stop) button: the accent once there's something to
+    /// send, a quiet grey until then.
+    private func round(icon: String, help: String, live: Bool, act: @escaping () -> Void) -> some View {
         Button(action: act) {
             Image(systemName: icon)
-                .font(.system(size: 11, weight: .semibold))
-                .foregroundStyle(Palette.ground)
-                .frame(width: 24, height: 24)
-                .background(Palette.ink, in: Circle())
+                .font(.system(size: 11.5, weight: .bold))
+                .foregroundStyle(live ? Palette.onAccent : Palette.muted)
+                .frame(width: 28, height: 28)
+                .background(live ? Palette.accent : Palette.wash, in: Circle())
         }
         .buttonStyle(.plain)
+        .animation(Motion.quick, value: live)
         .help(help)
     }
 
@@ -989,23 +1008,26 @@ private struct ReplyText: View {
     }
 
     var body: some View {
+        // Citations as small numbers, their sources under the reply once
+        // (Citations.swift).
+        let marked = Citations.mark(text)
         VStack(alignment: .leading, spacing: size * 0.7) {
-            ForEach(Array(Self.blocks(text).enumerated()), id: \.offset) { _, block in
+            ForEach(Array(Self.blocks(marked.text).enumerated()), id: \.offset) { _, block in
                 switch block {
                 case .words(let words):
-                    Text(Agent.rich(words))
+                    Text(Citations.style(Agent.rich(words), size: size))
                         .lineSpacing(size * 0.2)
                 case .item(let words, let mark, let depth):
                     HStack(alignment: .firstTextBaseline, spacing: 8) {
                         Text(mark)
                             .foregroundStyle(Palette.muted)
                             .frame(minWidth: 10, alignment: .trailing)
-                        Text(Agent.rich(words))
+                        Text(Citations.style(Agent.rich(words), size: size))
                             .lineSpacing(size * 0.2)
                     }
                     .padding(.leading, 4 + CGFloat(depth) * 16)
                 case .heading(let words):
-                    Text(Agent.rich(words))
+                    Text(Citations.style(Agent.rich(words), size: size))
                         .font(.system(size: size + 1, weight: .semibold))
                 case .code(let code):
                     Text(code)
@@ -1014,6 +1036,10 @@ private struct ReplyText: View {
                         .frame(maxWidth: .infinity, alignment: .leading)
                         .background(Palette.wash, in: RoundedRectangle(cornerRadius: 8, style: .continuous))
                 }
+            }
+            if !marked.sources.isEmpty {
+                SourcesRow(sources: marked.sources, size: size)
+                    .padding(.top, 2)
             }
         }
         .font(.system(size: size))
