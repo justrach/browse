@@ -17,6 +17,7 @@ in [ROADMAP.md](ROADMAP.md).
 - Codegraff answers what it knows, and from the page you sent, without going to the web first; it searches when something is current or checkable, or when you ask for sources, and keeps answers brief unless asked for more.
 - Less memory with many tabs: three stay awake behind the one you're on (it was six), the rest sleep after a minute, and any tab after a quarter of an hour. With ten ordinary sites open that's about 280 MB less.
 - Codegraff reads a page once its text is in and has stopped changing, not once the last ad and tracker has loaded — on busy sites that's a second or two instead of up to fifteen, with the same text read.
+- The pages Codegraff opens for itself block ads and trackers as your tabs do, and follow the same switch and the same sites you've paused it on: a third to three-fifths fewer requests on news sites, and a busy page done loading two seconds sooner.
 
 ## 1.0.2 — 25 September 2026
 

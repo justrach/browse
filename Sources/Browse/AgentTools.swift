@@ -949,6 +949,9 @@ private final class Sheet: Target {
         let config = WKWebViewConfiguration()
         config.websiteDataStore = Store.websites
         config.applicationNameForUserAgent = Web.userAgentName
+        // The ad blocker, as a tab has it: a page still fetching its ads and
+        // trackers is a page settled() is still waiting on.
+        Shield.shared.protect(config.userContentController)
         web = WKWebView(frame: room.contentView?.bounds ?? NSRect(x: 0, y: 0, width: 1280, height: 900), configuration: config)
         web.autoresizingMask = [.width, .height]
         room.contentView?.addSubview(web)
@@ -957,7 +960,12 @@ private final class Sheet: Target {
     var title: String { web.title?.isEmpty == false ? web.title ?? "" : (web.url?.host() ?? id) }
     var address: String { web.url?.absoluteString ?? "" }
 
-    func go(_ url: URL) { web.load(URLRequest(url: url)) }
+    /// On or off for where it is going: off for a site it is paused on, and
+    /// off everywhere once it is switched off in Settings.
+    func go(_ url: URL) {
+        Shield.shared.tune(web.configuration.userContentController, for: url.host())
+        web.load(URLRequest(url: url))
+    }
 
     func drop() {
         web.stopLoading()
