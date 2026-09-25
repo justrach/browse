@@ -221,6 +221,9 @@ private struct MenuLine: View {
 
 struct ContentView: View {
     @ObservedObject var browser: Browser
+    /// Each theme put on (Theme.swift). What the window draws is built again
+    /// once for it — the pages and the window's own set-up are kept.
+    @ObservedObject private var themes = ThemeClock.shared
 
     @State private var keys: Any?
     @State private var window: NSWindow?
@@ -386,11 +389,12 @@ struct ContentView: View {
 
     var body: some View {
         window_
+            .id(themes.tick)
             // The column folded away, and out again at the edge (see Fold.swift).
-            .overlay(alignment: .leading) { Fold(browser: browser, prefs: browser.prefs) }
-            .overlay(alignment: .bottom) { bars }
-            .overlay { field }
-            .overlay { panels }
+            .overlay(alignment: .leading) { Fold(browser: browser, prefs: browser.prefs).id(themes.tick) }
+            .overlay(alignment: .bottom) { bars.id(themes.tick) }
+            .overlay { field.id(themes.tick) }
+            .overlay { panels.id(themes.tick) }
             .animation(Motion.settle, value: browser.fieldShowing)
             .background(WindowSetup { window = $0; dress($0) })
             .onChange(of: browser.prefs.sidebar) { _, _ in

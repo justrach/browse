@@ -96,8 +96,15 @@ enum Themes {
         current = chosen
         cache.removeAll()
         redraw()
+        ThemeClock.shared.tick += 1
     }
 
+    /// SwiftUI keeps the colours it worked out for a view until the view is
+    /// built again, and a view that's out of sight — under the chat, say —
+    /// isn't told the appearance changed. So the window's views are built
+    /// again once for each theme put on (ContentView), and the appearance
+    /// nudge below does the same for AppKit's own.
+    ///
     /// Dynamic colours are worked out again when the app's appearance
     /// changes, and not otherwise. So for one turn of the run loop the app
     /// wears the vibrant twin of what it wears now — the same light or dark,
@@ -320,6 +327,13 @@ struct ThemesPage: View {
             said = failure.why
         }
     }
+}
+
+/// Counts the themes put on, for the views that are built again for each.
+@MainActor
+final class ThemeClock: ObservableObject {
+    static let shared = ThemeClock()
+    @Published var tick = 0
 }
 
 extension Themes {
