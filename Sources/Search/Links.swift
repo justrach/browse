@@ -179,8 +179,8 @@ final class Links: NSObject, NSApplicationDelegate {
         text.host = "github.com"
         text.path = "/justrach/search/issues/new"
         text.queryItems = [
-            URLQueryItem(name: "title", value: "search.codegraff.app feedback"),
-            URLQueryItem(name: "body", value: "\n\n—\nsearch.codegraff.app \(Updater.version), build \(Updater.build), macOS \(ProcessInfo.processInfo.operatingSystemVersionString)"),
+            URLQueryItem(name: "title", value: "SEACHAI feedback"),
+            URLQueryItem(name: "body", value: "\n\n—\nSEACHAI \(Updater.version), build \(Updater.build), macOS \(ProcessInfo.processInfo.operatingSystemVersionString)"),
         ]
         guard let url = text.url else { return }
         NSWorkspace.shared.open(url)

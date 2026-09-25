@@ -1,6 +1,6 @@
-# search.codegraff.app
+# SEACHAI
 
-<img src="Icon/search-codegraff-app.png" alt="search.codegraff.app icon" width="96">
+<img src="Icon/seachai.png" alt="SEACHAI icon" width="96">
 
 A Codegraff browser for the Mac. Browse with WebKit, ask about what you're reading, research something, or have [Codegraff](https://github.com/justrach/codegraff) fill in a form while you watch.
 
@@ -10,7 +10,7 @@ A Codegraff browser for the Mac. Browse with WebKit, ask about what you're readi
 
 *Illustration above; the images below show the app.*
 
-![search.codegraff.app showing a Wikipedia article, with the tabs across the top](docs/screenshots/browse.png)
+![SEACHAI showing a Wikipedia article, with the tabs across the top](docs/screenshots/browse.png)
 
 ## The browser
 
@@ -66,13 +66,13 @@ You need macOS 14 or later and Xcode 16 (Swift 6).
 
 ```sh
 swift build                        # the SwiftPM executable
-./build.sh                         # build/search.codegraff.app, signed for this Mac
-open build/search.codegraff.app
+./build.sh                         # build/SEACHAI.app, signed for this Mac
+open build/SEACHAI.app
 ```
 
-`./build.sh release dmg` also makes `build/search.codegraff.app.dmg` and `build/search.codegraff.app.zip`. `SEARCH_NOTARY_PROFILE=<profile> ./build.sh release ship` signs and notarizes them with your Developer ID and a `notarytool store-credentials` profile of your own.
+`./build.sh release dmg` also makes `build/SEACHAI.dmg` and `build/SEACHAI.zip`. `SEARCH_NOTARY_PROFILE=<profile> ./build.sh release ship` signs and notarizes them with your Developer ID and a `notarytool store-credentials` profile of your own.
 
-`./fresh.sh` opens a copy with a profile of its own, apart from the one you browse with. `./bench` drives a running copy from the shell once Settings › General › "Let a script drive search.codegraff.app" is on. See `skill/search-bench/SKILL.md`.
+`./fresh.sh` opens a copy with a profile of its own, apart from the one you browse with. `./bench` drives a running copy from the shell once Settings › General › "Let a script drive SEACHAI" is on. See `skill/search-bench/SKILL.md`.
 
 The app keeps its data in `~/Library/Application Support/Search by Codegraff/`, under the bundle identifier `com.codegraff.search`. This name change preserves existing profiles.
 
@@ -80,4 +80,4 @@ The SwiftUI and AppKit code is in `Sources/Search/`. `Agent.swift`, `AgentColumn
 
 ## License
 
-search.codegraff.app is a Codegraff product released under [AGPL-3.0](LICENSE). Code from before the Codegraff work remains the property of its original owner and retains its [MIT license and copyright notice](LICENSE.MIT).
+SEACHAI is a Codegraff product released under [AGPL-3.0](LICENSE). Code from before the Codegraff work remains the property of its original owner and retains its [MIT license and copyright notice](LICENSE.MIT).

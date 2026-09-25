@@ -14,14 +14,14 @@ set -euo pipefail
 
 cd "$(dirname "$0")"
 [ $# -eq 1 ] || { echo "usage: ./publish.sh github | <folder>" >&2; exit 1; }
-FILES=(search.codegraff.app.dmg search.codegraff.app.zip appcast.json)
+FILES=(SEACHAI.dmg SEACHAI.zip appcast.json)
 VERSION="$(tr -d '[:space:]' < VERSION)"
 
 for FILE in "${FILES[@]}"; do
   [ -f "build/$FILE" ] || { echo "build/$FILE is missing — run ./build.sh release ship" >&2; exit 1; }
 done
-xcrun stapler validate -q "build/search.codegraff.app.dmg" >/dev/null 2>&1 \
-  || echo "note: build/search.codegraff.app.dmg is not notarised — ./build.sh release ship does that" >&2
+xcrun stapler validate -q "build/SEACHAI.dmg" >/dev/null 2>&1 \
+  || echo "note: build/SEACHAI.dmg is not notarised — ./build.sh release ship does that" >&2
 
 if [ "$1" = "github" ]; then
   REPO="justrach/search"
@@ -34,7 +34,7 @@ if [ "$1" = "github" ]; then
   # The first paragraph of NOTES.md is what's new, the same line Settings shows.
   NOTES="$(awk 'NF { printf "%s%s", (n++ ? " " : ""), $0; next } n { exit }' NOTES.md)"
   gh release create "v$VERSION" -R "$REPO" --target main \
-    --title "search.codegraff.app $VERSION" --notes "$NOTES" \
+    --title "SEACHAI $VERSION" --notes "$NOTES" \
     "${FILES[@]/#/build/}"
   exit 0
 fi

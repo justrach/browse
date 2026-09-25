@@ -702,7 +702,7 @@ final class Agent: ObservableObject {
             clear
             \(Agent.quoted(found.path)) login
             echo
-            echo "Done. Back in Search, press I've signed in."
+            echo "Done. Back in SEACHAI, press I've signed in."
             """
             do {
                 try body.write(to: script, atomically: true, encoding: .utf8)
@@ -1024,7 +1024,7 @@ final class Agent: ObservableObject {
     /// where graff is, and what it has to hand here that it wouldn't at a
     /// terminal.
     private static let introduction = """
-    You are Codegraff, running inside Search, the web browser the user is using right now; \
+    You are Codegraff, running inside SEACHAI, the web browser the user is using right now; \
     they are talking to you from beside the page, or from a page of its own. For anything on \
     the web use the `search` MCP tools (mcp__search__*): `search`, then `read_pages` with many \
     links at once — they load in parallel in pages the user doesn't see — and `open` a page to \

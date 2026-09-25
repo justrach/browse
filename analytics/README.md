@@ -1,6 +1,6 @@
 # Anonymous stats
 
-The Worker behind search.codegraff.app's stats page:
+The Worker behind SEACHAI's stats page:
 https://search-codegraff-stats.rachpradhan.workers.dev
 
 A Mac sends to it only when sharing is switched on (Settings › Privacy, off by default; see `Sources/Search/Stats.swift`). A report holds a random id made on that Mac, the app and macOS versions, the chip, CPU and GPU cores, memory, the app's own memory use, how many tabs are open and awake, and the thermal state. It is sent at most once a day.

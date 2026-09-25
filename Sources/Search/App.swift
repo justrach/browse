@@ -11,7 +11,7 @@ struct SearchApp: App {
     @NSApplicationDelegateAdaptor(Links.self) private var links
 
     var body: some Scene {
-        Window("search.codegraff.app", id: "browser") {
+        Window("SEACHAI", id: "browser") {
             ContentView(browser: browser)
                 .frame(minWidth: 640, minHeight: 420)
         }

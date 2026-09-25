@@ -1,6 +1,6 @@
 # Contributing
 
-search.codegraff.app is a Codegraff product. Contributions are welcome; a few things make a change easier to review.
+SEACHAI is a Codegraff product. Contributions are welcome; a few things make a change easier to review.
 
 ## Before writing code
 

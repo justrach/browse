@@ -184,8 +184,8 @@ final class Updater: ObservableObject {
         guard case .fetching(let fetching) = stage, fetching == release else { return }
         stage = worked ? .ready(release) : .offered(release)
         say?(worked
-            ? "Search \(release.version) is ready — it's there the next time you open it"
-            : "Search \(release.version) is out — it's in Settings")
+            ? "SEACHAI \(release.version) is ready — it's there the next time you open it"
+            : "SEACHAI \(release.version) is out — it's in Settings")
     }
 
     /// Quit, and come back as the new one. A shell waits for this process
