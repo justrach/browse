@@ -1,12 +1,16 @@
-# Search by Codegraff
+# search.codegraff.app
 
-<img src="Icon/search-by-codegraff.png" alt="Search by Codegraff icon" width="128">
+<img src="Icon/search-codegraff-app.png" alt="search.codegraff.app icon" width="96">
 
-A small, fast browser for the Mac with an agent built in. It is the quiet WebKit browser [Search](https://github.com/driceroland/Search) with [Codegraff](https://github.com/justrach/codegraff) working beside the page: ask it about what you're reading, send it off to research something, or have it fill in a form while you watch.
+A Codegraff browser for the Mac. Browse with WebKit, ask about what you're reading, research something, or have [Codegraff](https://github.com/justrach/codegraff) fill in a form while you watch.
 
-**[Download for macOS](https://github.com/justrach/search/releases/latest/download/Search-by-Codegraff.dmg)** · macOS 14 or later · signed and notarized · open the disk image and drag the app to Applications
+**[Download for macOS](https://github.com/justrach/search/releases/latest)** · macOS 14 or later · open the disk image and drag the app to Applications
 
-![Search by Codegraff showing a Wikipedia article, with the tabs across the top](docs/screenshots/browse.png)
+![Illustration of a browser page with an assistant panel beside it](docs/readme-banner.png)
+
+*Illustration above; the images below show the app.*
+
+![search.codegraff.app showing a Wikipedia article, with the tabs across the top](docs/screenshots/browse.png)
 
 ## The browser
 
@@ -41,7 +45,7 @@ The model picker under the field searches every model your Codegraff account rea
 
 ### What Codegraff needs
 
-Search doesn't ship an agent. It runs the `graff` command already on your Mac, the one the [Codegraff](https://github.com/justrach/codegraff) app installs, and uses your own Codegraff sign-in. Without it the browser works as normal, and the Ask tab offers to get it for you.
+The browser doesn't ship an agent. It runs the `graff` command already on your Mac, the one the [Codegraff](https://github.com/justrach/codegraff) app installs, and uses your own Codegraff sign-in. Without it the browser works as normal, and the Ask tab offers to get it for you.
 
 - **What leaves your Mac:** what you type to Codegraff, and the text of the page when you ask about it, go to the model provider your Codegraff account uses. Nothing else does.
 - **It stays light:** by default it runs with the browser's tools and its own, not every MCP server your other apps know about (Settings › Agent can include them). After ten quiet minutes it stops, and your next message picks the same conversation up.
@@ -59,19 +63,19 @@ Turn it all off in Settings › Agent.
 You need macOS 14 or later and Xcode 16 (Swift 6).
 
 ```sh
-swift build                                  # the SwiftPM executable
-./build.sh                                   # build/Search by Codegraff.app, signed for this Mac
-open "build/Search by Codegraff.app"
+swift build                        # the SwiftPM executable
+./build.sh                         # build/search.codegraff.app, signed for this Mac
+open build/search.codegraff.app
 ```
 
-`./build.sh release dmg` also makes `build/Search-by-Codegraff.dmg`. `SEARCH_NOTARY_PROFILE=<profile> ./build.sh release ship` signs it with your Developer ID and notarizes and staples it, with a `notarytool store-credentials` profile of your own.
+`./build.sh release dmg` also makes `build/search.codegraff.app.dmg` and `build/search.codegraff.app.zip`. `SEARCH_NOTARY_PROFILE=<profile> ./build.sh release ship` signs and notarizes them with your Developer ID and a `notarytool store-credentials` profile of your own.
 
-`./fresh.sh` opens a copy with a profile of its own, apart from the one you browse with. `./bench` drives a running copy from the shell once Settings › General › "Let a script drive Search" is on. See `skill/search-bench/SKILL.md`.
+`./fresh.sh` opens a copy with a profile of its own, apart from the one you browse with. `./bench` drives a running copy from the shell once Settings › General › "Let a script drive search.codegraff.app" is on. See `skill/search-bench/SKILL.md`.
 
-The app keeps its data in `~/Library/Application Support/Search by Codegraff/`, under the bundle identifier `com.codegraff.search`. It never touches the original Search app or its profile.
+The app keeps its data in `~/Library/Application Support/Search by Codegraff/`, under the bundle identifier `com.codegraff.search`. This name change preserves existing profiles.
 
-The code is SwiftUI and AppKit in `Sources/Search/`. `Agent.swift`, `AgentColumn.swift`, `AgentHome.swift` and `AgentTools.swift` are Codegraff's part; the rest is the browser. [CONTRIBUTING.md](CONTRIBUTING.md) is the original project's guide.
+The SwiftUI and AppKit code is in `Sources/Search/`. `Agent.swift`, `AgentColumn.swift`, `AgentHome.swift`, and `AgentTools.swift` connect the browser to Codegraff.
 
-## Origin and license
+## License
 
-A fork of [Search](https://github.com/driceroland/Search) by [Office Commun](https://officecommun.com), which keeps its history and its [MIT license](LICENSE), including **Copyright (c) 2026 Office Commun**. The Search name and icon are Office Commun's; this fork has a name and icon of its own.
+search.codegraff.app is a Codegraff product released under [AGPL-3.0](LICENSE). Code from before the Codegraff work remains the property of its original owner and retains its [MIT license and copyright notice](LICENSE.MIT).

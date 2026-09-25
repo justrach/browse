@@ -5,7 +5,7 @@ where each request came from: GitHub issues, pull requests, and the replies
 to the launch on X. Anything finished moves to the **Unreleased** section of
 [CHANGELOG.md](CHANGELOG.md), which becomes the next update.
 
-Want something that isn't here? [Open an issue](https://github.com/driceroland/Search/issues).
+Want something that isn't here? [Open an issue](https://github.com/justrach/search/issues).
 Want to build something that is? Say so on its issue first, so two people
 don't build it twice.
 

@@ -12,13 +12,13 @@ set -euo pipefail
 cd "$(dirname "$0")"
 [ $# -eq 1 ] || { echo "usage: ./publish.sh <folder>" >&2; exit 1; }
 FOLDER="$1"
-FILES=(Search-by-Codegraff.dmg Search-by-Codegraff.zip appcast.json)
+FILES=(search.codegraff.app.dmg search.codegraff.app.zip appcast.json)
 
 for FILE in "${FILES[@]}"; do
   [ -f "build/$FILE" ] || { echo "build/$FILE is missing — set SEARCH_DOWNLOAD_URL and run ./build.sh release dmg" >&2; exit 1; }
 done
-xcrun stapler validate -q "build/Search-by-Codegraff.dmg" >/dev/null 2>&1 \
-  || echo "note: build/Search-by-Codegraff.dmg is not notarised — ./build.sh release ship does that" >&2
+xcrun stapler validate -q "build/search.codegraff.app.dmg" >/dev/null 2>&1 \
+  || echo "note: build/search.codegraff.app.dmg is not notarised — ./build.sh release ship does that" >&2
 
 mkdir -p "$FOLDER"
 for FILE in "${FILES[@]}"; do

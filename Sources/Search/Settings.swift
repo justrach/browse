@@ -158,7 +158,7 @@ struct SettingsPanel: View {
         Card {
             Line(
                 "Open links from other apps",
-                isDefault ? "Search by Codegraff is the default browser on this Mac" : "Mail, Slack and the rest still send links elsewhere"
+                isDefault ? "search.codegraff.app is the default browser on this Mac" : "Mail, Slack and the rest still send links elsewhere"
             ) {
                 if isDefault {
                     Image(systemName: "checkmark")
@@ -215,7 +215,7 @@ struct SettingsPanel: View {
                 Switch(on: $prefs.autoScroll)
             }
             Rule()
-            Line("Let a script drive Search", "A local socket for testing. Its tabs open beside yours with a flask on them and never take over — see ./bench") {
+            Line("Let a script drive search.codegraff.app", "A local socket for testing. Its tabs open beside yours with a flask on them and never take over — see ./bench") {
                 Switch(on: $prefs.bench)
             }
         }
@@ -347,7 +347,7 @@ struct SettingsPanel: View {
                 }
                 if let trouble = shield.trouble {
                     Rule()
-                    Line(trouble, "Nothing is being blocked until this clears — try again, or restart Search") {
+                    Line(trouble, "Nothing is being blocked until this clears — try again, or restart the app") {
                         Pill("Try again") { shield.compile() }
                     }
                 }
@@ -392,10 +392,10 @@ struct SettingsPanel: View {
             HStack(spacing: 14) {
                 BrandMark().frame(width: 34, height: 34)
                 VStack(alignment: .leading, spacing: 3) {
-                    Text("Search by Codegraff")
+                    Text("search.codegraff.app")
                         .font(.system(size: 15, weight: .semibold))
                         .foregroundStyle(Palette.ink)
-                    Text("Based on Search by Office Commun · version \(Updater.version)")
+                    Text("A Codegraff product · AGPL-3.0 · version \(Updater.version)")
                         .font(.system(size: 12))
                         .foregroundStyle(Palette.muted)
                 }
@@ -437,9 +437,9 @@ struct SettingsPanel: View {
     private var versionTitle: String {
         switch updater.stage {
         case .none: return "Updates"
-        case .fetching(let next): return "Search by Codegraff \(next.version) is downloading…"
-        case .ready(let next): return "Search by Codegraff \(next.version) is ready"
-        case .offered(let next): return "Search by Codegraff \(next.version) is out"
+        case .fetching(let next): return "search.codegraff.app \(next.version) is downloading…"
+        case .ready(let next): return "search.codegraff.app \(next.version) is ready"
+        case .offered(let next): return "search.codegraff.app \(next.version) is out"
         }
     }
 
@@ -452,7 +452,7 @@ struct SettingsPanel: View {
         case .fetching(let next):
             return next.notes ?? "Quietly, in the background — nothing you have set is touched"
         case .ready(let next):
-            return next.notes ?? "It's there the next time you open Search by Codegraff"
+            return next.notes ?? "It's there the next time you open search.codegraff.app"
         case .offered(let next):
             return next.notes ?? "Open the disk image, the same as the first time"
         }

@@ -151,7 +151,7 @@ struct BrandMark: View {
            let image = NSImage(contentsOfFile: path) { return image }
         let source = URL(fileURLWithPath: #filePath)
             .deletingLastPathComponent()
-            .appendingPathComponent("../../Icon/search-by-codegraff.png")
+            .appendingPathComponent("../../Icon/search-codegraff-app.png")
             .standardizedFileURL
         return NSImage(contentsOf: source)
     }()
@@ -164,7 +164,7 @@ struct BrandMark: View {
                 Image(systemName: "globe").resizable().scaledToFit()
             }
         }
-        .accessibilityLabel("Search by Codegraff logo")
+        .accessibilityLabel("search.codegraff.app logo")
     }
 }
 

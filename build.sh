@@ -34,9 +34,9 @@ set -euo pipefail
 cd "$(dirname "$0")"
 CONFIG="${1:-release}"
 STEP="${2:-app}"
-NAME="Search by Codegraff"
-SLUG="Search-by-Codegraff"
-APP="build/$NAME.app"
+NAME="search.codegraff.app"
+SLUG="search.codegraff.app"
+APP="build/$NAME"
 VERSION="$(tr -d '[:space:]' < VERSION)"
 # A build number that only ever goes up, so the updater can tell newer from
 # older without parsing version strings.
@@ -51,13 +51,14 @@ BINARY=".build/$CONFIG/Search"
 rm -rf "$APP"
 mkdir -p "$APP/Contents/MacOS" "$APP/Contents/Resources"
 cp "$BINARY" "$APP/Contents/MacOS/Search"
+cp LICENSE LICENSE.MIT "$APP/Contents/Resources/"
 
 # Symbols stay out of the app. The linker leaves every function's name and a
 # map back to the source in the binary — 15,000 entries, more than half of
 # what the app weighed (6.5 MB of binary, 2.7 without them), and nothing the
 # app reads while it runs. They are kept beside the build instead, as a dSYM
 # that turns the addresses in a crash report back into names (Console, or
-# atos -o "build/Search by Codegraff.app.dSYM/Contents/Resources/DWARF/Search").
+# atos -o "build/search.codegraff.app.dSYM/Contents/Resources/DWARF/Search").
 if [ "$CONFIG" = "release" ]; then
   rm -rf "$APP.dSYM"
   dsymutil "$BINARY" -o "$APP.dSYM" 2>/dev/null || echo "no dSYM this time" >&2
@@ -68,7 +69,7 @@ fi
 ICONSET="build/AppIcon.iconset"
 rm -rf "$ICONSET"
 mkdir -p "$ICONSET"
-SOURCE_ICON="Icon/search-by-codegraff.png"
+SOURCE_ICON="Icon/search-codegraff-app.png"
 [ -f "$SOURCE_ICON" ] || { echo "missing $SOURCE_ICON" >&2; exit 1; }
 for POINTS in 16 32 128 256 512; do
   for SCALE in 1 2; do
@@ -98,7 +99,7 @@ cat > "$APP/Contents/Info.plist" <<PLIST
   <key>CFBundleIconFile</key><string>AppIcon</string>
   <key>LSMinimumSystemVersion</key><string>$MINIMUM</string>
   <key>LSApplicationCategoryType</key><string>public.app-category.productivity</string>
-  <key>NSHumanReadableCopyright</key><string>Search by Codegraff. Based on Search © 2026 Office Commun (MIT).</string>
+  <key>NSHumanReadableCopyright</key><string>A Codegraff product. AGPL-3.0; license notices in the app bundle.</string>
   <key>NSHighResolutionCapable</key><true/>
   <!-- Owning http and https is what lets macOS offer this app as the default
        browser, and what sends a link clicked in Mail here. -->
@@ -127,9 +128,9 @@ cat > "$APP/Contents/Info.plist" <<PLIST
        still wants a sentence to put in its own prompt, and touching the APIs
        without one is a crash rather than a refusal. -->
   <key>NSCameraUsageDescription</key>
-  <string>Websites you visit can ask to use your camera. Search by Codegraff asks you first, every time, for each site.</string>
+  <string>Websites you visit can ask to use your camera. search.codegraff.app asks you first, every time, for each site.</string>
   <key>NSMicrophoneUsageDescription</key>
-  <string>Websites you visit can ask to use your microphone. Search by Codegraff asks you first, every time, for each site.</string>
+  <string>Websites you visit can ask to use your microphone. search.codegraff.app asks you first, every time, for each site.</string>
   <key>NSDownloadsFolderUsageDescription</key>
   <string>Files you download are saved to your Downloads folder.</string>
 </dict>
@@ -147,8 +148,8 @@ IDENTITY="${SEARCH_SIGN_IDENTITY:-$(security find-identity -v -p codesigning 2>/
 # this script, both go in; without it, the app is signed as before, because
 # a restricted entitlement with no profile behind it is an app that won't open.
 ENTITLEMENTS="Search.entitlements"
-# The upstream passkey profile belongs to Office Commun's bundle identifier.
-# A Codegraff-specific profile and matching entitlements are needed here.
+# A passkey profile must match this bundle identifier. A profile for another
+# app cannot be reused here.
 if [ -n "$IDENTITY" ]; then
   codesign --force --deep --timestamp --options runtime \
     --entitlements "$ENTITLEMENTS" \

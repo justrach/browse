@@ -1,19 +1,19 @@
 ---
 name: search-bench
 description: >
-  Drive the Search by Codegraff macOS browser from the repo-root ./bench command: open
+  Drive the search.codegraff.app macOS browser from the repo-root ./bench command: open
   flask-marked bench tabs, wait for load, read text, run JavaScript, click,
   type, submit, screenshot the page, probe window chrome, and install or
-  press Chrome extensions. Use when the user asks to test Search by Codegraff, drive the
+  press Chrome extensions. Use when the user asks to test search.codegraff.app, drive the
   browser, run ./bench, open a page in the browser, screenshot a tab, check a
   panel, or exercise an extension, and when they run /search-bench.
 metadata:
-  short-description: Drive Search by Codegraff with ./bench
+  short-description: Drive search.codegraff.app with ./bench
 ---
 
-# Search by Codegraff bench
+# search.codegraff.app bench
 
-Search by Codegraff is a native Mac browser in this repo. Drive the running app with `./bench` from the repo root. `./bench help` is the command syntax. This file is how to use it without touching the browser a person has open.
+search.codegraff.app is a native Mac browser in this repo. Drive the running app with `./bench` from the repo root. `./bench help` is the command syntax. This file is how to use it without touching the browser a person has open.
 
 ## Which process
 
@@ -25,7 +25,7 @@ Every command goes to one world. Pass the same flag on every call.
 | `--world NAME` | World `NAME` (lowercase letters, digits, hyphens) | `~/Library/Application Support/Search by Codegraff (NAME)/` |
 | none | The installed browser they actually use | `~/Library/Application Support/Search by Codegraff/` |
 
-Use a test world for any work that changes chrome, installs or removes extensions, resizes, sends real key events, or selects a tab. A `swift build` binary under `.build/` is always world `test`, even with no `SEARCH_PROBE`. `./fresh.sh` launches `build/Search by Codegraff.app` with `SEARCH_PROBE` set, which is also a test world.
+Use a test world for any work that changes chrome, installs or removes extensions, resizes, sends real key events, or selects a tab. A `swift build` binary under `.build/` is always world `test`, even with no `SEARCH_PROBE`. `./fresh.sh` launches `build/search.codegraff.app` with `SEARCH_PROBE` set, which is also a test world.
 
 `select`, `key`, `resize`, and `ext-answer` fail on the installed browser. `--yes` skips an extension's install dialog only on a test run.
 
@@ -33,7 +33,7 @@ On the installed browser, only when they asked you to drive that window: `tabs`,
 
 ## Get a test world listening
 
-One process per world. Quit a process only after its executable path is this repo's `build/Search by Codegraff.app` or a `.build/` binary, or its environment contains `SEARCH_PROBE`. Leave installed browser apps alone. `killall` and `osascript` quit can hit an installed app too.
+One process per world. Quit a process only after its executable path is this repo's `build/search.codegraff.app` or a `.build/` binary, or its environment contains `SEARCH_PROBE`. Leave installed browser apps alone. `killall` and `osascript` quit can hit an installed app too.
 
 1. `./bench --test tabs` (or `--world NAME`). A tab list means that world is listening. Do not launch another.
 2. If it prints `Search isn't listening`:
@@ -44,9 +44,9 @@ One process per world. Quit a process only after its executable path is this rep
 
 `./fresh.sh` with no argument deletes that world's folder, settings suite, and WebKit store, then opens it. The suite delete clears the `bench` switch, so a wipe has to be followed by the defaults write, a quit of the process it just opened, and `./fresh.sh again`. Wipe only when they asked for a clean browser.
 
-If `./bench tabs` (no flag) is not listening, ask them to turn on **Settings › General › Let a script drive Search by Codegraff**. Do not write defaults for the installed app.
+If `./bench tabs` (no flag) is not listening, ask them to turn on **Settings › General › Let a script drive search.codegraff.app**. Do not write defaults for the installed app.
 
-`./fresh.sh` builds `build/Search by Codegraff.app` when that bundle is missing.
+`./fresh.sh` builds `build/search.codegraff.app` when that bundle is missing.
 
 ## Tabs that are not theirs
 
