@@ -159,7 +159,22 @@ IDENTITY="${SEARCH_SIGN_IDENTITY:-$(security find-identity -v -p codesigning 2>/
 # a restricted entitlement with no profile behind it is an app that won't open.
 ENTITLEMENTS="Browse.entitlements"
 # A passkey profile must match this bundle identifier. A profile for another
-# app cannot be reused here.
+# app cannot be reused here, and one that doesn't carry the passkey
+# entitlement would sign an app that can't use it — both are refused, and the
+# app is signed without passkeys, as before.
+PROFILE="${SEARCH_PROVISION_PROFILE:-browse.provisionprofile}"
+if [ -n "$IDENTITY" ] && [ -f "$PROFILE" ]; then
+  DECODED="$(security cms -D -i "$PROFILE" 2>/dev/null || true)"
+  APPID="$(printf '%s' "$DECODED" | plutil -extract Entitlements.com\.apple\.application-identifier raw -o - - 2>/dev/null || true)"
+  PASSKEYS="$(printf '%s' "$DECODED" | plutil -extract Entitlements.com\.apple\.developer\.web-browser\.public-key-credential raw -o - - 2>/dev/null || true)"
+  if [ "$APPID" = "WWP9DLJ27P.com.codegraff.search" ] && [ "$PASSKEYS" = "true" ]; then
+    cp "$PROFILE" "$APP/Contents/embedded.provisionprofile"
+    ENTITLEMENTS="Browse.passkeys.entitlements"
+    echo "passkeys: $PROFILE embedded"
+  else
+    echo "note: $PROFILE isn't a Developer ID profile for com.codegraff.search with passkeys (app id: ${APPID:-none}, passkeys: ${PASSKEYS:-no}) — signing without passkeys" >&2
+  fi
+fi
 if [ -n "$IDENTITY" ]; then
   codesign --force --deep --timestamp --options runtime \
     --entitlements "$ENTITLEMENTS" \

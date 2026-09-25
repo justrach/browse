@@ -81,7 +81,7 @@ Nothing else. Codegraff doesn't ship inside the app: it runs the `graff` command
 
 ## Known limits
 
-- Passkeys aren't available yet: they need a provisioning profile of this app's own.
+- Passkeys aren't available yet: they wait on Apple granting browse the browser passkey entitlement (docs/releasing.md).
 - Sync needs Codegraff's server to support it; until it does, Settings › Sync says so.
 - Versions before 1.0.2 don't check for updates; they need the next one downloaded by hand, once.
 

@@ -9,6 +9,8 @@
 #   APPLE_ID                    the Apple Account that notarises
 #   APPLE_APP_PASSWORD          an app-specific password for it
 #   APPLE_TEAM_ID               the team, e.g. WWP9DLJ27P
+# And, for passkeys (optional; without it the app is signed without them):
+#   MACOS_PROVISION_PROFILE     the Developer ID provisioning profile, base64
 name: release
 
 on:
@@ -68,6 +70,16 @@ jobs:
             --password "$APPLE_APP_PASSWORD" --keychain "$KEYCHAIN"
           echo "SEARCH_NOTARY_KEYCHAIN=$KEYCHAIN" >> "$GITHUB_ENV"
           echo "SEARCH_SIGN_IDENTITY=$(security find-identity -v -p codesigning "$KEYCHAIN" | grep -o '"Developer ID Application: [^"]*"' | head -1 | tr -d '"')" >> "$GITHUB_ENV"
+
+      - name: The passkey profile, when there is one
+        env:
+          PROFILE: ${{ secrets.MACOS_PROVISION_PROFILE }}
+        run: |
+          if [ -n "$PROFILE" ]; then
+            echo "$PROFILE" | base64 --decode > browse.provisionprofile
+          else
+            echo "no MACOS_PROVISION_PROFILE — this release goes out without passkeys"
+          fi
 
       - name: Build, sign, notarise
         env:

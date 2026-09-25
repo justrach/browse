@@ -56,3 +56,26 @@ The same steps run on a Mac that has the certificate and a notarytool profile
 SEARCH_NOTARY_PROFILE=<name> ./build.sh release ship
 ./publish.sh github
 ```
+
+## Passkeys
+
+Passkeys in a browser that isn't Safari need an entitlement Apple grants to
+web browsers on request, `com.apple.developer.web-browser.public-key-credential`,
+and a Developer ID provisioning profile that carries it. The app already
+knows what to do with it (Passkeys.swift; Settings › Passwords › Offer
+passkeys); only the signing needs it.
+
+1. On developer.apple.com, in Certificates, Identifiers & Profiles, make an
+   explicit App ID for **com.codegraff.search** under the team, if there
+   isn't one.
+2. Request the **Web Browser Public Key Credential Requests** capability for
+   it (Apple reviews these; it can take a few days). Once granted, it shows
+   under the App ID's Additional Capabilities — switch it on there.
+3. Profiles › + › **Developer ID**, for that App ID and the Developer ID
+   Application certificate. Download it.
+4. Put it next to build.sh as `browse.provisionprofile` (it's ignored by
+   git). `./build.sh` checks it's for com.codegraff.search and carries the
+   passkey entitlement, embeds it, and signs with `Browse.passkeys.entitlements`.
+5. For CI: `base64 -i browse.provisionprofile | gh secret set MACOS_PROVISION_PROFILE -R justrach/browse`.
+
+The profile expires after some years; a new one goes in the same way.
