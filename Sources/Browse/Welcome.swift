@@ -8,7 +8,9 @@ struct WelcomePanel: View {
     @ObservedObject var browser: Browser
     @ObservedObject var prefs: Preferences
 
-    @State private var page = 0
+    /// A test run can open on another page (the welcome.start setting), for
+    /// pictures of it.
+    @State private var page = Store.testing ? Store.settings.integer(forKey: "welcome.start") : 0
     @State private var forward = true
 
     // Bringing things over.

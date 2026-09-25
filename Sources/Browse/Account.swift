@@ -272,7 +272,9 @@ struct AccountCard: View {
                         .padding(.bottom, 12)
                 }
             case .signedOut, .failed:
-                Line("Sign in with Codegraff", failure ?? "Keeps your bookmarks and history in step across your Macs, and lets Codegraff work beside the page") {
+                Line(inline ? "Your Codegraff account" : "Sign in with Codegraff", failure ?? (inline
+                    ? "A code, and one click on codegraff.com to approve it"
+                    : "Keeps your bookmarks and history in step across your Macs, and lets Codegraff work beside the page")) {
                     Pill("Sign in", filled: true) { begin() }
                 }
             }
