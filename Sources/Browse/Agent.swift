@@ -680,19 +680,20 @@ final class Agent: ObservableObject {
         keep()
     }
 
-    /// `graff login`, in Terminal — the sign-in graff names for ACP clients.
-    /// It asks which account and may open a browser to sign in, which is
-    /// Terminal's to host, not ours. A .command file opens there on its own,
-    /// without Search needing leave to drive Terminal.
+    /// Signed in to Codegraff from here, as `graff login` does — the page
+    /// to approve it opens as a tab, and graff starts again once it's done
+    /// (see Account.swift).
     func signIn() {
+        guard let browser = AgentTools.shared.browser else { return }
+        CodegraffAccount.shared.signIn(show: { browser.open($0, foreground: true) }, done: { browser.signedIn() })
+    }
+
+    /// `graff login`, in Terminal, for the providers graff signs in to
+    /// itself — Codex, Kimi and the rest. A .command file opens there on its
+    /// own, without the browser needing leave to drive Terminal.
+    func loginInTerminal() {
         Task {
-            let found: URL?
-            if let program {
-                found = program
-            } else {
-                found = await Agent.locate(custom: prefs.agentPath)?.program
-            }
-            guard let found else {
+            guard let found = await Agent.locate(custom: prefs.agentPath)?.program else {
                 phase = .missing
                 return
             }
@@ -701,19 +702,19 @@ final class Agent: ObservableObject {
             #!/bin/sh
             clear
             \(Agent.quoted(found.path)) login
-            echo
-            echo "Done. Back in browse, press I've signed in."
             """
             do {
                 try body.write(to: script, atomically: true, encoding: .utf8)
                 try FileManager.default.setAttributes([.posixPermissions: 0o700], ofItemAtPath: script.path)
             } catch {
-                entries.append(Entry(kind: .note, text: "Couldn't open Terminal: \(error.localizedDescription)"))
                 return
             }
             NSWorkspace.shared.open(script)
         }
     }
+
+    /// Whether graff is running now, rather than waiting to be asked.
+    var started: Bool { pipe != nil }
 
     // MARK: - talking
 

@@ -56,7 +56,7 @@
     ./bench film peek|unpeek|fold PATH [N] [SECS]  the window drawn N times while it animates → PATH-00.png… — --test runs only
     ./bench ui KEY VALUE               settings/passwords/welcome/history/downloads/bookmarks/hidden on|off,
                                        agent on|off, agentfull on|off, chat N|none (the Nth saved chat, newest 0), rest on, ask WORDS (test run),
-                                       syncnow on, syncjoin CODE, forget URL (test run; probe shows sync),
+                                       syncnow on, syncjoin CODE, forget URL, signin on (test run; probe shows sync, account),
                                        look light|dark|system, sidebar on|off, spaces on|off, hides on|off,
                                        folded on|off, peek on|off
 

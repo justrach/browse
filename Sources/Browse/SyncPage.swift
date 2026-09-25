@@ -14,6 +14,7 @@ struct SyncPage: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 18) {
+            AccountCard(browser: browser)
             Card {
                 Line(
                     "Sync history and bookmarks",
@@ -106,7 +107,7 @@ struct SyncPage: View {
     private var status: (String, String) {
         switch sync.phase {
         case .off: return ("Starting", "In a moment")
-        case .signedOut: return ("Not signed in", "Sync goes through your Codegraff sign-in — run graff login, or sign in from the Codegraff app")
+        case .signedOut: return ("Not signed in", "Sync goes through your Codegraff account — sign in above")
         case .needsCode: return ("Waiting for the code", "Below")
         case .wrongCode: return ("That code doesn't fit", "This Mac's key isn't the one the other Macs use — enter theirs below")
         case .syncing: return ("Syncing…", "History, then bookmarks")

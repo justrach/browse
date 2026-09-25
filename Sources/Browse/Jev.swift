@@ -43,24 +43,8 @@ enum Jev {
     private static var downUntil: Date?
     private static var downWhy = ""
 
-    /// The Codegraff sign-in `graff login` saved, read where graff reads it.
-    /// Read each time, so signing in or out needs no restart.
-    static func key() -> String? {
-        if let key = ProcessInfo.processInfo.environment["CODEGRAFF_API_KEY"], !key.isEmpty { return key }
-        let home = FileManager.default.homeDirectoryForCurrentUser
-        if let data = try? Data(contentsOf: home.appendingPathComponent(".simple-harness-codegraff.json")),
-           let saved = (try? JSONSerialization.jsonObject(with: data)) as? [String: Any],
-           let key = saved["api_key"] as? String, !key.isEmpty {
-            return key
-        }
-        if let data = try? Data(contentsOf: home.appendingPathComponent("forge/.credentials.json")),
-           let saved = (try? JSONSerialization.jsonObject(with: data)) as? [[String: Any]],
-           let entry = saved.first(where: { $0["id"] as? String == "codegraff" }),
-           let key = (entry["auth_details"] as? [String: Any])?["api_key"] as? String, !key.isEmpty {
-            return key
-        }
-        return nil
-    }
+    /// The Codegraff sign-in (see Account.swift).
+    static func key() -> String? { CodegraffAccount.key() }
 
     // MARK: - one drive
 

@@ -384,6 +384,7 @@ final class Bench {
                 "field": browser.editing,
                 "suggesting": browser.suggesting != nil,
                 "sync": Store.testing ? Sync.shared.probe : [:],
+                "account": Store.testing ? CodegraffAccount.shared.probe : [:],
                 "offering": browser.offering != nil,
                 "modal": NSApp.modalWindow.map { "\(type(of: $0)) “\($0.title)”" } ?? "",
                 "look": browser.prefs.look.rawValue,
@@ -1062,6 +1063,9 @@ final class Bench {
             if Store.testing {
                 if let code = request["syncjoin"] as? String { Task { _ = await Sync.shared.join(code) } }
                 if request["syncnow"] as? Bool == true { Sync.shared.now() }
+                if request["signin"] as? Bool == true {
+                    CodegraffAccount.shared.signIn(show: { browser.open($0, foreground: true) }, done: { browser.signedIn() })
+                }
                 if let url = (request["forget"] as? String).flatMap(URL.init(string:)) {
                     browser.history.forget(Address.pretty(url).lowercased())
                 }

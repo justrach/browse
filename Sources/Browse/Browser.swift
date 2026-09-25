@@ -550,6 +550,14 @@ final class Browser: NSObject, ObservableObject {
         announce("Cache cleared")
     }
 
+    /// Signed in to Codegraff just now: whatever needs the sign-in picks it
+    /// up — a graff already running starts again with it, and sync goes.
+    func signedIn() {
+        if agent.started { agent.restart() }
+        Sync.shared.nudge(after: 1)
+        announce("Signed in to Codegraff")
+    }
+
     func clearHistory() {
         history.forget()
         announce("History cleared")

@@ -1,8 +1,8 @@
 import SwiftUI
 
-/// The first time. Four short pages over the window, in the app's own
-/// language: what this is, what to bring over, how to hold it, and whether
-/// links from other apps should come here. Nothing is asked twice, and every
+/// The first time. Five short pages over the window, in the app's own
+/// language: what this is, signing in to Codegraff, what to bring over, how
+/// to hold it, and whether links from other apps should come here. Nothing is asked twice, and every
 /// page can be skipped.
 struct WelcomePanel: View {
     @ObservedObject var browser: Browser
@@ -23,7 +23,7 @@ struct WelcomePanel: View {
     @State private var isDefault = Links.isDefault
     @State private var asked = false
 
-    private let pages = 4
+    private let pages = 5
 
     var body: some View {
         ZStack {
@@ -34,8 +34,9 @@ struct WelcomePanel: View {
                 ZStack {
                     switch page {
                     case 0: welcome
-                    case 1: bring
-                    case 2: hold
+                    case 1: account
+                    case 2: bring
+                    case 3: hold
                     default: links
                     }
                 }
@@ -70,6 +71,13 @@ struct WelcomePanel: View {
                     .lineSpacing(3)
                     .frame(maxWidth: 400)
             }
+        }
+    }
+
+    private var account: some View {
+        VStack(alignment: .leading, spacing: 22) {
+            heading("Sign in with Codegraff.", "One account keeps your bookmarks, history and themes the same on every Mac, sealed so only your Macs can read them — and lets Codegraff work beside the page. Skip it if you like; it's in Settings whenever you want it.")
+            AccountCard(browser: browser, inline: true)
         }
     }
 

@@ -1127,6 +1127,7 @@ struct AgentPage: View {
     @State private var looked = false
 
     var body: some View {
+        AccountCard(browser: browser)
         Card {
             Line(
                 "Codegraff",
@@ -1173,8 +1174,8 @@ struct AgentPage: View {
                 }
             }
             Rule()
-            Line("Sign in", "graff login, in Terminal — a Codegraff account, or Codex, Kimi and the others it knows") {
-                Pill("Sign in…") { agent.signIn() }
+            Line("Other accounts", "graff login, in Terminal — Codex, Kimi and the other providers graff knows") {
+                Pill("Open…") { agent.loginInTerminal() }
             }
         }
         .task(id: prefs.agentPath) {
