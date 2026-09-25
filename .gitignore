@@ -10,3 +10,7 @@ build/
 *.provisionprofile
 *.p12
 *.mobileprovision
+
+# Local agent state.
+.graff/
+.harness/

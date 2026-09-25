@@ -40,14 +40,27 @@ jobs:
           ref: ${{ github.event.inputs.tag || github.ref }}
 
       - name: Xcode 16
+        if: steps.done.outputs.skip != 'true'
         run: sudo xcode-select -s /Applications/Xcode_16.4.app || sudo xcode-select -s "$(ls -d /Applications/Xcode_16*.app | tail -1)"
 
+      - name: Published already, by hand from a Mac?
+        id: done
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          if gh release view "$TAG" -R "$GITHUB_REPOSITORY" --json assets -q '.assets[].name' 2>/dev/null | grep -qx appcast.json; then
+            echo "$TAG is already published with its appcast — nothing to do"
+            echo "skip=true" >> "$GITHUB_OUTPUT"
+          fi
+
       - name: The tag is the version
+        if: steps.done.outputs.skip != 'true'
         run: |
           VERSION="$(tr -d '[:space:]' < VERSION)"
           [ "v$VERSION" = "$TAG" ] || { echo "VERSION says $VERSION but the tag is $TAG" >&2; exit 1; }
 
       - name: A keychain of the run's own, with the certificate in it
+        if: steps.done.outputs.skip != 'true'
         env:
           CERTIFICATE: ${{ secrets.MACOS_CERTIFICATE }}
           CERTIFICATE_PASSWORD: ${{ secrets.MACOS_CERTIFICATE_PASSWORD }}
@@ -72,6 +85,7 @@ jobs:
           echo "SEARCH_SIGN_IDENTITY=$(security find-identity -v -p codesigning "$KEYCHAIN" | grep -o '"Developer ID Application: [^"]*"' | head -1 | tr -d '"')" >> "$GITHUB_ENV"
 
       - name: The passkey profile, when there is one
+        if: steps.done.outputs.skip != 'true'
         env:
           PROFILE: ${{ secrets.MACOS_PROVISION_PROFILE }}
         run: |
@@ -82,17 +96,20 @@ jobs:
           fi
 
       - name: Build, sign, notarise
+        if: steps.done.outputs.skip != 'true'
         env:
           SEARCH_NOTARY_PROFILE: release
         run: ./build.sh release ship
 
       - name: Checked the way a Mac that downloads it will check it
+        if: steps.done.outputs.skip != 'true'
         run: |
           spctl --assess --type open --context context:primary-signature -v build/browse.dmg
           xcrun stapler validate build/browse.dmg
           codesign --verify --deep --strict build/browse.app
 
       - name: Published — installed copies pick it up from here
+        if: steps.done.outputs.skip != 'true'
         env:
           GH_TOKEN: ${{ github.token }}
         run: ./publish.sh github

@@ -11,6 +11,8 @@ in [ROADMAP.md](ROADMAP.md).
 
 ## Unreleased
 
+## 1.0.2 — 25 September 2026
+
 ### Added
 
 - A Mac whose web engine is missing Apple's security fixes is told so, with a button to Software Update: browse runs on the WebKit built into macOS, and now knows when that WebKit is behind. It's in Settings › About too.
