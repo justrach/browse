@@ -437,6 +437,8 @@ final class Tab: ObservableObject, Identifiable {
         controller.addUserScript(
             WKUserScript(source: Swipe.calm, injectionTime: .atDocumentStart, forMainFrameOnly: true)
         )
+        // Google's sign-in card without a white box round it (Frames.swift).
+        controller.addUserScript(Frames.userScript)
         // Every frame: a swipe over an embedded map is the map's, and only the
         // map's own document can say so.
         controller.addUserScript(

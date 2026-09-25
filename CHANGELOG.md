@@ -38,6 +38,7 @@ in [ROADMAP.md](ROADMAP.md).
 
 ### Fixed
 
+- Google's "Sign in with Google" card no longer sits in a white box on dark sites like ChatGPT.
 - Codegraff's fill set every field but a dropdown, which it said wouldn't take the value.
 - The stand-in traffic lights drawn while Search is in the background are no longer redrawn each time the window changes screen or size, only when they move.
 - An empty tab no longer works the processor while it waits: the slow breath under the address field was redrawn by the app every frame, about a sixth of a core with nothing happening. The same breath now runs in macOS's own animation layer, at no cost to Search.
