@@ -20,8 +20,8 @@ enum Store {
     }
 
     /// Which test world a test run lives in. SEARCH_PROBE=1, or a run from
-    /// the build folder, is the test world, "Search (test)". SEARCH_PROBE=
-    /// <name> is a world of its own, "Search (<name>)", with settings and
+    /// the build folder, is the test world, "browse (test)". SEARCH_PROBE=
+    /// <name> is a world of its own, "browse (<name>)", with settings and
     /// WebKit stores of its own: two sessions testing at once, or a
     /// measurement that needs a browser nobody has installed anything in,
     /// never borrow each other's. Nil for the browser somebody is using.
@@ -76,12 +76,21 @@ enum Store {
         return UUID(uuidString: text)!
     }
 
-    /// The fork has its own profile. Upstream Search and Office Browser data
-    /// remain where those apps left them.
+    /// browse's own profile. Upstream Search and Office Browser data remain
+    /// where those apps left them.
     static let folder: URL = {
         let support = FileManager.default
             .urls(for: .applicationSupportDirectory, in: .userDomainMask)[0]
-        return support.appendingPathComponent(world.map { "Search by Codegraff (\($0))" } ?? "Search by Codegraff", isDirectory: true)
+        let here = support.appendingPathComponent(world.map { "browse (\($0))" } ?? "browse", isDirectory: true)
+        // Where it was kept while the app was Search by Codegraff: moved
+        // whole, once, the first time this runs. It's the only way in to the
+        // folder, so nothing is read or written before the move.
+        let before = support.appendingPathComponent(world.map { "Search by Codegraff (\($0))" } ?? "Search by Codegraff", isDirectory: true)
+        let files = FileManager.default
+        if !files.fileExists(atPath: here.path), files.fileExists(atPath: before.path) {
+            try? files.moveItem(at: before, to: here)
+        }
+        return here
     }()
 
     static func file(_ name: String) -> URL {

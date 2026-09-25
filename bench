@@ -60,10 +60,10 @@
                                        look light|dark|system, sidebar on|off, spaces on|off, hides on|off,
                                        folded on|off, peek on|off
 
-Needs Settings › General › "Let a script drive Search" switched on in the
+Needs Settings › General › "Let a script drive browse" switched on in the
 running app. IDs are the first characters of a tab's id, as `tabs` prints
 them. With --test, talks to a SEARCH_PROBE run instead of the real one;
-with --world NAME, to a SEARCH_PROBE=NAME run, the world "Search (NAME)".
+with --world NAME, to a SEARCH_PROBE=NAME run, the world "browse (NAME)".
 """
 
 import json
@@ -72,7 +72,7 @@ import socket
 import sys
 
 def folder(world):
-    name = f"Search ({world})" if world else "Search"
+    name = f"browse ({world})" if world else "browse"
     return os.path.expanduser(f"~/Library/Application Support/{name}")
 
 def ask(path, request):
@@ -80,8 +80,8 @@ def ask(path, request):
         try:
             s.connect(path)
         except (FileNotFoundError, ConnectionRefusedError):
-            sys.exit("Search isn't listening — is it open, with Settings › General › "
-                     "“Let a script drive Search” on?")
+            sys.exit("browse isn't listening — is it open, with Settings › General › "
+                     "“Let a script drive browse” on?")
         s.sendall((json.dumps(request) + "\n").encode())
         chunks = []
         while True:

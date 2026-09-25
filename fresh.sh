@@ -1,10 +1,10 @@
 #!/bin/bash
 # A first launch, without touching the browser you actually use.
 #
-#   ./fresh.sh          wipe the test world and open Search as a newcomer
+#   ./fresh.sh          wipe the test world and open browse as a newcomer
 #   ./fresh.sh again    open the test copy as it was left, no wipe
 #
-#   SEARCH_PROBE=NAME ./fresh.sh   the same for a named world, "Search (NAME)"
+#   SEARCH_PROBE=NAME ./fresh.sh   the same for a named world, "browse (NAME)"
 #
 # A run with SEARCH_PROBE=1 keeps everything apart from the real one: its own
 # folder under Application Support, its own settings suite, its own WebKit
@@ -29,7 +29,7 @@ fi
 STORE=$(printf '5E4C%04X-%04X-4000-8000-000000000001' $((HASH >> 16)) $((HASH & 0xFFFF)))
 
 if [ "${1:-}" != "again" ]; then
-  rm -rf "$HOME/Library/Application Support/Search by Codegraff ($WORLD)"
+  rm -rf "$HOME/Library/Application Support/browse ($WORLD)"
   defaults delete "$SUITE" 2>/dev/null || true
   # Store.probeStore(1), the fixed identifier of the world's website data.
   rm -rf "$HOME/Library/WebKit/com.codegraff.search/WebsiteDataStore/$STORE"

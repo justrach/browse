@@ -1,12 +1,12 @@
 ---
-name: search-bench
+name: browse-bench
 description: >
   Drive the browse macOS browser from the repo-root ./bench command: open
   flask-marked bench tabs, wait for load, read text, run JavaScript, click,
   type, submit, screenshot the page, probe window chrome, and install or
   press Chrome extensions. Use when the user asks to test browse, drive the
   browser, run ./bench, open a page in the browser, screenshot a tab, check a
-  panel, or exercise an extension, and when they run /search-bench.
+  panel, or exercise an extension, and when they run /browse-bench.
 metadata:
   short-description: Drive browse with ./bench
 ---
@@ -21,9 +21,9 @@ Every command goes to one world. Pass the same flag on every call.
 
 | Flag | Whose browser | Socket folder |
 |---|---|---|
-| `--test` | World `test` | `~/Library/Application Support/Search by Codegraff (test)/` |
-| `--world NAME` | World `NAME` (lowercase letters, digits, hyphens) | `~/Library/Application Support/Search by Codegraff (NAME)/` |
-| none | The installed browser they actually use | `~/Library/Application Support/Search by Codegraff/` |
+| `--test` | World `test` | `~/Library/Application Support/browse (test)/` |
+| `--world NAME` | World `NAME` (lowercase letters, digits, hyphens) | `~/Library/Application Support/browse (NAME)/` |
+| none | The installed browser they actually use | `~/Library/Application Support/browse/` |
 
 Use a test world for any work that changes chrome, installs or removes extensions, resizes, sends real key events, or selects a tab. A `swift build` binary under `.build/` is always world `test`, even with no `SEARCH_PROBE`. `./fresh.sh` launches `build/browse.app` with `SEARCH_PROBE` set, which is also a test world.
 
@@ -66,7 +66,7 @@ If `./bench tabs` (no flag) is not listening, ask them to turn on **Settings ›
 id=$(./bench --test open https://example.com)
 ./bench --test wait "$id" 20
 ./bench --test text "$id"
-./bench --test shot "$id" /tmp/search-bench.png
+./bench --test shot "$id" /tmp/browse-bench.png
 ./bench --test close "$id"
 ```
 

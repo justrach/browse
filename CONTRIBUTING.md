@@ -41,4 +41,4 @@ Open pull requests against this repository. Explain the behavior you changed, ho
 
 ## Reporting a bug
 
-Open an issue with: what you did, what you expected, what happened instead, and your macOS version. A crash log, if there is one, lives at `~/Library/Application Support/Search by Codegraff/crash.log` — it stays on your Mac unless you attach it yourself.
+Open an issue with: what you did, what you expected, what happened instead, and your macOS version. A crash log, if there is one, lives at `~/Library/Application Support/browse/crash.log` — it stays on your Mac unless you attach it yourself.

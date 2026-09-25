@@ -840,8 +840,8 @@ private struct EntryRow: View {
 
     /// A tool's name as graff gives it, said the way a person would.
     static func said(_ entry: Agent.Entry) -> String {
-        let prefix = "mcp__search__"
-        guard entry.text.hasPrefix(prefix) else { return entry.text }
+        // mcp__search__ in chats from before the app was browse.
+        guard let prefix = ["mcp__browse__", "mcp__search__"].first(where: entry.text.hasPrefix) else { return entry.text }
         let tool = String(entry.text.dropFirst(prefix.count))
         return [
             "search": "Searching the web", "read_pages": "Reading pages", "open": "Opening a page",
@@ -948,7 +948,7 @@ private struct EntryRow: View {
     /// worked in the browser, through Search's own tools.
     static func icon(_ entry: Agent.Entry) -> String {
         let title = entry.text.lowercased()
-        if title.contains("search__") || title.hasPrefix("search.") || title.hasPrefix("search:") { return "safari" }
+        if title.contains("browse__") || title.contains("search__") || title.hasPrefix("browse.") || title.hasPrefix("search.") || title.hasPrefix("search:") { return "safari" }
         switch entry.act {
         case "search": return "magnifyingglass"
         case "fetch": return "globe"

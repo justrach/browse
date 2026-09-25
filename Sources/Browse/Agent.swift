@@ -500,7 +500,7 @@ final class Agent: ObservableObject {
         call("initialize", [
             "protocolVersion": 1,
             "clientCapabilities": ["fs": [String: Any]()],
-            "clientInfo": ["name": "search", "title": "Search", "version": Updater.version],
+            "clientInfo": ["name": "browse", "title": "browse", "version": Updater.version],
         ]) { [weak self] result in
             guard let self else { return }
             switch result {
@@ -1026,7 +1026,7 @@ final class Agent: ObservableObject {
     private static let introduction = """
     You are Codegraff, running inside browse, the web browser the user is using right now; \
     they are talking to you from beside the page, or from a page of its own. For anything on \
-    the web use the `search` MCP tools (mcp__search__*): `search`, then `read_pages` with many \
+    the web use the `browse` MCP tools (mcp__browse__*): `search`, then `read_pages` with many \
     links at once — they load in parallel in pages the user doesn't see — and `open` a page to \
     act on it. For steps on a page — a form, a search and its filters — `drive` takes the goal \
     and the values to type and does the clicking and typing quickly; `form_fields` and `fill` \
@@ -1193,7 +1193,7 @@ final class Agent: ObservableObject {
         environment["GRAFF_AUTO_ISOLATE"] = "0"
         // The browser's tools come ready to call, not folded away behind
         // graff's search for tools: in a browser they are the point.
-        environment["GRAFF_MCP_EAGER"] = "search"
+        environment["GRAFF_MCP_EAGER"] = "browse"
         // Straight to SSE. graff's codex WebSocket prewarm goes out without a
         // model, is refused, and the first turn of every session retries a
         // socket and falls back — ~7 s of a 12 s "hey there", paid again by

@@ -14,7 +14,7 @@ import Security
 // newer.
 //
 // What the updater leaves alone, on purpose: everything in
-// ~/Library/Application Support/Search by Codegraff, the defaults under
+// ~/Library/Application Support/browse, the defaults under
 // com.codegraff.search, and the keychain. The session, the pins, the
 // history, the passwords — none of it is read, moved or rewritten here. Only
 // the bundle changes hands, and it keeps its bundle id and its signing
@@ -35,7 +35,7 @@ final class Updater: ObservableObject {
     /// replace a Codegraff build with a different app. SEARCH_FEED points a
     /// test run at a feed of its own.
     static let feed: URL? = ProcessInfo.processInfo.environment["SEARCH_FEED"].flatMap(URL.init(string:))
-        ?? URL(string: "https://github.com/justrach/search/releases/latest/download/appcast.json")
+        ?? URL(string: "https://github.com/justrach/browse/releases/latest/download/appcast.json")
     static var configured: Bool { feed != nil }
 
     private static var overridden: Bool {

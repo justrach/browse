@@ -101,7 +101,7 @@ final class AgentTools {
         guard let port else { return false }
         let config: [String: Any] = [
             "mcpServers": [
-                "search": [
+                "browse": [
                     "url": "http://127.0.0.1:\(port)/mcp",
                     "headers": ["Authorization": "Bearer \(token)"],
                 ],
@@ -190,7 +190,7 @@ final class AgentTools {
             reply["result"] = [
                 "protocolVersion": params["protocolVersion"] as? String ?? "2025-06-18",
                 "capabilities": ["tools": ["listChanged": false]],
-                "serverInfo": ["name": "search", "title": "Search", "version": Updater.version],
+                "serverInfo": ["name": "browse", "title": "browse", "version": Updater.version],
                 "instructions": AgentTools.instructions,
             ]
         case "ping":

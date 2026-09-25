@@ -177,7 +177,7 @@ final class Links: NSObject, NSApplicationDelegate {
         var text = URLComponents()
         text.scheme = "https"
         text.host = "github.com"
-        text.path = "/justrach/search/issues/new"
+        text.path = "/justrach/browse/issues/new"
         text.queryItems = [
             URLQueryItem(name: "title", value: "browse feedback"),
             URLQueryItem(name: "body", value: "\n\n—\nbrowse \(Updater.version), build \(Updater.build), macOS \(ProcessInfo.processInfo.operatingSystemVersionString)"),

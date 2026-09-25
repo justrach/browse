@@ -4,7 +4,7 @@ browse is a WebKit browser for the Mac with Codegraff built in.
 The browser is this repository; the agent is `graff`, from
 [justrach/codegraff](https://github.com/justrach/codegraff). Read
 [CONTRIBUTING.md](CONTRIBUTING.md) for what gets merged, and
-`skill/search-bench/SKILL.md` before driving the app.
+`skill/browse-bench/SKILL.md` before driving the app.
 
 ## Search runs on graff: where each half lives
 

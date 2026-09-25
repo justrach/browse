@@ -3,7 +3,7 @@
 # the disk image for people, the ZIP for the updater, and the appcast that
 # names them both.
 #
-#   ./publish.sh github            a GitHub release, vVERSION, on justrach/search
+#   ./publish.sh github            a GitHub release, vVERSION, on justrach/browse
 #   ./publish.sh <folder>          or a folder a site serves
 #
 # ./build.sh release ship makes them first (release dmg makes them too, but
@@ -24,7 +24,7 @@ xcrun stapler validate -q "build/browse.dmg" >/dev/null 2>&1 \
   || echo "note: build/browse.dmg is not notarised — ./build.sh release ship does that" >&2
 
 if [ "$1" = "github" ]; then
-  REPO="justrach/search"
+  REPO="justrach/browse"
   # The appcast has to name this release, or the updater would fetch another
   # version's ZIP — or nothing.
   grep -q "/releases/download/v$VERSION/" build/appcast.json \

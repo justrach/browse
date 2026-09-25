@@ -5,7 +5,7 @@ import AppKit
 // there is nothing else to learn and nothing else to press.
 
 @main
-struct SearchApp: App {
+struct BrowseApp: App {
     @StateObject private var browser = Browser()
     /// Links from other apps, and the Dock icon.
     @NSApplicationDelegateAdaptor(Links.self) private var links

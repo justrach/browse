@@ -46,11 +46,11 @@ BUILD="$(date +%Y%m%d%H%M)"
 MINIMUM="14.0"
 
 swift build -c "$CONFIG"
-BINARY=".build/$CONFIG/Search"
+BINARY=".build/$CONFIG/Browse"
 
 rm -rf "$APP"
 mkdir -p "$APP/Contents/MacOS" "$APP/Contents/Resources"
-cp "$BINARY" "$APP/Contents/MacOS/Search"
+cp "$BINARY" "$APP/Contents/MacOS/Browse"
 cp LICENSE LICENSE.MIT "$APP/Contents/Resources/"
 
 # Symbols stay out of the app. The linker leaves every function's name and a
@@ -58,11 +58,11 @@ cp LICENSE LICENSE.MIT "$APP/Contents/Resources/"
 # what the app weighed (6.5 MB of binary, 2.7 without them), and nothing the
 # app reads while it runs. They are kept beside the build instead, as a dSYM
 # that turns the addresses in a crash report back into names (Console, or
-# atos -o "build/browse.app.dSYM/Contents/Resources/DWARF/Search").
+# atos -o "build/browse.app.dSYM/Contents/Resources/DWARF/Browse").
 if [ "$CONFIG" = "release" ]; then
   rm -rf "$APP.dSYM"
   dsymutil "$BINARY" -o "$APP.dSYM" 2>/dev/null || echo "no dSYM this time" >&2
-  strip -x "$APP/Contents/MacOS/Search"
+  strip -x "$APP/Contents/MacOS/Browse"
 fi
 
 # Build the macOS icon from the Codegraff artwork used in the app.
@@ -91,7 +91,7 @@ cat > "$APP/Contents/Info.plist" <<PLIST
 <dict>
   <key>CFBundleName</key><string>$NAME</string>
   <key>CFBundleDisplayName</key><string>$NAME</string>
-  <key>CFBundleExecutable</key><string>Search</string>
+  <key>CFBundleExecutable</key><string>Browse</string>
   <key>CFBundleIdentifier</key><string>com.codegraff.search</string>
   <key>CFBundlePackageType</key><string>APPL</string>
   <key>CFBundleShortVersionString</key><string>$VERSION</string>
@@ -147,7 +147,7 @@ IDENTITY="${SEARCH_SIGN_IDENTITY:-$(security find-identity -v -p codesigning 2>/
 # Developer ID provisioning profile that carries it. With the profile next to
 # this script, both go in; without it, the app is signed as before, because
 # a restricted entitlement with no profile behind it is an app that won't open.
-ENTITLEMENTS="Search.entitlements"
+ENTITLEMENTS="Browse.entitlements"
 # A passkey profile must match this bundle identifier. A profile for another
 # app cannot be reused here.
 if [ -n "$IDENTITY" ]; then
@@ -209,7 +209,7 @@ echo "packed: $ZIP"
 # characters JSON minds escaped, is the line under the version in Settings.
 # By default, the GitHub release ./publish.sh github makes for this VERSION —
 # the feed the app reads is that release's appcast.json.
-BASE="${SEARCH_DOWNLOAD_URL:-https://github.com/justrach/search/releases/download/v$VERSION}"
+BASE="${SEARCH_DOWNLOAD_URL:-https://github.com/justrach/browse/releases/download/v$VERSION}"
 BASE="${BASE%/}"
 NOTES=""
 if [ -f NOTES.md ]; then

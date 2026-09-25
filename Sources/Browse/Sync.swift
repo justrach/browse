@@ -590,7 +590,8 @@ private enum Keychain {
         [
             kSecClass as String: kSecClassGenericPassword,
             kSecAttrService as String: "com.codegraff.browse.sync",
-            kSecAttrAccount as String: Store.folder.lastPathComponent,
+            // By profile, not folder: the folder was renamed once already.
+            kSecAttrAccount as String: Store.world.map { "browse (\($0))" } ?? "browse",
         ]
     }
 
