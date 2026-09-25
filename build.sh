@@ -4,8 +4,7 @@
 # fetches.
 #
 #   ./build.sh                 debug-free release build, ad-hoc signed: runs here
-#   ./build.sh release dmg     + branded DMG and ZIP; with
-#                                SEARCH_DOWNLOAD_URL, also appcast.json
+#   ./build.sh release dmg     + branded DMG, ZIP and appcast.json
 #   ./build.sh release ship    + both notarised, the DMG stapled
 #
 # Same shape as the one next door: SwiftPM builds the executable, and a macOS
@@ -23,8 +22,9 @@
 #     (SEARCH_SIGN_IDENTITY names it; otherwise the first one found is used)
 #   - a notarytool profile: xcrun notarytool store-credentials "search"
 #     (SEARCH_NOTARY_PROFILE names it; default "search")
-#   - SEARCH_DOWNLOAD_URL, the https folder the artifacts are served from,
-#     for the appcast. No upstream release address is used by this fork.
+#   - nothing else: the appcast names this VERSION's GitHub release, which
+#     ./publish.sh github makes. SEARCH_DOWNLOAD_URL names another https
+#     folder instead. No upstream release address is used by this fork.
 #
 # NOTES.md, next to this script, is what's new: newest release first, one
 # paragraph each. The first paragraph goes into the appcast, and from there
@@ -207,7 +207,9 @@ echo "packed: $ZIP"
 
 # What the updater reads. The first paragraph of NOTES.md, with the two
 # characters JSON minds escaped, is the line under the version in Settings.
-BASE="${SEARCH_DOWNLOAD_URL:-}"
+# By default, the GitHub release ./publish.sh github makes for this VERSION —
+# the feed the app reads is that release's appcast.json.
+BASE="${SEARCH_DOWNLOAD_URL:-https://github.com/justrach/search/releases/download/v$VERSION}"
 BASE="${BASE%/}"
 NOTES=""
 if [ -f NOTES.md ]; then

@@ -29,9 +29,13 @@ import Security
 final class Updater: ObservableObject {
     static let shared = Updater()
 
-    /// This fork has no release feed until its distributor configures one.
-    /// Never ask the upstream Search feed to replace a Codegraff build.
+    /// The appcast attached to this repository's newest GitHub release —
+    /// `latest/download` always names the newest one, so the address never
+    /// changes. Never the upstream Search feed: that one would offer to
+    /// replace a Codegraff build with a different app. SEARCH_FEED points a
+    /// test run at a feed of its own.
     static let feed: URL? = ProcessInfo.processInfo.environment["SEARCH_FEED"].flatMap(URL.init(string:))
+        ?? URL(string: "https://github.com/justrach/search/releases/latest/download/appcast.json")
     static var configured: Bool { feed != nil }
 
     private static var overridden: Bool {
