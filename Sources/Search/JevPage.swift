@@ -67,7 +67,15 @@ extension Jev {
             delta = raw["delta"] as? Int ?? 0
         }
 
-        /// What the script that does it is handed.
+        /// A box's state in words, for the table and the history: Jev reads
+    /// " — checked" far more surely than a separate field, and without it
+    /// flips a box it has already set.
+    var state: String {
+        guard let checked = states["checked"] else { return "" }
+        return checked == "true" ? " — checked" : " — not checked"
+    }
+
+    /// What the script that does it is handed.
         var action: [String: Any] { ["node": node, "kind": kind, "value": value, "delta": delta] }
     }
 
@@ -135,7 +143,7 @@ extension Jev {
                     elements[at]["options"] = options
                 }
                 var criterion: [String: Any] = [
-                    "element": "[\(index)] \(control.label)",
+                    "element": "[\(index)] \(control.label)\(control.state)",
                     "current_value": control.kind == "select" ? control.current : control.value,
                     "role": control.role,
                 ]

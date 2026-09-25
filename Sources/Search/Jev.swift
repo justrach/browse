@@ -132,7 +132,9 @@ enum Jev {
                 continue
             }
             let changed = next.mark != page.mark
-            history.append(Step(label: control.label, kind: control.kind, text: text, changed: changed))
+            // A box says what it is now, so the next step doesn't set it again.
+            let now = next.controls.first { $0.node == control.node && $0.kind == control.kind }?.state ?? ""
+            history.append(Step(label: control.label + now, kind: control.kind, text: text, changed: changed))
             page = next
             stalls = changed || control.kind == "wait" ? 0 : stalls + 1
             if stalls >= 3 {
