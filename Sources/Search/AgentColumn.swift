@@ -1154,6 +1154,16 @@ struct AgentPage: View {
                 ))
             }
             Rule()
+            Line(
+                "Quick steps with Jev",
+                "On a form or a search's filters, Jev picks each click and field in one quick call, through your Codegraff sign-in, and Codegraff says what gets typed. The page's words and controls go to Jev as they do to Codegraff's model"
+            ) {
+                Switch(on: Binding(
+                    get: { prefs.agentJev },
+                    set: { prefs.agentJev = $0 }
+                ))
+            }
+            Rule()
             Line("graff", location) {
                 HStack(spacing: 6) {
                     if !prefs.agentPath.isEmpty {

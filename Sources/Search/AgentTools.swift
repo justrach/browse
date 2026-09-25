@@ -216,8 +216,11 @@ final class AgentTools {
     can open it. For research, `search` first, then `read_pages` with every promising link at \
     once — it loads them in parallel — rather than one page at a time. Pages read that way \
     are closed once read; `open` one to keep it. `open` a page to act on \
-    it (click, type, submit, run_js, screenshot). For a form, `form_fields` then one `fill` with \
-    every field, then check what it says each holds. `tabs` lists the user's own tabs too; one \
+    it (click, type, submit, run_js, screenshot). For a task of several steps on a page — a \
+    search with its filters, a form, a date picker — `drive` it: give the whole goal and every \
+    value to type, and Jev does the steps quickly; then check the page. Without Jev, or for a \
+    plain form, `form_fields` then one `fill` with every field, then check what it says each \
+    holds. `tabs` lists the user's own tabs too; one \
     of theirs can be read or acted on by its id. `show` puts a page in front of the user as a tab.
     """
 
@@ -285,6 +288,12 @@ final class AgentTools {
             ],
             "page": page,
         ], required: ["fields"]),
+        tool("drive", "Carry out a goal of several steps on one page — a search form, its filters, a sign-up, a date picker — fast: Jev picks each click, choice and field in one quick call a step, and types only the values you give it. Returns each step, why it stopped, and the page as it is now. It stops before paying, sending, posting, booking, deleting or creating an account, and when a field wants a value you didn't give — call again with it. Check the page after; if Jev is unavailable, use form_fields, fill and click.", [
+            "goal": ["type": "string", "description": "What should be true on the page when it's done, in full: every field, choice and filter."],
+            "values": ["type": "array", "items": ["type": "string"], "description": "Every text the goal needs typed, each exactly as it should be typed — a name, an email, a city, a search. Nothing is made up past these."],
+            "steps": ["type": "integer", "description": "Most steps to take. 25 unless asked."],
+            "page": page,
+        ], required: ["goal"]),
         tool("run_js", "Run JavaScript in a page and return its value.", [
             "script": ["type": "string", "description": "An expression, or a function called at once."],
             "page": page,
@@ -416,6 +425,21 @@ final class AgentTools {
                 try? await Task.sleep(nanoseconds: 400_000_000)
                 await target.settled()
                 return AgentTools.said(["page": target.id, "title": target.title, "url": target.address])
+            }
+
+        case "drive":
+            guard browser.prefs.agentJev else {
+                return AgentTools.failed("drive is switched off in Settings › Agent. Use form_fields, fill and click.")
+            }
+            guard let goal = (arguments["goal"] as? String)?.trimmingCharacters(in: .whitespacesAndNewlines), !goal.isEmpty else {
+                return AgentTools.failed("drive needs a goal")
+            }
+            let values = (arguments["values"] as? [Any] ?? []).compactMap { $0 as? String ?? ($0 as? NSNumber)?.stringValue }
+            let steps = min(max(arguments["steps"] as? Int ?? 25, 1), 60)
+            return await on(arguments, browser) { target in
+                let (said, failed) = await Jev.drive(goal: goal, values: values, steps: steps, on: target.web)
+                self.seen(target)
+                return failed ? AgentTools.failed(said) : AgentTools.text("\(target.id) · " + said)
             }
 
         case "run_js":

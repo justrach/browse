@@ -39,6 +39,8 @@ Ask about the page you're on with ⌘↩ in the address field or ⇧⌘A, and th
 
 It can use the browser too: search, read many pages at once, click, type, and **fill in forms**. It reads a form the way you do (labels, choices, what's required) and fills it in on your tab in front of you. It's told to ask before sending anything that pays, posts, books or signs you up, so check what it has filled before it submits anything that matters.
 
+For work of many small steps, like a search with its filters or a date picker, Codegraff can hand the clicking to [Jev](https://docs.typesafe.ai/introduction), the way [jev-ultrafast](https://github.com/browser-use/jev-ultrafast) does. Each step is one quick call that picks the action and the element. Codegraff's model still plans the task and gives Jev the text to type, and Jev doesn't make up any text of its own. It goes through your Codegraff sign-in. Settings › Agent › Quick steps with Jev turns it off.
+
 ![Codegraff has filled in a pizza order form on the page and says it did not submit it](docs/screenshots/fill-a-form.png)
 
 The model picker under the field searches every model your Codegraff account reaches.
@@ -47,7 +49,7 @@ The model picker under the field searches every model your Codegraff account rea
 
 The browser doesn't ship an agent. It runs the `graff` command already on your Mac, the one the [Codegraff](https://github.com/justrach/codegraff) app installs, and uses your own Codegraff sign-in. Without it the browser works as normal, and the Ask tab offers to get it for you.
 
-- **What leaves your Mac:** what you type to Codegraff, and the text of the page when you ask about it, go to the model provider your Codegraff account uses. Nothing else does.
+- **What leaves your Mac:** what you type to Codegraff, and the text of the page when you ask about it, go to the model provider your Codegraff account uses. When Jev takes the steps, the page's visible words and controls go to Jev through Codegraff. Password fields never go. Nothing else leaves.
 - **It stays light:** by default it runs with the browser's tools and its own, not every MCP server your other apps know about (Settings › Agent can include them). After ten quiet minutes it stops, and your next message picks the same conversation up.
 - **It acts without stopping to ask** before each step, as `graff acp --yolo` does, including commands and file edits on your Mac. Treat it as you would any agent with those powers.
 

@@ -157,6 +157,11 @@ final class Preferences: ObservableObject {
     @Published var agentAllTools: Bool {
         didSet { store.set(agentAllTools, forKey: "agent.alltools") }
     }
+    /// Whether Codegraff's `drive` tool may ask Jev to pick its steps on a
+    /// page, through the Codegraff sign-in (see Jev.swift).
+    @Published var agentJev: Bool {
+        didSet { store.set(agentJev, forKey: "agent.jev") }
+    }
     /// Where `graff` is, when it isn't anywhere Search already looks.
     @Published var agentPath: String {
         didSet { store.set(agentPath, forKey: "agent.path") }
@@ -234,6 +239,7 @@ final class Preferences: ObservableObject {
         usesAgent = store.object(forKey: "agent") as? Bool ?? true
         shareStats = store.bool(forKey: "stats.share")
         agentAllTools = store.bool(forKey: "agent.alltools")
+        agentJev = store.object(forKey: "agent.jev") as? Bool ?? true
         agentPath = store.string(forKey: "agent.path") ?? ""
         agentModel = store.string(forKey: "agent.model") ?? ""
         agentEffort = store.string(forKey: "agent.effort") ?? ""
