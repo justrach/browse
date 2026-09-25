@@ -17,6 +17,7 @@ Tabs and the page, and nothing else in the way.
 - **Built in, not bolted on.** An ad and tracker blocker that runs before the page loads, reading mode (⇧⌘R), video that floats above everything (⇧⌘P), and ⇧⌘H to hide anything on a site for good.
 - **Passwords in your keychain,** offered once a sign-in has actually worked.
 - **Chrome extensions** from the Chrome Web Store, on macOS 15.4 or later.
+- **Peek, a bookmarks bar, a small window for links from other apps** — shift-click a link to look at it without leaving the page; each of these is off until you turn it on in Settings.
 - **Small.** It runs on WebKit, the engine already in macOS, so the app is a few megabytes and opens at once.
 
 ## Themes
