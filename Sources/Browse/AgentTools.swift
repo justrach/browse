@@ -914,12 +914,23 @@ extension Target {
         }
     }
 
-    /// Until the page has stopped loading, and a beat for its own scripts,
-    /// or fifteen seconds, whichever is first.
+    /// Until there is something to read: the page stopped loading — or its
+    /// document is parsed, has words on it, and has stopped growing, which on
+    /// a page still pulling in its ads and trackers is long before it stops.
+    /// Then a beat for its own scripts. Fifteen seconds at most. Waiting for
+    /// the last tracker cost a read 15 s on a page whose text was there in
+    /// two (25 Sep 2026); stopping at the first words read a tenth short on
+    /// pages that fill in their stories just after.
     func settled() async {
         let limit = Date().addingTimeInterval(15)
         try? await Task.sleep(nanoseconds: 250_000_000)
+        var last = -1
         while web.isLoading, Date() < limit {
+            let (state, _) = await run("document.readyState + '|' + (document.body ? document.body.innerText.length : 0)")
+            let parts = (state as? String)?.split(separator: "|") ?? []
+            let length = parts.count == 2 ? Int(parts[1]) ?? 0 : 0
+            if parts.count == 2, parts[0] != "loading", length > 400, length == last { break }
+            last = length
             try? await Task.sleep(nanoseconds: 150_000_000)
         }
         try? await Task.sleep(nanoseconds: 300_000_000)
