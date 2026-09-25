@@ -211,7 +211,7 @@ final class AgentTools {
     }
 
     static let instructions = """
-    These tools are a web browser — SEACHAI, the one the user is looking at. They work in \
+    These tools are a web browser — browse, the one the user is looking at. They work in \
     pages of their own, out of the user's sight; each page read is listed for the user, who \
     can open it. For research, `search` first, then `read_pages` with every promising link at \
     once — it loads them in parallel — rather than one page at a time. Pages read that way \
@@ -307,7 +307,7 @@ final class AgentTools {
     // MARK: - the tools
 
     private func call(_ name: String, _ arguments: [String: Any]) async -> [String: Any] {
-        guard let browser else { return AgentTools.failed("SEACHAI has no window") }
+        guard let browser else { return AgentTools.failed("browse has no window") }
         switch name {
         case "search":
             guard let query = arguments["query"] as? String, let url = browser.searchURL(for: query) else {
@@ -783,7 +783,9 @@ final class AgentTools {
                 if (box.checked !== want) { box.checked = want; fire(box, ['input', 'change']); }
                 if (box.checked) ticked.push(clean(label(box)));
               }
-              var set = el.closest('fieldset'), legend = set && set.querySelector('legend');
+              // Not `set`: a var is the whole function's, and would hide the
+              // set() every select and text field needs.
+              var fieldset = el.closest('fieldset'), legend = fieldset && fieldset.querySelector('legend');
               out.push(clean(legend ? legend.innerText : el.name) + ' → ' + (ticked.length ? ticked.join(', ') : 'none ticked'));
               return;
             }

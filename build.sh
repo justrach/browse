@@ -34,8 +34,8 @@ set -euo pipefail
 cd "$(dirname "$0")"
 CONFIG="${1:-release}"
 STEP="${2:-app}"
-NAME="SEACHAI"
-SLUG="SEACHAI"
+NAME="browse"
+SLUG="browse"
 APP="build/$NAME.app"
 VERSION="$(tr -d '[:space:]' < VERSION)"
 # A build number that only ever goes up, so the updater can tell newer from
@@ -58,7 +58,7 @@ cp LICENSE LICENSE.MIT "$APP/Contents/Resources/"
 # what the app weighed (6.5 MB of binary, 2.7 without them), and nothing the
 # app reads while it runs. They are kept beside the build instead, as a dSYM
 # that turns the addresses in a crash report back into names (Console, or
-# atos -o "build/SEACHAI.app.dSYM/Contents/Resources/DWARF/Search").
+# atos -o "build/browse.app.dSYM/Contents/Resources/DWARF/Search").
 if [ "$CONFIG" = "release" ]; then
   rm -rf "$APP.dSYM"
   dsymutil "$BINARY" -o "$APP.dSYM" 2>/dev/null || echo "no dSYM this time" >&2
@@ -69,7 +69,7 @@ fi
 ICONSET="build/AppIcon.iconset"
 rm -rf "$ICONSET"
 mkdir -p "$ICONSET"
-SOURCE_ICON="Icon/seachai.png"
+SOURCE_ICON="Icon/browse.png"
 [ -f "$SOURCE_ICON" ] || { echo "missing $SOURCE_ICON" >&2; exit 1; }
 for POINTS in 16 32 128 256 512; do
   for SCALE in 1 2; do
@@ -128,9 +128,9 @@ cat > "$APP/Contents/Info.plist" <<PLIST
        still wants a sentence to put in its own prompt, and touching the APIs
        without one is a crash rather than a refusal. -->
   <key>NSCameraUsageDescription</key>
-  <string>Websites you visit can ask to use your camera. SEACHAI asks you first, every time, for each site.</string>
+  <string>Websites you visit can ask to use your camera. browse asks you first, every time, for each site.</string>
   <key>NSMicrophoneUsageDescription</key>
-  <string>Websites you visit can ask to use your microphone. SEACHAI asks you first, every time, for each site.</string>
+  <string>Websites you visit can ask to use your microphone. browse asks you first, every time, for each site.</string>
   <key>NSDownloadsFolderUsageDescription</key>
   <string>Files you download are saved to your Downloads folder.</string>
 </dict>

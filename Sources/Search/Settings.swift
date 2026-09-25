@@ -158,7 +158,7 @@ struct SettingsPanel: View {
         Card {
             Line(
                 "Open links from other apps",
-                isDefault ? "SEACHAI is the default browser on this Mac" : "Mail, Slack and the rest still send links elsewhere"
+                isDefault ? "browse is the default browser on this Mac" : "Mail, Slack and the rest still send links elsewhere"
             ) {
                 if isDefault {
                     Image(systemName: "checkmark")
@@ -215,7 +215,7 @@ struct SettingsPanel: View {
                 Switch(on: $prefs.autoScroll)
             }
             Rule()
-            Line("Let a script drive SEACHAI", "A local socket for testing. Its tabs open beside yours with a flask on them and never take over — see ./bench") {
+            Line("Let a script drive browse", "A local socket for testing. Its tabs open beside yours with a flask on them and never take over — see ./bench") {
                 Switch(on: $prefs.bench)
             }
         }
@@ -392,7 +392,7 @@ struct SettingsPanel: View {
             HStack(spacing: 14) {
                 BrandMark().frame(width: 34, height: 34)
                 VStack(alignment: .leading, spacing: 3) {
-                    Text("SEACHAI")
+                    Text("browse")
                         .font(.system(size: 15, weight: .semibold))
                         .foregroundStyle(Palette.ink)
                     Text("A Codegraff product · AGPL-3.0 · version \(Updater.version)")
@@ -437,9 +437,9 @@ struct SettingsPanel: View {
     private var versionTitle: String {
         switch updater.stage {
         case .none: return "Updates"
-        case .fetching(let next): return "SEACHAI \(next.version) is downloading…"
-        case .ready(let next): return "SEACHAI \(next.version) is ready"
-        case .offered(let next): return "SEACHAI \(next.version) is out"
+        case .fetching(let next): return "browse \(next.version) is downloading…"
+        case .ready(let next): return "browse \(next.version) is ready"
+        case .offered(let next): return "browse \(next.version) is out"
         }
     }
 
@@ -452,7 +452,7 @@ struct SettingsPanel: View {
         case .fetching(let next):
             return next.notes ?? "Quietly, in the background — nothing you have set is touched"
         case .ready(let next):
-            return next.notes ?? "It's there the next time you open SEACHAI"
+            return next.notes ?? "It's there the next time you open browse"
         case .offered(let next):
             return next.notes ?? "Open the disk image, the same as the first time"
         }

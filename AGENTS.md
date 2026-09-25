@@ -1,6 +1,6 @@
 # Repository instructions
 
-SEACHAI is a WebKit browser for the Mac with Codegraff built in.
+browse is a WebKit browser for the Mac with Codegraff built in.
 The browser is this repository; the agent is `graff`, from
 [justrach/codegraff](https://github.com/justrach/codegraff). Read
 [CONTRIBUTING.md](CONTRIBUTING.md) for what gets merged, and
@@ -70,7 +70,7 @@ lines, in commits or pull requests. Commits carry the owner's git identity.
 
 ## Building, testing, releasing
 
-- `./build.sh` builds `build/SEACHAI.app`; `swift build` must stay
+- `./build.sh` builds `build/browse.app`; `swift build` must stay
   free of warnings you introduced.
 - `./bench --world NAME …` drives a test copy with a profile of its own. Never
   drive or quit the installed app unless asked.

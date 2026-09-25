@@ -282,7 +282,7 @@ enum Jev {
         request.httpMethod = "POST"
         request.setValue("Bearer \(key)", forHTTPHeaderField: "Authorization")
         request.setValue("application/json", forHTTPHeaderField: "Content-Type")
-        request.setValue("SEACHAI/\(Updater.version)", forHTTPHeaderField: "User-Agent")
+        request.setValue("browse/\(Updater.version)", forHTTPHeaderField: "User-Agent")
         request.httpBody = try JSONSerialization.data(withJSONObject: body)
         let (data, response): (Data, URLResponse)
         do {

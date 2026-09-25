@@ -1,6 +1,6 @@
 # Contributing
 
-SEACHAI is a Codegraff product. Contributions are welcome; a few things make a change easier to review.
+browse is a Codegraff product. Contributions are welcome; a few things make a change easier to review.
 
 ## Before writing code
 

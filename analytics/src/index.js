@@ -1,4 +1,4 @@
-// Anonymous hardware stats for SEACHAI, and the page that shows them.
+// Anonymous hardware stats for browse, and the page that shows them.
 //
 //   POST /v1/ping   one report from a Mac whose owner switched it on
 //   GET  /v1/stats  the totals, as JSON
@@ -240,7 +240,7 @@ export function page(s) {
   ].join("") : `<p class="note">Fewer than ${MIN_GROUP} Macs so far: breakdowns appear once there are enough that none points at one Mac.</p>`;
 
   return `<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
-<title>SEACHAI · anonymous stats</title>
+<title>browse · anonymous stats</title>
 <style>
 .viz-root { color-scheme: light; --surface-0:#f4f4f2; --surface-1:#fcfcfb; --hair:#e4e3df; --text-primary:#0b0b0b; --text-secondary:#52514e; --text-muted:#76756f; --series-1:#2a78d6; }
 @media (prefers-color-scheme: dark) { :root:where(:not([data-theme="light"])) .viz-root { color-scheme: dark; --surface-0:#111110; --surface-1:#1a1a19; --hair:#2c2c2a; --text-primary:#ffffff; --text-secondary:#c3c2b7; --text-muted:#9a998f; --series-1:#3987e5; } }
@@ -279,7 +279,7 @@ footer { color: var(--text-muted); font-size: 12.5px; margin-top: 28px; max-widt
 #tip { position: fixed; pointer-events: none; background: var(--text-primary); color: var(--surface-1); font-size: 12px; padding: 5px 8px; border-radius: 6px; opacity: 0; transition: opacity .08s; white-space: nowrap; z-index: 9; }
 </style></head>
 <body><div class="viz-root"><main>
-<h1>SEACHAI · anonymous stats</h1>
+<h1>browse · anonymous stats</h1>
 <p class="lede">The Macs that people have chosen to share numbers from: their chips, cores, memory, and how much memory the browser itself uses on them. Nothing here names a person or a Mac.</p>
 <div class="tiles">${tiles}</div>
 <div class="grid">${body}</div>

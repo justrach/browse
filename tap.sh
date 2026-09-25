@@ -2,8 +2,8 @@
 # Update a fork-owned Homebrew tap after publishing a Codegraff release.
 # Required environment:
 #   CODEGRAFF_TAP_REPO   Git URL of a tap you control
-#   CODEGRAFF_CASK_PATH  Cask path within that tap (for example Casks/seachai.rb)
-#   CODEGRAFF_RELEASE_URL  URL of this version's SEACHAI.dmg
+#   CODEGRAFF_CASK_PATH  Cask path within that tap (for example Casks/browse.rb)
+#   CODEGRAFF_RELEASE_URL  URL of this version's browse.dmg
 # No repository or tap is a default.
 set -euo pipefail
 
@@ -15,16 +15,16 @@ VERSION="$(tr -d '[:space:]' < VERSION)"
 WORK="$(mktemp -d)"
 trap 'rm -rf "$WORK"' EXIT
 
-curl -fsSL -o "$WORK/SEACHAI.dmg" "$CODEGRAFF_RELEASE_URL"
-SHA="$(shasum -a 256 "$WORK/SEACHAI.dmg" | cut -d' ' -f1)"
+curl -fsSL -o "$WORK/browse.dmg" "$CODEGRAFF_RELEASE_URL"
+SHA="$(shasum -a 256 "$WORK/browse.dmg" | cut -d' ' -f1)"
 git clone -q "$CODEGRAFF_TAP_REPO" "$WORK/tap"
 CASK="$WORK/tap/$CODEGRAFF_CASK_PATH"
 [ -f "$CASK" ] || { echo "missing cask: $CODEGRAFF_CASK_PATH" >&2; exit 1; }
 sed -i '' -E "s/^  version \".*\"/  version \"$VERSION\"/; s/^  sha256 \".*\"/  sha256 \"$SHA\"/" "$CASK"
 if git -C "$WORK/tap" diff --quiet; then
-  echo "the tap already has SEACHAI $VERSION"
+  echo "the tap already has browse $VERSION"
   exit 0
 fi
-git -C "$WORK/tap" commit -qam "SEACHAI $VERSION"
+git -C "$WORK/tap" commit -qam "browse $VERSION"
 git -C "$WORK/tap" push -q
-echo "tap: SEACHAI $VERSION, sha256 $SHA"
+echo "tap: browse $VERSION, sha256 $SHA"
