@@ -1,80 +1,80 @@
 1
-00:00:00,600 --> 00:00:02,849
+00:00:00,400 --> 00:00:01,899
 Research rarely fits in one tab.
 
 2
-00:00:02,849 --> 00:00:11,557
+00:00:01,899 --> 00:00:07,705
 In our ten-tab test, browse used fifty-nine percent less RAM than
 Chrome, leaving more memory for the rest of your work.
 
 3
-00:00:12,600 --> 00:00:21,122
+00:00:08,400 --> 00:00:14,081
 Less RAM, more room for research, and potentially lower energy use
 when reduced memory pressure means less swapping.
 
 4
-00:00:22,600 --> 00:00:24,542
+00:00:15,067 --> 00:00:16,361
 Command L brings up search.
 
 5
-00:00:24,542 --> 00:00:29,844
+00:00:16,361 --> 00:00:19,896
 Pick up a recent query, or explore fresh Google suggestions as you
 type.
 
 6
-00:00:29,844 --> 00:00:32,383
+00:00:19,896 --> 00:00:21,589
 Both options are yours to turn on.
 
 7
-00:00:35,600 --> 00:00:39,447
+00:00:23,733 --> 00:00:26,298
 Already have a source open? Command K finds your tabs.
 
 8
-00:00:39,447 --> 00:00:44,817
+00:00:26,298 --> 00:00:29,878
 Type part of the title, choose your page, and jump back into the
 research.
 
 9
-00:00:46,600 --> 00:00:49,660
+00:00:31,067 --> 00:00:33,107
 Compare sources with Command Shift right bracket.
 
 10
-00:00:49,660 --> 00:00:54,122
+00:00:33,107 --> 00:00:36,081
 Left bracket brings you back, with the highlight following your place.
 
 11
-00:00:56,600 --> 00:01:01,329
+00:00:37,733 --> 00:00:40,886
 Within a tab, Command right bracket moves forward in page history.
 
 12
-00:01:01,329 --> 00:01:03,948
+00:00:40,886 --> 00:00:42,632
 Command left bracket takes you back.
 
 13
-00:01:06,600 --> 00:01:10,019
+00:00:44,400 --> 00:00:46,679
 As you scroll, the tab shows how far you have read.
 
 14
-00:01:10,019 --> 00:01:13,643
+00:00:46,679 --> 00:00:49,095
 Revisit a section, and the progress follows you back.
 
 15
-00:01:18,600 --> 00:01:20,532
+00:00:52,400 --> 00:00:53,688
 Codegraff sits beside the page.
 
 16
-00:01:20,532 --> 00:01:27,165
+00:00:53,688 --> 00:00:58,110
 Ask about what you are reading, explore a question, or get help with a
 form, without leaving your work.
 
 17
-00:01:29,600 --> 00:01:35,086
+00:00:59,733 --> 00:01:03,391
 When it is time to focus, Command S lets the tabs step aside.
 
 18
-00:01:35,086 --> 00:01:37,554
+00:01:03,391 --> 00:01:05,036
 More room for your research.
 
 19
-00:01:37,554 --> 00:01:39,383
+00:01:05,036 --> 00:01:06,255
 Browse, for the Mac.

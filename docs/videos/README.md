@@ -1,6 +1,6 @@
 # browse demo
 
-The 100-second walkthrough opens with the measured RAM comparison, then shows search, keyboard shortcuts, reading progress, and Codegraff in the real macOS app. The README's animated preview links to the full MP4.
+The 67-second walkthrough opens with the measured RAM comparison, then shows search, keyboard shortcuts, reading progress, and Codegraff in the real macOS app. The README's animated preview links to the full MP4.
 
 | Shortcut | Action |
 | --- | --- |
@@ -28,19 +28,20 @@ The two opening illustrations were made using the built-in ImageGen tool. They a
 | Time | Scene |
 | --- | --- |
 | 0:00 | Ten-tab RAM comparison |
-| 0:12 | More room for research |
-| 0:22 | ⌘L search and suggestions |
-| 0:35 | ⌘K tab finder |
-| 0:46 | Switching tabs |
-| 0:56 | Page history |
-| 1:06 | Reading progress while scrolling |
-| 1:18 | Codegraff beside the page |
-| 1:29 | ⌘S quiet mode |
+| 0:08 | More room for research |
+| 0:15 | ⌘L search and suggestions |
+| 0:23 | ⌘K tab finder |
+| 0:31 | Switching tabs |
+| 0:37 | Page history |
+| 0:44 | Reading progress while scrolling |
+| 0:52 | Codegraff beside the page |
+| 0:59 | ⌘S quiet mode |
 
 ## Recording notes
 
 - Recorded from the development build at `110bd9d`, merged in PR #6; not a claim that all development changes are in the published 1.0.3 release.
 - An isolated demo profile was used. No personal browsing history or account was recorded.
+- The complete walkthrough and animated preview run at 1.5× speed. Voice pitch is preserved; subtitles and chapter times follow the faster playback.
 - Native ScreenCaptureKit window capture, up to 60 frames per second. The export is 1920 × 1080 at 60 fps, with H.264 video, AAC narration, and optional English subtitles.
 - Shortcuts ran through browse's keyboard handler. Page scrolling used WebKit's native smooth scrolling; the progress animation and sliding tab highlight are the app's own rendering.
 - The AI shot shows the real Codegraff composer with the current page attached and a draft question; it does not show a submitted request or claim a completed answer.
