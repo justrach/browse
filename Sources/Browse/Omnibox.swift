@@ -139,6 +139,10 @@ struct Omnibox: View {
                     Image(systemName: "clock.arrow.circlepath")
                         .font(.system(size: 10, weight: .medium))
                         .foregroundStyle(Palette.muted)
+                case .google:
+                    Image(systemName: "magnifyingglass")
+                        .font(.system(size: 10, weight: .medium))
+                        .foregroundStyle(Palette.muted)
                 case .ask:
                     Image(systemName: "sparkle")
                         .font(.system(size: 10, weight: .medium))

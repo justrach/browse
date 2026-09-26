@@ -37,6 +37,8 @@
 
 The tabs and the page are the whole window. Press **⌘L** for an address or search, **⌘K** to find an open tab, or **⇧⌘R** for reading mode. Put tabs across the top or down the side; pin the ones you keep, and idle tabs sleep to free memory.
 
+Searches you have made are remembered in history and ranked as you type, using the words you remember, how often you searched, and how recently. In Settings › General, **Show recent searches** brings them up in an empty address field; **Google search suggestions** adds live query suggestions when Google is your search engine. Both options start off. Private tabs use neither your saved search history nor Google suggestions.
+
 The things you expect from a browser are here too: blocking for ads and trackers before pages load, picture-in-picture video, passwords in your Mac keychain, and Chrome extensions on macOS 15.4 or later. Peek, a bookmarks bar, and a small window for links from other apps are available in Settings when you want them.
 
 Press **⌘S** to hide the tab bar or sidebar and give the page the whole window. Rest the pointer at the top or left edge to bring tabs back temporarily; press **⌘S** again to keep them visible. **⌘L** still opens the address and search field. You can also set the sidebar to tuck itself away in Settings › Tabs.
@@ -66,6 +68,7 @@ Sign in with your Codegraff account to use the agent. It is the same account use
 ## What leaves your Mac
 
 - Questions you send to Codegraff, and page text when you ask about a page, go to the model provider your Codegraff account uses. When Jev handles a step, the page's visible words and controls go to Jev through Codegraff. Password fields are excluded.
+- If you turn on Google search suggestions, eligible text typed in the address field is sent to Google for autocomplete. This is off by default and disabled in private tabs.
 - If you turn on sync, encrypted bookmarks, history, and themes go to Codegraff's server.
 - Anonymous device and memory statistics are optional and off by default in Settings › Privacy. You can see the [aggregate statistics](https://search-codegraff-stats.rachpradhan.workers.dev).
 - The daily update check asks GitHub for the latest release. An update is installed for the next launch only after browse checks that it is newer and signed by the same developer.

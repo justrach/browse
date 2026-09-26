@@ -15,6 +15,7 @@ import Foundation
 struct Searched {
     private struct Past {
         let words: String
+        let display: String
         let terms: [String]
         let count: Int
         let last: Date
@@ -28,29 +29,46 @@ struct Searched {
     init(_ found: [(words: String, count: Int, last: Date)]) {
         // The same words searched twice — on two engines, or with a
         // different tail of tracking on the address — are one search.
-        var merged: [String: (count: Int, last: Date)] = [:]
+        var merged: [String: (display: String, count: Int, last: Date)] = [:]
         for one in found {
-            let words = Searched.plain(one.words)
+            let display = one.words.split(whereSeparator: \.isWhitespace).joined(separator: " ")
+            let words = Searched.plain(display)
             guard !words.isEmpty else { continue }
             let was = merged[words]
-            merged[words] = ((was?.count ?? 0) + one.count, max(was?.last ?? one.last, one.last))
+            merged[words] = (
+                one.last >= (was?.last ?? .distantPast) ? display : was?.display ?? display,
+                (was?.count ?? 0) + one.count,
+                max(was?.last ?? one.last, one.last)
+            )
         }
-        past = merged.map { Past(words: $0.key, terms: Searched.terms($0.key), count: $0.value.count, last: $0.value.last) }
+        past = merged.map {
+            Past(words: $0.key, display: $0.value.display, terms: Searched.terms($0.key),
+                 count: $0.value.count, last: $0.value.last)
+        }
         var spread: [String: Int] = [:]
         for one in past { for term in Set(one.terms) { spread[term, default: 0] += 1 } }
         self.spread = spread
         average = past.isEmpty ? 1 : max(1, Double(past.reduce(0) { $0 + $1.terms.count }) / Double(past.count))
     }
 
-    /// Best first, never the very words typed — the field's own search row
-    /// is that one.
+    /// Most recent searches for a blank field.
+    func recent(limit: Int) -> [String] {
+        Array(past.sorted {
+            if $0.last != $1.last { return $0.last > $1.last }
+            if $0.count != $1.count { return $0.count > $1.count }
+            return $0.words < $1.words
+        }.prefix(limit).map(\.display))
+    }
+
+    /// Best first, never the very words typed — the field's own search row is that one.
     func matching(_ typed: String, limit: Int, now: Date = Date()) -> [String] {
         let asked = Searched.plain(typed)
-        guard asked.count >= 2, !past.isEmpty else { return [] }
+        guard !asked.isEmpty, !past.isEmpty else { return [] }
         var whole = Searched.terms(asked)
         guard !whole.isEmpty else { return [] }
         // Still being typed: the last word is whatever it may yet become.
-        let partial = typed.last?.isWhitespace == false ? whole.removeLast() : nil
+        let partial = typed.last.map({ $0.isLetter || $0.isNumber }) == true ? whole.removeLast() : nil
+        let punctuation = typed.last.map({ !$0.isLetter && !$0.isNumber && !$0.isWhitespace }) == true
 
         let k1 = 1.2, b = 0.75, n = Double(past.count)
         func rarity(_ term: String) -> Double {
@@ -60,6 +78,9 @@ struct Searched {
 
         var scored: [(words: String, score: Double)] = []
         for one in past where one.words != asked {
+            // A trailing +, # or other punctuation belongs to the search,
+            // not to a half-typed alphabetic word.
+            if punctuation && !one.words.contains(asked) { continue }
             let norm = k1 * (1 - b + b * Double(one.terms.count) / average)
             var score = 0.0
             var all = true
@@ -78,7 +99,7 @@ struct Searched {
             if one.words.hasPrefix(asked) { score += 2 }
             let days = max(0, now.timeIntervalSince(one.last) / 86_400)
             score *= 1 + log1p(Double(one.count) * exp(-days / 30))
-            scored.append((one.words, score))
+            scored.append((one.display, score))
         }
         return scored
             .sorted { $0.score == $1.score ? $0.words.count < $1.words.count : $0.score > $1.score }

@@ -209,6 +209,14 @@ struct SettingsPanel: View {
                 .padding(.bottom, 11)
             }
             Rule()
+            Line("Show recent searches", "Offer recent searches in an empty address field; never in private tabs") {
+                Switch(on: $prefs.recentSearches)
+            }
+            Rule()
+            Line("Google search suggestions", "When Google is your search engine, send eligible text you type to Google for suggestions. Never in private tabs") {
+                Switch(on: $prefs.googleSuggestions)
+            }
+            Rule()
             Line("Appearance", "Light, dark, or whatever the Mac is doing — pages follow it too") {
                 Segmented(options: Look.allCases.map { ($0, $0.title) }, selection: $prefs.look)
             }
