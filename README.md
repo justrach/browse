@@ -16,6 +16,12 @@ The tabs and the page are the whole window. Press **⌘L** for an address or sea
 
 The things you expect from a browser are here too: blocking for ads and trackers before pages load, picture-in-picture video, passwords in your Mac keychain, and Chrome extensions on macOS 15.4 or later. Peek, a bookmarks bar, and a small window for links from other apps are available in Settings when you want them.
 
+### Just the page
+
+For a quieter window, press **⌘S** to hide the tab bar or sidebar. The page fills the window; rest the pointer at the top edge (or left edge for sidebar tabs) to bring the tabs back temporarily. Press **⌘S** again to keep them visible. **⌘L** still opens the address and search field.
+
+To start with the sidebar tucked away every time, enable **Tabs in a sidebar**, then **Hide the sidebar until the pointer reaches the edge** in Settings › Tabs.
+
 ## Ask, without leaving
 
 The Ask tab gives Codegraff a place for a question or a task. Ask about the page you're reading with **⇧⌘A**, or press **⌘↩** in the address field to send the page with your question. The conversation can stay in a column next to the site, with its answer and sources in sight.
