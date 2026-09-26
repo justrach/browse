@@ -28,7 +28,7 @@ The Ask tab gives Codegraff a place for a question or a task, with a choice of m
 
 ![Codegraff's rounded conversation column beside an event form](docs/screenshots/column-rounded-light.png)
 
-*The rounded column in the upcoming build, with a sample conversation beside a local demo form.*
+*The rounded column, with a sample conversation beside a local demo form.*
 
 Codegraff can read and fill a form on your tab, then leave you to review it; it is instructed to ask before sending a payment, post, booking, or signup. [See a filled event form](docs/screenshots/event-registration-window.png) (local demo; nothing submitted). [Capture notes](docs/images/README.md).
 
