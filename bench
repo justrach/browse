@@ -56,6 +56,8 @@
     ./bench keyeq CHARS CODE [shift]   test run: ⌘CHARS pressed while the page has the keyboard — who took it
     ./bench menu [open]                test run: the Bookmarks menu as it is about to open, and its first
                                        folder (open: its first bookmark picked)
+    ./bench stream [CHARS] [PIECE]     test run: a long answer (12000 chars) streamed into Codegraff's column,
+                                       PIECE (24) at a time, each piece timed until the window rests
     ./bench bookmark URL [new]         test run: a bookmark picked from the list, timed until it loads
                                        (new: into a new tab, whose page isn't built yet)
     ./bench peek URL|close             test run: the peek panel over the tab in front, as a shift-click opens it
@@ -238,6 +240,10 @@ def main(argv):
         request["text"] = args[0]
         request["type"] = "type" in args[1:]
         request["go"] = "go" in args[1:]
+    elif verb == "stream":
+        if len(args) > 2 or any(not a.isdigit() for a in args): sys.exit("usage: bench stream [CHARS] [PIECE]")
+        if args: request["size"] = int(args[0])
+        if len(args) == 2: request["piece"] = int(args[1])
     elif verb == "bookmark":
         if len(args) not in (1, 2) or (len(args) == 2 and args[1] != "new"): sys.exit("usage: bench bookmark URL [new]")
         request["url"] = args[0]

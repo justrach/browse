@@ -934,6 +934,32 @@ final class Agent: ObservableObject {
         }
     }
 
+    /// The bench's `stream`: a question, then its answer arriving a piece at
+    /// a time through the same door graff's updates come in by, with the
+    /// column drawing it as it would a turn at work. Test runs only.
+    func rehearse(asking: String) {
+        guard Store.testing else { return }
+        entries.append(Entry(kind: .you, text: asking))
+        before = phase
+        phase = .working
+    }
+
+    func rehearse(piece: String) {
+        guard Store.testing else { return }
+        take(["jsonrpc": "2.0", "method": "session/update", "params": [
+            "update": ["sessionUpdate": "agent_message_chunk", "content": ["type": "text", "text": piece]],
+        ]])
+    }
+
+    /// Back to what it was before: ready, or no graff at all.
+    func rehearsed() {
+        guard Store.testing, let was = before else { return }
+        before = nil
+        if phase == .working, !prompting { phase = was }
+    }
+
+    private var before: Phase?
+
     private func asked(_ method: String, id: Any, params: [String: Any]) {
         let key = "\(id)"
         owed[key] = id

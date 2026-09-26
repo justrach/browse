@@ -739,6 +739,66 @@ final class Bench {
                 }
             }
 
+        case "stream":
+            // A long answer arriving in the column a piece at a time, through
+            // the door graff's own updates come in by: each piece timed from
+            // going in to the run loop's next rest — SwiftUI's update, the
+            // text laid out, Core Animation's commit. The same answer every
+            // run, so one build can be held against the next. Only on a
+            // SEARCH_PROBE run. The column is opened, as `ui agent on` opens
+            // it, and graff — which opening it wakes — left to finish coming
+            // up first, so it doesn't change the column halfway through.
+            guard Store.testing else { answer(["error": "stream only works on a --test run — it would write into your chats"]); return }
+            guard browser.agent.phase != .working else { answer(["error": "Codegraff is working — try again once it's done"]); return }
+            if !browser.consulting {
+                browser.prefs.usesAgent = true
+                browser.consulting = true
+            }
+            let settleBy = Date().addingTimeInterval(15)
+            @MainActor func whenSettled(_ then: @escaping @MainActor () -> Void) {
+                let phase = browser.agent.phase
+                if (phase != .asleep && phase != .starting) || Date() > settleBy {
+                    // And a beat for the column to be drawn.
+                    DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) { then() }
+                } else {
+                    DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) { whenSettled(then) }
+                }
+            }
+            let size = max(200, request["size"] as? Int ?? 12_000)
+            let piece = max(1, request["piece"] as? Int ?? 24)
+            let answerText = Bench.longAnswer(size)
+            var pieces: [String] = []
+            var rest = Substring(answerText)
+            while !rest.isEmpty { pieces.append(String(rest.prefix(piece))); rest = rest.dropFirst(piece) }
+            var times: [Double] = []
+            @MainActor func next(_ index: Int) {
+                guard index < pieces.count else {
+                    browser.agent.rehearsed()
+                    let sorted = times.sorted()
+                    let tenth = max(1, times.count / 10)
+                    let mean = { (slice: ArraySlice<Double>) in slice.reduce(0, +) / Double(slice.count) }
+                    answer([
+                        "pieces": times.count, "chars": answerText.count,
+                        "totalMs": times.reduce(0, +),
+                        "firstTenthMs": mean(times.prefix(tenth)), "lastTenthMs": mean(times.suffix(tenth)),
+                        "p50Ms": sorted[sorted.count / 2], "p95Ms": sorted[min(sorted.count - 1, sorted.count * 95 / 100)],
+                        "maxMs": sorted.last ?? 0,
+                        "over8ms": times.filter { $0 > 8.33 }.count, "over16ms": times.filter { $0 > 16.67 }.count,
+                    ])
+                    return
+                }
+                let start = CACurrentMediaTime()
+                browser.agent.rehearse(piece: pieces[index])
+                Bench.whenResting(since: start) { rested in
+                    times.append(rested)
+                    DispatchQueue.main.async { next(index + 1) }
+                }
+            }
+            whenSettled {
+                browser.agent.rehearse(asking: "Tell me everything, with sources.")
+                next(0)
+            }
+
         case "menu":
             // The Bookmarks menu as it is about to open: the menu bar
             // told it is being tracked, SwiftUI's own update run on it, its
@@ -1491,6 +1551,37 @@ final class Bench {
         if let field = view as? NSTextField, field.delegate is AddressField.Coordinator { return field }
         for sub in view.subviews { if let found = addressField(in: sub) { return found } }
         return nil
+    }
+
+    /// An answer the way graff writes one — headings, paragraphs whose
+    /// sentences end in a source, lists, a block of code — `size` characters
+    /// of it, the same every time.
+    static func longAnswer(_ size: Int) -> String {
+        var out = ""
+        var n = 0
+        while out.count < size {
+            n += 1
+            out += """
+            ## Part \(n): what the sources say
+
+            WebKit lays out a page in passes, and a change to one box can move every box after it — which is why a column that grows at the bottom has to be measured again each time it grows. [source](https://webkit.org/blog/\(n)/layout/)
+            The fix most renderers reach for is to keep what has finished and redo only what is still changing. [notes](https://developer.apple.com/documentation/swiftui/\(n))
+
+            - Measure first, on the same input every time, so a change can be held against the one before.
+            - Keep finished blocks as they are; only the last one is still growing.
+            - Hand the screen fewer, larger updates rather than one per word.
+
+            ```swift
+            let blocks = answer.split(separator: "\\n\\n")
+            for block in blocks where block.hasPrefix("##") { print(block) }
+            ```
+
+            A table of what changed would sit here in a real answer, and a line or two on what is still open. See also [the thread](https://example.com/thread/\(n)) for the longer version.
+
+
+            """
+        }
+        return String(out.prefix(size))
     }
 
     /// Milliseconds from `start` to the run loop's next rest — after every
