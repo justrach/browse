@@ -363,7 +363,7 @@ struct WelcomePanel: View {
         @State private var hovering = false
 
         private static let letters = ["G", "W", "Y"]
-        private static let icons: [NSImage?] = ["github", "wikipedia", "youtube"].map { name in
+        private static let icons: [NSImage?] = ["github", "webkit", "youtube"].map { name in
             Bundle.main.url(forResource: name, withExtension: "png", subdirectory: "PreviewFavicons")
                 .flatMap { NSImage(contentsOf: $0) }
         }

@@ -3,7 +3,7 @@ bundled so switching between Letters and Site icons works before any page has
 loaded, without fetching images during setup.
 
 - `github.png`: [GitHub favicon](https://github.com/favicon.ico)
-- `wikipedia.png`: [Wikipedia favicon](https://www.wikipedia.org/static/favicon/wikipedia.ico)
+- `webkit.png`: [WebKit favicon](https://webkit.org/favicon.ico)
 - `youtube.png`: [YouTube favicon](https://www.youtube.com/favicon.ico)
 
 Each file is the site's ICO converted to PNG with `sips`. The site owners
