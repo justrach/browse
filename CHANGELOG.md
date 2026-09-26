@@ -11,6 +11,8 @@ in [ROADMAP.md](ROADMAP.md).
 
 ## Unreleased
 
+## 1.0.3 — 26 September 2026
+
 ### Added
 
 - Searches you've made come back as you type: a few of their words, in any order, bring up the whole search — from your history, whichever engine it went to and wherever it was typed — and the field finishes it in grey for Return. Pages of search results stop showing up as places.
