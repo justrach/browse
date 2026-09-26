@@ -25,6 +25,16 @@ jobs:
         run: |
           plutil -p build/browse.app/Contents/Info.plist | grep -E 'CFBundleName|CFBundleExecutable|CFBundleIdentifier'
           test -x build/browse.app/Contents/MacOS/Browse
+      - name: Package the pull request test build
+        if: github.event_name == 'pull_request'
+        run: ditto -c -k --sequesterRsrc --keepParent build/browse.app "$RUNNER_TEMP/browse-test.zip"
+      - name: Keep the test build for review
+        if: github.event_name == 'pull_request'
+        uses: actions/upload-artifact@v4
+        with:
+          name: browse-test
+          path: ${{ runner.temp }}/browse-test.zip
+          retention-days: 3
 
   stats:
     runs-on: ubuntu-latest
