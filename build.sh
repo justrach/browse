@@ -107,7 +107,8 @@ else
   rm -rf "$APP"
   mkdir -p "$APP/Contents/MacOS" "$APP/Contents/Resources"
   cp "$BINARY" "$APP/Contents/MacOS/Browse"
-  cp LICENSE LICENSE.MIT "$APP/Contents/Resources/"
+  cp LICENSE "$APP/Contents/Resources/"
+  cp docs/legal/upstream-mit.txt "$APP/Contents/Resources/LICENSE.MIT"
 
 # Symbols stay out of the app. The linker leaves every function's name and a
 # map back to the source in the binary — 15,000 entries, more than half of

@@ -1,10 +1,35 @@
-# browse
+<p align="center">
+  <img src="Icon/browse.png" alt="browse app icon" width="96" height="96">
+</p>
 
-**A quieter browser for the Mac, with Codegraff beside the page.**
+<h1 align="center">browse</h1>
+<h3 align="center">More page. Less browser.</h3>
 
-browse is a small WebKit browser for reading, searching, and getting things done. Keep the page in view while [Codegraff](https://github.com/justrach/codegraff) researches a question, follows links, or helps with a form.
+<p align="center">
+  A small, native WebKit browser for the Mac.<br>
+  Read, explore, and work with <a href="https://github.com/justrach/codegraff">Codegraff</a> beside the page.
+</p>
 
-**[Download browse for macOS](https://github.com/justrach/browse/releases/latest)** · macOS 14 or later · signed and notarized
+<p align="center">
+  <a href="https://github.com/justrach/browse/releases/latest"><img src="https://img.shields.io/github/v/release/justrach/browse?style=flat-square&amp;color=555555" alt="Latest release"></a>
+  <img src="https://img.shields.io/badge/macOS-14%2B-777777?style=flat-square" alt="macOS 14 or later">
+  <img src="https://img.shields.io/badge/engine-WebKit-777777?style=flat-square" alt="WebKit engine">
+  <a href="LICENSE"><img src="https://img.shields.io/badge/license-AGPL--3.0-d45a43?style=flat-square" alt="AGPL-3.0 license"></a>
+</p>
+
+<p align="center">
+  <strong><a href="https://github.com/justrach/browse/releases/latest">Download for macOS</a></strong> ·
+  <a href="docs/performance.md">RAM &amp; app comparison</a> ·
+  <a href="#ask-without-leaving">Codegraff</a> ·
+  <a href="#build-from-source">Build</a>
+  <br><sub>Signed and notarized · Free to download · All new code is AGPL-3.0</sub>
+</p>
+
+| **9.38 MiB** app bundle | **186 MiB** single-page memory | **45% lower** than Chrome in that test |
+| :---: | :---: | :---: |
+| Measured installed browse bundle | Whole browser, including helpers | Chrome measured 340 MiB |
+
+*One Mac, one matched synthetic single-page run; memory is median physical footprint. App size excludes shared macOS WebKit, profiles, caches, and Codegraff. [Measurements, builds, and full comparison →](docs/performance.md)*
 
 ![browse showing a Wikipedia article with its tab bar hidden on a quiet desktop](docs/screenshots/quiet-desktop.png)
 
@@ -85,4 +110,6 @@ Contributions are welcome; read [CONTRIBUTING.md](CONTRIBUTING.md) first. [Relea
 
 ## License
 
-browse is a Codegraff product under [AGPL-3.0](LICENSE). Earlier code retains its original owner's [MIT license and copyright notice](LICENSE.MIT). The Jev step code adapts Browser Use's jev-ultrafast (MIT).
+browse and all new code and contributions are licensed under [AGPL-3.0](LICENSE). This is not an MIT/AGPL dual-license offer.
+
+Earlier upstream code retains its original [MIT copyright and permission notice](docs/legal/upstream-mit.txt). That notice applies to the inherited code; it does not license new browse work under MIT. The Jev step code adapts Browser Use's jev-ultrafast (MIT).

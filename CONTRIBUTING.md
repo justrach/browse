@@ -2,6 +2,12 @@
 
 browse is a Codegraff product. Contributions are welcome; a few things make a change easier to review.
 
+## License
+
+All new code and contributions are licensed under [AGPL-3.0](LICENSE). The
+[upstream MIT notice](docs/legal/upstream-mit.txt) is retained for inherited
+code only; it is not an alternative license for new contributions.
+
 ## Before writing code
 
 For anything beyond a small fix, open an issue first describing what you want to change and why. It saves a rewritten pull request later if the direction doesn't fit.
