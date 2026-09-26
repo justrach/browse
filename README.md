@@ -1,104 +1,77 @@
 # browse
 
-<img src="Icon/browse.png" alt="browse icon" width="96">
+<img src="Icon/browse.png" alt="browse icon" width="72">
 
-A small, fast browser for the Mac, with [Codegraff](https://github.com/justrach/codegraff) beside the page. Read, search, and ask about what you're reading; have Codegraff research something, fill in a form, or make you a theme from a sentence. Your bookmarks, history and themes follow you between Macs, sealed so only your Macs can read them.
+**A quieter browser for the Mac, with Codegraff beside the page.**
 
-**[Download for macOS](https://github.com/justrach/browse/releases/latest)** · macOS 14 or later · signed and notarized · it keeps itself up to date
+browse is a small WebKit browser for reading, searching, and getting things done. Keep the page in view while [Codegraff](https://github.com/justrach/codegraff) researches a question, follows links, or helps with a form.
 
-![browse showing a Wikipedia article, with the tabs across the top](docs/screenshots/browse.png)
+**[Download browse for macOS](https://github.com/justrach/browse/releases/latest)** · macOS 14 or later · signed and notarized
 
-## The browser
+![browse showing a Wikipedia article in a light window](docs/screenshots/browse.png)
 
-Tabs and the page, and nothing else in the way.
+## Room for the page
 
-- **One field.** ⌘L to type an address or a search; it finishes addresses from your own history. ⌘K switches to a tab you already have open.
-- **Tabs your way.** Across the top or down the side. Pin the ones you keep all day; tabs you haven't looked at in a while sleep and give their memory back.
-- **Built in, not bolted on.** An ad and tracker blocker that runs before the page loads, reading mode (⇧⌘R), video that floats above everything (⇧⌘P), and ⇧⌘H to hide anything on a site for good.
-- **Passwords in your keychain,** offered once a sign-in has actually worked.
-- **Chrome extensions** from the Chrome Web Store, on macOS 15.4 or later.
-- **Peek, a bookmarks bar, a small window for links from other apps** — shift-click a link to look at it without leaving the page; each of these is off until you turn it on in Settings.
-- **Small.** It runs on WebKit, the engine already in macOS, so the app is a few megabytes and opens at once.
+The tabs and the page are the whole window. Press **⌘L** for an address or search, **⌘K** to find an open tab, or **⇧⌘R** for reading mode. Put tabs across the top or down the side; pin the ones you keep, and idle tabs sleep to free memory.
 
-## Themes
+The things you expect from a browser are here too: blocking for ads and trackers before pages load, picture-in-picture video, passwords in your Mac keychain, and Chrome extensions on macOS 15.4 or later. Peek, a bookmarks bar, and a small window for links from other apps are available in Settings when you want them.
 
-Pick how it looks in Settings › Themes: browse's own white and greys, **Codegraff** (the Codegraff app's warm graphite and amber), **Codegraff Paper** (codegraff.com's paper, ink and coral), Nord or Forest — each for light and for dark.
+## Ask, without leaving
 
-![Settings › Themes, with the Codegraff theme chosen](docs/screenshots/themes.png)
+The Ask tab gives Codegraff a place for a question or a task. Ask about the page you're reading with **⇧⌘A**, or press **⌘↩** in the address field to send the page with your question. The conversation can stay in a column next to the site, with its answer and sources in sight.
 
-Or describe one. Say what it should feel like and Codegraff picks the colours for light and dark, checks every one reads, and switches to it.
+![Codegraff making a theme beside a Wikipedia page](docs/screenshots/make-a-theme.png)
 
-![Codegraff made a theme called Desert Evening from a sentence, and the whole window wears it](docs/screenshots/make-a-theme.png)
+*A theme made from a sentence, beside the page.*
 
-A theme is a small JSON file — add one from a file, share yours, or open the themes folder and edit one by hand. The ones you add or make sync to your other Macs.
+Codegraff can search, read several pages, click, type, and fill forms on your tab. It reads the fields and their labels before filling them, then leaves you to check anything that matters. It is instructed to ask before submitting a payment, post, booking, or signup.
 
-![The Ask tab in the Codegraff theme, dark](docs/screenshots/ask-dark.png)
+![Codegraff fills a form on the page and reports what it did](docs/screenshots/fill-a-form.png)
 
-## Codegraff, beside the page
+*Fields filled; the form is left for review before submission.*
 
-The sparkle at the head of the tab row is the Ask tab: one field that asks Codegraff anything (Tab switches it to a plain search), and your conversations so far, each a card you can pick back up.
+For a series of small interactions, Codegraff can use [Jev](https://docs.typesafe.ai/introduction) to choose the next click or control. Your Codegraff account supplies the models available in the picker.
 
-![The Ask tab: a field for a question and the chats so far](docs/screenshots/ask.png)
+<p align="center"><img src="docs/images/reading-workshop-v1.png" alt="Two illustrated mice reading and filing pages" width="560"></p>
+<!-- Illustration generated with OpenAI ImageGen. Product screenshots are captures of browse. -->
 
-A conversation reads like a page of its own: what you asked, the work folded into one line that opens to every step, and the answer with its sources.
+## Make it feel like yours
 
-![A conversation on its own page, answered with three linked sources](docs/screenshots/chat.png)
+Choose a light or dark look in Settings › Themes: browse, Codegraff, Codegraff Paper, Nord, or Forest. You can also describe a theme to Codegraff, import one from a JSON file, or edit one yourself.
 
-Ask about the page you're on with ⌘↩ in the address field or ⇧⌘A, and the page goes along with the question. Keep the talk in a column beside the page if you'd rather see both.
+![Theme choices in browse settings](docs/screenshots/themes.png)
 
-![Codegraff in a column beside Hacker News, listing the top five stories with links](docs/screenshots/beside-the-page.png)
-
-It uses the browser too: search, read many pages at once, click, type, and **fill in forms**. It reads a form the way you do — labels, choices, what's required — and fills it in on your tab in front of you. It's told to ask before sending anything that pays, posts, books or signs you up; check what it filled before anything that matters goes.
-
-![Codegraff has filled in a pizza order form on the page and says it did not submit it](docs/screenshots/fill-a-form.png)
-
-For work of many small steps — a search with its filters, a date picker — Codegraff hands the clicking to [Jev](https://docs.typesafe.ai/introduction), the way Browser Use's [jev-ultrafast](https://github.com/browser-use/jev-ultrafast) does: one quick call a step picks the action and the element, about half a second each. Codegraff's model still plans the task and says what gets typed; Jev makes nothing up.
-
-The model picker under the field searches every model your Codegraff account reaches.
-
-## Your Codegraff account, and sync
-
-Sign in once — on the welcome screens, or in Settings — with a code and one click on codegraff.com. That one sign-in is what Codegraff, Jev and sync use, and it's the same one `graff login` makes, so the graff in your terminal is signed in too.
-
-![The welcome screen's sign-in step](docs/screenshots/sign-in.png)
-
-Switch on sync in Settings › Sync and your history, bookmarks and themes are the same on every Mac you sign in on. Everything is **sealed on your Mac** before it leaves, with a key only your Macs hold — you carry it to the next Mac as a sync code — so Codegraff stores it without being able to read it, not even the addresses. Forget a page or clear your history, move or delete a bookmark, and it happens everywhere. Settings › Sync can also delete everything synced from Codegraff's server.
-
-![Settings › Sync, with the account and the switch](docs/screenshots/sync.png)
-
-## Updates
-
-browse checks for a new version once a day, fetches it quietly, checks it's this app, newer, and signed by the same developer, and has it ready the next time you open it — or now, with Relaunch in Settings › About. Nothing you've set is touched.
+Sign in with your Codegraff account to use the agent. It is the same account used by `graff` in your terminal. When Codegraff's sync server supports it, you can switch on end-to-end encrypted sync for bookmarks, history, and themes; the sync key stays with your Macs and moves to a new Mac through a sync code. Settings › Sync shows when the service is available.
 
 ## What leaves your Mac
 
-- What you type to Codegraff, and the text of the page when you ask about it, go to the model provider your Codegraff account uses. When Jev takes the steps, the page's visible words and controls go to Jev through Codegraff. Password fields never go.
-- With sync on, your history, bookmarks and themes go to Codegraff sealed, as above.
-- With anonymous stats on (Settings › Privacy, off by default): this Mac's chip, cores, memory and macOS version, and how much memory the app uses — under a random id, [added up here](https://search-codegraff-stats.rachpradhan.workers.dev).
-- The daily update check asks GitHub for the latest release.
+- Questions you send to Codegraff, and page text when you ask about a page, go to the model provider your Codegraff account uses. When Jev handles a step, the page's visible words and controls go to Jev through Codegraff. Password fields are excluded.
+- If you turn on sync, encrypted bookmarks, history, and themes go to Codegraff's server.
+- Anonymous device and memory statistics are optional and off by default in Settings › Privacy. You can see the [aggregate statistics](https://search-codegraff-stats.rachpradhan.workers.dev).
+- The daily update check asks GitHub for the latest release. An update is installed for the next launch only after browse checks that it is newer and signed by the same developer.
 
-Nothing else. Codegraff doesn't ship inside the app: it runs the `graff` command already on your Mac (the one the Codegraff app installs), and it acts without stopping to ask before each step, commands and file edits included — treat it as you would any agent with those powers. Turn it all off in Settings › Agent.
+Codegraff runs as the `graff` command on your Mac, installed by the Codegraff app. It can run commands and edit files as well as use the browser, without a permission prompt for each action. You can switch the agent off in Settings › Agent.
 
-## Known limits
+## Build from source
 
-- Passkeys aren't available yet: they wait on Apple granting browse the browser passkey entitlement (docs/releasing.md).
-- Sync needs Codegraff's server to support it; until it does, Settings › Sync says so.
-- Versions before 1.0.2 don't check for updates; they need the next one downloaded by hand, once.
-
-## Build it yourself
-
-macOS 14 or later and Xcode 16.
+You need macOS 14 or later and Xcode 16.
 
 ```sh
-swift build              # the SwiftPM executable
-./build.sh               # build/browse.app, signed for this Mac
+swift build        # SwiftPM executable
+./build.sh         # build/browse.app, signed for this Mac
 open build/browse.app
 ```
 
-`./fresh.sh` opens a copy with a profile of its own, apart from the one you browse with, and `./bench` drives a running copy from the shell (Settings › General › "Let a script drive browse"); see `skill/browse-bench/SKILL.md`. The code is SwiftUI and AppKit in `Sources/Browse/`.
+`./fresh.sh` starts a copy with its own profile. `./bench --test` drives that test copy from the shell; see [browse-bench](skill/browse-bench/SKILL.md). The SwiftUI and AppKit source lives in `Sources/Browse/`.
 
-Releases come from CI: `./release.sh 1.0.2 "What's new."` tags a version, and a GitHub Actions workflow builds, signs, notarizes and publishes it — which is also how every installed copy gets it. [docs/releasing.md](docs/releasing.md) has the details, [AGENTS.md](AGENTS.md) the rules for working here.
+Contributions are welcome; read [CONTRIBUTING.md](CONTRIBUTING.md) first. [Release notes](CHANGELOG.md), the [roadmap](ROADMAP.md), and [release process](docs/releasing.md) have more detail.
+
+## Current limits
+
+- Passkeys depend on Apple granting browse the browser passkey entitlement and signing the app with it. See [releasing.md](docs/releasing.md).
+- Sync needs Codegraff's server to support it. Until then, Settings › Sync says so.
+- Versions before 1.0.2 need one manual download to start receiving automatic updates.
 
 ## License
 
-browse is a Codegraff product released under [AGPL-3.0](LICENSE). Code from before the Codegraff work remains its original owner's under its [MIT license and copyright notice](LICENSE.MIT); the Jev step code adapts Browser Use's jev-ultrafast (MIT).
+browse is a Codegraff product under [AGPL-3.0](LICENSE). Earlier code retains its original owner's [MIT license and copyright notice](LICENSE.MIT). The Jev step code adapts Browser Use's jev-ultrafast (MIT).
