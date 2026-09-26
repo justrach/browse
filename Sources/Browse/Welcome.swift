@@ -21,8 +21,11 @@ struct WelcomePanel: View {
     @State private var wantsPasswords = true
     @State private var wantsHistory = true
     @State private var wantsBookmarks = true
+    @State private var wantsSignIns = true
     @State private var bringing = false
     @State private var brought: String?
+    /// What came in from an export file: Safari's zip, or bookmarks.
+    @State private var fromFile: String?
 
     // The default browser.
     @State private var isDefault = Links.isDefault
@@ -93,7 +96,7 @@ struct WelcomePanel: View {
 
             let sources = Chromium.installed()
             if sources.isEmpty {
-                Text("No other browser found on this Mac — nothing to bring.")
+                Text("No Chrome, Arc, Brave or other Chromium browser on this Mac.")
                     .font(.system(size: 13))
                     .foregroundStyle(Palette.faint)
             } else {
@@ -111,11 +114,18 @@ struct WelcomePanel: View {
                     Choice("Passwords", "macOS will ask once for that browser's keychain key", on: $wantsPasswords)
                     Choice("Bookmarks", "Folders and all, behind the bookmark button", on: $wantsBookmarks)
                     Choice("History", "The last few thousand places, for finishing addresses", on: $wantsHistory)
+                    Choice(
+                        "Sign-ins",
+                        Chromium.profiles(in: source ?? sources[0]).count > 1
+                            ? "Each profile becomes a space, signed in where it was"
+                            : "Stay signed in to the sites you use there",
+                        on: $wantsSignIns
+                    )
                 }
 
                 HStack(spacing: 12) {
                     Big(bringing ? "Bringing…" : "Bring them in", filled: true) { bringAll() }
-                        .disabled(bringing || brought != nil || !(wantsPasswords || wantsHistory || wantsBookmarks))
+                        .disabled(bringing || brought != nil || !(wantsPasswords || wantsHistory || wantsBookmarks || wantsSignIns))
                     if bringing { Ring(size: 10) }
                     if let brought {
                         Text(brought)
@@ -125,6 +135,25 @@ struct WelcomePanel: View {
                     }
                 }
                 .animation(Motion.settle, value: brought)
+            }
+
+            VStack(alignment: .leading, spacing: 10) {
+                Text("From Safari: in Safari, File › Export Browsing Data to File…, then choose the zip it makes. A bookmarks file from any browser works too.")
+                    .font(.system(size: 13))
+                    .foregroundStyle(Palette.muted)
+                    .fixedSize(horizontal: false, vertical: true)
+                HStack(spacing: 12) {
+                    Big("Choose an export…", filled: sources.isEmpty) {
+                        browser.importExport { fromFile = $0 }
+                    }
+                    if let fromFile {
+                        Text(fromFile)
+                            .font(.system(size: 13))
+                            .foregroundStyle(Palette.muted)
+                            .transition(.opacity)
+                    }
+                }
+                .animation(Motion.settle, value: fromFile)
             }
         }
     }
@@ -259,6 +288,13 @@ struct WelcomePanel: View {
         }
         if wantsBookmarks {
             lines.append("\(browser.takeBookmarks(from: source)) bookmarks")
+        }
+        if wantsSignIns {
+            group.enter()
+            Task {
+                lines.append(await browser.takeSignIns(from: source))
+                group.leave()
+            }
         }
         if wantsHistory {
             group.enter()

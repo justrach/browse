@@ -1,0 +1,12 @@
+[package]
+name = "shield-lists"
+version = "0.1.0"
+edition = "2021"
+publish = false
+license = "AGPL-3.0-only"
+
+# Brave's filter-list engine, for its conversion into WebKit's content
+# blocker rules — the same one Brave's iOS browser uses.
+[dependencies]
+adblock = { version = "0.13", default-features = false, features = ["content-blocking", "embedded-domain-resolver", "full-regex-handling"] }
+serde_json = "1"

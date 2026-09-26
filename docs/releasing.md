@@ -127,3 +127,17 @@ When Apple ships a WebKit security fix (support.apple.com/100100 lists them):
 A build's first number over a thousand is its macOS (22625 → 22); floors
 are only compared within their own line, and a line with no floor is never
 warned about.
+
+## The ad blocker's lists
+
+The app carries EasyList and EasyPrivacy, already converted into WebKit's
+content blocker rules, in `Assets/Shield` (Shield.swift). They're only as new
+as the last time someone made them, so before a release:
+
+1. `./shield-lists` — downloads both lists, converts them with Brave's
+   adblock engine (`tools/shield-lists`, needs cargo), and writes the two
+   `.json.xz` files and `version`.
+2. Commit `Assets/Shield`.
+
+A new `version` is compiled once on each Mac, in the background, the first
+time the release opens; the compiled copy of the old one is thrown away.

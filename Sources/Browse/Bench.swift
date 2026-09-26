@@ -445,6 +445,8 @@ final class Bench {
                 "field": browser.editing,
                 "suggesting": browser.suggesting != nil,
                 "sync": Store.testing ? Sync.shared.probe : [:],
+                // Test runs only, and never a password: who is saved where.
+                "logins": Store.testing ? Vault.all().map { "\($0.user)@\($0.host)" } : [],
                 "account": Store.testing ? CodegraffAccount.shared.probe : [:],
                 "engine": Store.testing ? WebKitCheck.shared.probe : [:],
                 "offering": browser.offering != nil,
@@ -1357,6 +1359,13 @@ final class Bench {
             // entered as if pasted, a round now, a page forgotten.
             if Store.testing {
                 if let code = request["syncjoin"] as? String { Task { _ = await Sync.shared.join(code) } }
+                // A connected app's question, pairing or tabs, answered.
+                if let said = request["connect"] as? String { Connect.shared.answer(said == "yes") }
+                // A login saved, as if signed in with: "host|user|password".
+                if let spec = request["vault"] as? String {
+                    let parts = spec.split(separator: "|", maxSplits: 2).map(String.init)
+                    if parts.count == 3 { Vault.save(host: parts[0], user: parts[1], password: parts[2], used: Date()) }
+                }
                 if request["syncnow"] as? Bool == true { Sync.shared.now() }
                 if request["signin"] as? Bool == true {
                     CodegraffAccount.shared.signIn(show: { browser.open($0, foreground: true) }, done: { browser.signedIn() })

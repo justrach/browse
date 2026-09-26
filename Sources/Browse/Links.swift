@@ -24,6 +24,7 @@ final class Links: NSObject, NSApplicationDelegate {
 
     func applicationWillTerminate(_ notification: Notification) {
         Links.flush?()
+        Connect.withdraw()
     }
 
     /// The nearest thing to a crash reporter a browser with no server can

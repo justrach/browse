@@ -1,0 +1,37 @@
+#!/bin/bash
+# The ad blocker's lists: EasyList and EasyPrivacy, turned into WebKit's
+# content blocker rules by Brave's adblock engine (tools/shield-lists) and
+# packed small into Assets/Shield, which build.sh puts in the app. Run it
+# before a release to bring the lists up to date; the app compiles each new
+# set once, in the background, and keeps it (Shield.swift).
+#
+#   ./shield-lists
+#
+# Needs cargo (rustup.rs) and a network.
+set -euo pipefail
+cd "$(dirname "$0")"
+
+OUT=Assets/Shield
+WORK="$(mktemp -d)"
+trap 'rm -rf "$WORK"' EXIT
+
+for url in https://easylist.to/easylist/easylist.txt https://easylist.to/easylist/easyprivacy.txt; do
+  curl -fsSL --retry 3 -o "$WORK/$(basename "$url")" "$url"
+  echo "$(basename "$url" .txt): $(grep -m1 '^! Version:' "$WORK/$(basename "$url")" | cut -d' ' -f3)"
+done
+
+cargo build --release --quiet --manifest-path tools/shield-lists/Cargo.toml
+BIN=tools/shield-lists/target/release/shield-lists
+
+mkdir -p "$OUT"
+for KIND in network cosmetic; do
+  printf '%s: ' "$KIND"
+  "$BIN" "$KIND" "$WORK/easylist.txt" "$WORK/easyprivacy.txt" > "$WORK/$KIND.json"
+  # xz, which the app opens with Apple's own Compression (NSData .lzma).
+  python3 -c 'import lzma, sys; open(sys.argv[2], "wb").write(lzma.compress(open(sys.argv[1], "rb").read(), preset=9 | lzma.PRESET_EXTREME))' \
+    "$WORK/$KIND.json" "$OUT/$KIND.json.xz"
+done
+
+# What the app keys its compiled copy by: a new set is compiled once.
+cat "$OUT"/*.json.xz | shasum -a 256 | cut -c1-12 > "$OUT/version"
+echo "wrote $OUT ($(cat "$OUT/version")): $(du -ch "$OUT"/*.json.xz | tail -1 | cut -f1)"

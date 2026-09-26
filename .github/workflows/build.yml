@@ -21,6 +21,8 @@ jobs:
         run: |
           bash tests/search-suggestions.sh
           bash tests/history.sh
+          bash tests/safari-import.sh
+          bash tests/chromium-import.sh
       - name: Build
         run: swift build -c release
       - name: Bundle, signed for this runner only

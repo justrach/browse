@@ -244,6 +244,11 @@ final class Preferences: ObservableObject {
     @Published var sync: Bool {
         didSet { store.set(sync, forKey: "sync.on") }
     }
+    /// Passwords too, sealed the same way, behind a switch of their own.
+    /// Off unless switched on.
+    @Published var syncPasswords: Bool {
+        didSet { store.set(syncPasswords, forKey: "sync.passwords") }
+    }
     /// Whether Codegraff's `drive` tool may ask Jev to pick its steps on a
     /// page, through the Codegraff sign-in (see Jev.swift).
     @Published var agentJev: Bool {
@@ -340,6 +345,7 @@ final class Preferences: ObservableObject {
         Themes.start(chosenTheme)
         agentJev = store.object(forKey: "agent.jev") as? Bool ?? true
         sync = store.bool(forKey: "sync.on")
+        syncPasswords = store.bool(forKey: "sync.passwords")
         agentPath = store.string(forKey: "agent.path") ?? ""
         agentModel = store.string(forKey: "agent.model") ?? ""
         agentEffort = store.string(forKey: "agent.effort") ?? ""

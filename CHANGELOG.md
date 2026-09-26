@@ -14,9 +14,18 @@ in [ROADMAP.md](ROADMAP.md).
 ### Added
 
 - Optional recent searches in the empty address field and Google query suggestions while typing, with separate switches in Settings › General. Google suggestions only run with Google selected and stay off in private tabs.
+- Bring things over from Safari: export from Safari with File › Export Browsing Data to File…, then choose the zip on the welcome screens or under Bookmarks › Safari or a file… Bookmarks (the Reading List included), history and, if exported, passwords come in. A bookmarks file from Firefox or any other browser works too.
+- Connected apps, in Settings › Agent, off by default: another app on your Mac — Harness first — can use browse for its agents' web tasks, with your sign-ins. It pairs once, with a code you check on both sides; you choose what it may do; every request is signed, a pill names the app while it works, and Revoke takes it back. It never types a password. See docs/connected-apps.md.
+- Bring each Chrome, Arc, Brave, Dia or Edge profile over as a space of its own, signed in where it was: its sign-ins go into that space's own cookies, and its bookmarks into a folder under the profile's name.
+- Passwords can sync between your Macs too, behind their own switch in Settings › Sync, off until you switch it on: sealed on your Mac with the same key as history and bookmarks, so Codegraff's server can't read them.
+
+### Changed
+
+- Ad and tracker blocking uses EasyList and EasyPrivacy, about 130,000 rules instead of a short list of our own: on busy news sites, a quarter to a third fewer requests, reaching a third to a half as many servers as before. The lists are compiled once, in the background, the first time a new version opens; the short list blocks in the meantime.
 
 ### Fixed
 
+- Two Macs switching sync on at the same moment could each make a key of their own and go on syncing apart, neither able to read the other's. Now the second gives way and asks for the first's code, and every round checks the key still fits the account before sending anything.
 - Search recall offers more useful history matches and keeps queries available when a results page fails to load.
 
 ## 1.0.3 — 26 September 2026
