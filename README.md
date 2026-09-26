@@ -1,7 +1,5 @@
 # browse
 
-<img src="Icon/browse.png" alt="browse icon" width="72">
-
 **A quieter browser for the Mac, with Codegraff beside the page.**
 
 browse is a small WebKit browser for reading, searching, and getting things done. Keep the page in view while [Codegraff](https://github.com/justrach/codegraff) researches a question, follows links, or helps with a form.
@@ -20,7 +18,17 @@ The things you expect from a browser are here too: blocking for ads and trackers
 
 For a quieter window, press **⌘S** to hide the tab bar or sidebar. The page fills the window; rest the pointer at the top edge (or left edge for sidebar tabs) to bring the tabs back temporarily. Press **⌘S** again to keep them visible. **⌘L** still opens the address and search field.
 
+![browse with the tab bar hidden against a soft coastal desktop backdrop](docs/screenshots/quiet-desktop.png)
+
+*Just the page. A real browse capture with ⌘S, shown over an original desktop backdrop.*
+
 To start with the sidebar tucked away every time, enable **Tabs in a sidebar**, then **Hide the sidebar until the pointer reaches the edge** in Settings › Tabs.
+
+### Beside Chrome
+
+The same Wikipedia page, in two equally sized windows: Chrome with its standard tabs and address bar, and browse with the tab bar hidden using **⌘S**.
+
+![Chrome and browse showing the same page at equal window sizes](docs/screenshots/browser-comparison.png)
 
 ## Ask, without leaving
 
@@ -32,14 +40,13 @@ The Ask tab gives Codegraff a place for a question or a task. Ask about the page
 
 Codegraff can search, read several pages, click, type, and fill forms on your tab. It reads the fields and their labels before filling them, then leaves you to check anything that matters. It is instructed to ask before submitting a payment, post, booking, or signup.
 
-![Codegraff fills a form on the page and reports what it did](docs/screenshots/fill-a-form.png)
+![A polished event-registration demo filled in browse](docs/screenshots/event-registration-window.png)
 
-*Fields filled; the form is left for review before submission.*
+*A local event-registration demo, filled through browse's browser tools. Fictional details; nothing submitted. [Demo source](docs/demos/event-registration.html).*
 
-For a series of small interactions, Codegraff can use [Jev](https://docs.typesafe.ai/introduction) to choose the next click or control. Your Codegraff account supplies the models available in the picker.
+Your Codegraff account supplies the models available in the picker.
 
-<p align="center"><img src="docs/images/reading-workshop-v1.png" alt="Two illustrated mice reading and filing pages" width="560"></p>
-<!-- Illustration generated with OpenAI ImageGen. Product screenshots are captures of browse. -->
+![Two illustrated mice reading and filing pages](docs/images/reading-workshop-v1.png)
 
 ## Make it feel like yours
 

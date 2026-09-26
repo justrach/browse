@@ -1,0 +1,395 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="color-scheme" content="light">
+  <title>Design after hours — Local demo</title>
+  <style>
+    :root {
+      color-scheme: light;
+      --paper: #f4f0e8;
+      --card: #fffdf8;
+      --ink: #292521;
+      --muted: #777169;
+      --line: #e7dfd4;
+      --coral: #c9614d;
+      --coral-dark: #a94c3c;
+      --wash: #f7e8e1;
+      --serif: Iowan Old Style, "Palatino Linotype", "Book Antiqua", Georgia, serif;
+      --sans: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+    }
+
+    * { box-sizing: border-box; }
+
+    body {
+      min-width: 320px;
+      min-height: 100vh;
+      margin: 0;
+      padding: 34px 30px;
+      display: grid;
+      place-items: center;
+      color: var(--ink);
+      background:
+        radial-gradient(ellipse at 8% 10%, rgb(201 97 77 / 8%), transparent 32rem),
+        var(--paper);
+      font-family: var(--sans);
+      -webkit-font-smoothing: antialiased;
+    }
+
+    .page {
+      width: min(100%, 1040px);
+      overflow: hidden;
+      background: var(--card);
+      border: 1px solid #e9e2d8;
+      border-radius: 14px;
+      box-shadow: 0 18px 55px rgb(54 42 31 / 8%);
+    }
+
+    .masthead {
+      min-height: 66px;
+      padding: 0 38px;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      border-bottom: 1px solid var(--line);
+    }
+
+    .wordmark {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      color: var(--ink);
+      font-size: 12px;
+      font-weight: 650;
+      letter-spacing: .12em;
+      text-transform: uppercase;
+    }
+
+    .mark {
+      width: 24px;
+      height: 24px;
+      display: grid;
+      place-items: center;
+      color: var(--coral-dark);
+      border: 1px solid #d9a99c;
+      border-radius: 50%;
+      font-family: var(--serif);
+      font-size: 15px;
+      font-style: italic;
+      letter-spacing: 0;
+    }
+
+    .masthead-note {
+      color: var(--muted);
+      font-size: 12px;
+      letter-spacing: .02em;
+    }
+
+    .content {
+      padding: 42px 48px 46px;
+      display: grid;
+      grid-template-columns: minmax(0, 1fr) minmax(340px, .82fr);
+      gap: 54px;
+      align-items: start;
+    }
+
+    .event-copy { padding-top: 5px; }
+
+    .eyebrow {
+      margin: 0 0 16px;
+      color: var(--coral-dark);
+      font-size: 11px;
+      font-weight: 700;
+      letter-spacing: .16em;
+      text-transform: uppercase;
+    }
+
+    h1 {
+      max-width: 470px;
+      margin: 0;
+      font-family: var(--serif);
+      font-size: clamp(46px, 5.6vw, 66px);
+      font-weight: 500;
+      letter-spacing: -.055em;
+      line-height: .99;
+    }
+
+    .dek {
+      max-width: 390px;
+      margin: 22px 0 30px;
+      color: #655e56;
+      font-family: var(--serif);
+      font-size: 18px;
+      line-height: 1.5;
+    }
+
+    .event-rule {
+      width: 52px;
+      height: 2px;
+      margin: 0 0 25px;
+      background: var(--coral);
+    }
+
+    .details { margin: 0; }
+
+    .detail-row {
+      padding: 13px 0;
+      display: grid;
+      grid-template-columns: 86px 1fr;
+      gap: 10px;
+      border-top: 1px solid var(--line);
+    }
+
+    .detail-row:last-child { border-bottom: 1px solid var(--line); }
+
+    dt {
+      color: var(--muted);
+      font-size: 11px;
+      font-weight: 650;
+      letter-spacing: .1em;
+      text-transform: uppercase;
+    }
+
+    dd {
+      margin: 0;
+      font-size: 13px;
+      line-height: 1.45;
+    }
+
+    .note {
+      max-width: 380px;
+      margin: 22px 0 0;
+      color: var(--muted);
+      font-size: 12px;
+      line-height: 1.55;
+    }
+
+    .form-card {
+      padding: 25px 26px 23px;
+      background: #fffefa;
+      border: 1px solid var(--line);
+      border-radius: 10px;
+    }
+
+    .form-heading {
+      margin: 0 0 5px;
+      font-family: var(--serif);
+      font-size: 25px;
+      font-weight: 500;
+      letter-spacing: -.025em;
+    }
+
+    .form-intro {
+      margin: 0 0 21px;
+      color: var(--muted);
+      font-size: 12px;
+      line-height: 1.5;
+    }
+
+    .demo-badge {
+      margin: 0 0 22px;
+      padding: 10px 12px;
+      display: flex;
+      align-items: center;
+      gap: 9px;
+      color: #8f483a;
+      background: var(--wash);
+      border: 1px solid #efd1c8;
+      border-radius: 6px;
+      font-size: 11px;
+      font-weight: 650;
+      letter-spacing: .015em;
+    }
+
+    .demo-dot {
+      width: 7px;
+      height: 7px;
+      flex: 0 0 auto;
+      background: var(--coral);
+      border-radius: 50%;
+    }
+
+    .field { margin-top: 15px; }
+
+    label {
+      margin-bottom: 7px;
+      display: block;
+      color: #49433d;
+      font-size: 12px;
+      font-weight: 600;
+    }
+
+    .optional {
+      margin-left: 4px;
+      color: #989087;
+      font-weight: 400;
+    }
+
+    input, select, textarea {
+      width: 100%;
+      min-height: 42px;
+      padding: 10px 12px;
+      color: var(--ink);
+      background: #fff;
+      border: 1px solid #dcd4c9;
+      border-radius: 5px;
+      font: 13px var(--sans);
+      outline: none;
+      transition: border-color .15s ease, box-shadow .15s ease;
+    }
+
+    input::placeholder, textarea::placeholder { color: #aaa39a; }
+
+    input:focus, select:focus, textarea:focus {
+      border-color: var(--coral);
+      box-shadow: 0 0 0 3px rgb(201 97 77 / 15%);
+    }
+
+    select { appearance: none; padding-right: 38px; }
+
+    .select-wrap { position: relative; }
+
+    .select-wrap::after {
+      position: absolute;
+      top: 14px;
+      right: 14px;
+      width: 8px;
+      height: 8px;
+      content: "";
+      border-right: 1.5px solid #777169;
+      border-bottom: 1.5px solid #777169;
+      transform: rotate(45deg);
+      pointer-events: none;
+    }
+
+    textarea {
+      min-height: 76px;
+      resize: vertical;
+      line-height: 1.45;
+    }
+
+    .submit {
+      width: 100%;
+      min-height: 44px;
+      margin-top: 19px;
+      color: #fffaf5;
+      background: var(--coral-dark);
+      border: 1px solid var(--coral-dark);
+      border-radius: 5px;
+      font: 600 13px var(--sans);
+      cursor: pointer;
+      transition: background .15s ease, transform .15s ease;
+    }
+
+    .submit:hover { background: #933e32; }
+    .submit:active { transform: translateY(1px); }
+    .submit:focus-visible { outline: 3px solid #e5a08f; outline-offset: 3px; }
+
+    .form-footnote {
+      margin: 11px 0 0;
+      color: #8a837a;
+      font-size: 10px;
+      line-height: 1.45;
+      text-align: center;
+    }
+
+    .status {
+      min-height: 19px;
+      margin: 12px 0 0;
+      color: var(--coral-dark);
+      font-size: 12px;
+      font-weight: 600;
+      line-height: 1.5;
+      text-align: center;
+    }
+
+    @media (max-width: 760px) {
+      body { padding: 16px; }
+      .masthead { min-height: 58px; padding: 0 20px; }
+      .masthead-note { font-size: 10px; }
+      .content { padding: 30px 22px 28px; grid-template-columns: 1fr; gap: 30px; }
+      h1 { max-width: none; font-size: clamp(48px, 12vw, 66px); }
+      .dek { margin: 16px 0 23px; }
+      .form-card { padding: 22px 19px; }
+    }
+
+    @media (prefers-reduced-motion: reduce) {
+      *, *::before, *::after { scroll-behavior: auto !important; transition-duration: .01ms !important; }
+    }
+  </style>
+</head>
+<body>
+  <main class="page">
+    <header class="masthead">
+      <div class="wordmark"><span class="mark" aria-hidden="true">d</span> Fieldnotes Studio</div>
+      <span class="masthead-note">An evening for curious makers</span>
+    </header>
+
+    <div class="content">
+      <section class="event-copy" aria-labelledby="event-title">
+        <p class="eyebrow">Gather · Learn · Make</p>
+        <h1 id="event-title">Design<br>after hours</h1>
+        <p class="dek">A relaxed evening of good questions, fresh perspectives, and the ideas we take back to our desks.</p>
+        <div class="event-rule" aria-hidden="true"></div>
+
+        <dl class="details">
+          <div class="detail-row">
+            <dt>When</dt>
+            <dd>Thursday, October 22<br>6:30–9:00 pm</dd>
+          </div>
+          <div class="detail-row">
+            <dt>Where</dt>
+            <dd>The Assembly Room<br>Fictional venue · Singapore</dd>
+          </div>
+          <div class="detail-row">
+            <dt>Includes</dt>
+            <dd>Short talks, open conversation, and something good to drink</dd>
+          </div>
+        </dl>
+        <p class="note">Come as you are. Bring a project, a question, or just an hour to think alongside other people who care about the details.</p>
+      </section>
+
+      <section class="form-card" aria-labelledby="form-title">
+        <h2 class="form-heading" id="form-title">Save your place</h2>
+        <p class="form-intro">A few details help us make the evening welcoming.</p>
+        <p class="demo-badge"><span class="demo-dot" aria-hidden="true"></span>Local demo <span aria-hidden="true">·</span> Nothing is submitted</p>
+
+        <form id="registration-form">
+          <div class="field">
+            <label for="name">Name</label>
+            <input id="name" name="name" type="text" autocomplete="name" placeholder="Your name" required>
+          </div>
+          <div class="field">
+            <label for="email">Email</label>
+            <input id="email" name="email" type="email" autocomplete="email" placeholder="you@example.com" required>
+          </div>
+          <div class="field">
+            <label for="ticket">Ticket type</label>
+            <div class="select-wrap">
+              <select id="ticket" name="ticket" required>
+                <option value="" selected disabled>Choose a ticket</option>
+                <option value="general">General admission · $12</option>
+                <option value="student">Student · complimentary</option>
+              </select>
+            </div>
+          </div>
+          <div class="field">
+            <label for="note">Anything you'd like us to know? <span class="optional">Optional</span></label>
+            <textarea id="note" name="note" placeholder="Access needs, a topic on your mind…"></textarea>
+          </div>
+          <button class="submit" type="submit">Request a place</button>
+          <p class="form-footnote">This page is a local browser demo. No registration is sent.</p>
+          <p class="status" id="form-status" role="status" aria-live="polite"></p>
+        </form>
+      </section>
+    </div>
+  </main>
+  <script>
+    document.getElementById("registration-form").addEventListener("submit", (event) => {
+      event.preventDefault();
+      document.getElementById("form-status").textContent = "Demo only — no registration sent.";
+    });
+  </script>
+</body>
+</html>
