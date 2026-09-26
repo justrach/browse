@@ -436,7 +436,7 @@ struct SettingsPanel: View {
                     Text("By Codegraff · WebKit on macOS")
                         .font(.system(size: 12))
                         .foregroundStyle(Palette.muted)
-                    Text("Version \(Updater.version) · build \(Updater.build) · AGPL-3.0")
+                    Text("Version \(Updater.version) · build \(String(Updater.build)) · AGPL-3.0")
                         .font(.system(size: 12))
                         .foregroundStyle(Palette.muted)
                 }
