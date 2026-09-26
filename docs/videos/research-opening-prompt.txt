@@ -1,0 +1,11 @@
+Use case: ads-marketing
+Asset type: second opening image for browse's narrated Mac browser demo, 16:9 landscape.
+Primary request: a calm, premium editorial illustration about having room for more research and work. Match the companion memory comparison card's warm ivory paper, muted sage, charcoal typography and soft natural light. A tasteful desk scene with an open slim silver laptop showing blank abstract page cards, neatly arranged research notes, book, and a few translucent paper browser tabs; no invented application UI, no people.
+Composition: spacious wide landscape, large beautiful readable serif headline in upper half, scene in lower half. Light, restrained, rounded forms, gentle shadows.
+Text verbatim:
+"More room for research."
+"Less memory pressure."
+"Potentially less energy spent swapping."
+Footer verbatim:
+"Energy use and battery life have not been measured."
+Constraints: This expresses a conditional benefit, not a proven energy or battery saving. No battery icon, no hours, no percentage, no extra claims or text. Do not imply a measured number of extra tabs. Polished understated product-film title card.

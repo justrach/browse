@@ -1,9 +1,17 @@
-This is browse. A quiet, native browser for the Mac. Press Command S to hide the tabs, and give the page the whole window.
+Research rarely fits in one tab. In our ten-tab test, browse used fifty-nine percent less RAM than Chrome, leaving more memory for the rest of your work.
 
-Move between tabs with Command Shift right bracket, and back with Command Shift left bracket. The highlight slides to the tab you choose.
+Less RAM, more room for research, and potentially lower energy use when reduced memory pressure means less swapping.
+
+Command L brings up search. Pick up a recent query, or explore fresh Google suggestions as you type. Both options are yours to turn on.
+
+Already have a source open? Command K finds your tabs. Type part of the title, choose your page, and jump back into the research.
+
+Compare sources with Command Shift right bracket. Left bracket brings you back, with the highlight following your place.
 
 Within a tab, Command right bracket moves forward in page history. Command left bracket takes you back.
 
-As you scroll, the tab fills to show how far you have read. It follows the page as you move down, and returns as you scroll back up.
+As you scroll, the tab shows how far you have read. Revisit a section, and the progress follows you back.
 
-Less retyping. More room for the page. Browse, for the Mac.
+Codegraff sits beside the page. Ask about what you are reading, explore a question, or get help with a form, without leaving your work.
+
+When it is time to focus, Command S lets the tabs step aside. More room for your research. Browse, for the Mac.

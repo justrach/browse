@@ -1,0 +1,15 @@
+Use case: ads-marketing
+Asset type: opening title card for a real macOS browser video and its GitHub README, wide 16:9 landscape.
+Primary request: a refined, light editorial illustration explaining browse's measured memory savings, with excellent readable typography and a sense of room for more browsing.
+Scene/backdrop: warm ivory studio background, soft natural light, fine paper texture. Small sculptural stacks of softly rounded browser-tab cards arranged along the bottom third, airy sage accents for browse and neutral graphite for Chrome. Both illustrate the same ten retained tabs; no literal capacity multiplier, no invented screenshots, no logos.
+Composition: sophisticated spacious editorial layout, typography dominates upper two thirds. Restrained sage, ivory and charcoal matching a quiet native Mac app. Rounded, subtle shadows. Clean and inviting, no cartoon characters.
+Text verbatim, carefully typeset:
+"browse"
+"Same 10 tabs."
+"59% less RAM."
+"browse 289 MiB     Chrome 701 MiB"
+"412 MiB less memory in this test."
+Footer, smaller but readable:
+"One Mac · Synthetic workload · Whole-browser median physical footprint"
+"browse: 4 tabs awake, 6 asleep · Maximum tab capacity not measured"
+Constraints: Accurate exact numbers and wording. No 'times more tabs' claim, no speed claims, no price claim, no invented measurement. Do not include additional text. All lettering must be readable. Leave generous breathing room. Landscape video title-card aesthetic, premium and understated.

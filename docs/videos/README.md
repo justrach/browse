@@ -1,14 +1,41 @@
 # browse demo
 
-The narrated walkthrough shows keyboard shortcuts and reading progress in the real macOS app. The README's animated preview links to the full MP4.
+The 100-second walkthrough opens with the measured RAM comparison, then shows search, keyboard shortcuts, reading progress, and Codegraff in the real macOS app. The README's animated preview links to the full MP4.
 
 | Shortcut | Action |
 | --- | --- |
+| ⌘L | Search, recent queries, and optional Google suggestions |
+| ⌘K | Find an open tab |
 | ⌘S | Hide or show the tabs |
 | ⇧⌘] / ⇧⌘[ | Next / previous tab |
 | ⌘] / ⌘[ | Forward / back within a tab's page history |
 
 Scrolling fills the active tab to indicate reading progress. The enlarged strip in the video is a crop of the same live recording.
+
+## Opening images and measurements
+
+The opening compares **289 MiB for browse with 701 MiB for Chrome**, about **59% less RAM** with ten retained tabs in the [recorded synthetic workload](../performance.md). browse had four awake tabs and six asleep. This is one Mac and one workload, not a measured maximum tab capacity. The benchmark used build `8452b4d`; the footage uses the later build identified below.
+
+The narration says lower memory pressure can *potentially* reduce energy spent swapping. Energy consumption and battery life have not been measured.
+
+The two opening illustrations were made using the built-in ImageGen tool. They are concept art, not browser screenshots or quantitative charts:
+
+- [RAM comparison image](ram-opening-v1.png) · [Exact prompt](ram-opening-prompt.txt)
+- [Research image](research-opening-v1.png) · [Exact prompt](research-opening-prompt.txt)
+
+## Chapters
+
+| Time | Scene |
+| --- | --- |
+| 0:00 | Ten-tab RAM comparison |
+| 0:12 | More room for research |
+| 0:22 | ⌘L search and suggestions |
+| 0:35 | ⌘K tab finder |
+| 0:46 | Switching tabs |
+| 0:56 | Page history |
+| 1:06 | Reading progress while scrolling |
+| 1:18 | Codegraff beside the page |
+| 1:29 | ⌘S quiet mode |
 
 ## Recording notes
 
@@ -16,6 +43,7 @@ Scrolling fills the active tab to indicate reading progress. The enlarged strip 
 - An isolated demo profile was used. No personal browsing history or account was recorded.
 - Native ScreenCaptureKit window capture, up to 60 frames per second. The export is 1920 × 1080 at 60 fps, with H.264 video, AAC narration, and optional English subtitles.
 - Shortcuts ran through browse's keyboard handler. Page scrolling used WebKit's native smooth scrolling; the progress animation and sliding tab highlight are the app's own rendering.
+- The AI shot shows the real Codegraff composer with the current page attached and a draft question; it does not show a submitted request or claim a completed answer.
 - Animated keycaps and the enlarged tab strip are editorial overlays. The browser UI was not generated or recreated.
 - Narration: Gemini 3.8 Flash TTS, Sulafat voice. [Transcript](transcript.txt) and [subtitles](browse-demo.srt).
 - Public pages: [WebKit](https://en.wikipedia.org/wiki/WebKit), [Japan](https://en.wikipedia.org/wiki/Japan), and [Safari](https://en.wikipedia.org/wiki/Safari_(web_browser)). Wikipedia text is available under CC BY-SA 4.0; individual media licenses are on the linked Wikimedia Commons file pages.
