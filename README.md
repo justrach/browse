@@ -31,7 +31,9 @@
 
 *One Mac, one matched synthetic single-page run; memory is median physical footprint. App size excludes shared macOS WebKit, profiles, caches, and Codegraff. [Measurements, builds, and full comparison →](docs/performance.md)*
 
-![browse showing a Wikipedia article with its tab bar hidden on a quiet desktop](docs/screenshots/quiet-desktop.png)
+[![Watch browse in motion: animated shortcut keys, switching tabs, hiding the bar, and reading progress](docs/videos/browse-demo-preview.gif)](https://github.com/justrach/browse/raw/refs/heads/main/docs/videos/browse-demo.mp4)
+
+<p align="center"><a href="https://github.com/justrach/browse/raw/refs/heads/main/docs/videos/browse-demo.mp4"><strong>Watch the 55-second narrated demo →</strong></a><br><sub>Real app footage · Animated shortcut prompts · Reading progress as you scroll · <a href="docs/videos/README.md">Capture notes and transcript</a></sub></p>
 
 ## Room for the page
 

@@ -1,0 +1,49 @@
+1
+00:00:00,600 --> 00:00:01,709
+This is browse.
+
+2
+00:00:01,709 --> 00:00:04,482
+A quiet, native browser for the Mac.
+
+3
+00:00:04,482 --> 00:00:09,948
+Press Command S to hide the tabs, and give the page the whole window.
+
+4
+00:00:12,600 --> 00:00:19,385
+Move between tabs with Command Shift right bracket, and back with
+Command Shift left bracket.
+
+5
+00:00:19,385 --> 00:00:22,557
+The highlight slides to the tab you choose.
+
+6
+00:00:24,600 --> 00:00:29,329
+Within a tab, Command right bracket moves forward in page history.
+
+7
+00:00:29,329 --> 00:00:31,948
+Command left bracket takes you back.
+
+8
+00:00:34,600 --> 00:00:38,868
+As you scroll, the tab fills to show how far you have read.
+
+9
+00:00:38,868 --> 00:00:44,165
+It follows the page as you move down, and returns as you scroll back
+up.
+
+10
+00:00:48,600 --> 00:00:49,833
+Less retyping.
+
+11
+00:00:49,833 --> 00:00:51,920
+More room for the page.
+
+12
+00:00:51,920 --> 00:00:53,817
+Browse, for the Mac.

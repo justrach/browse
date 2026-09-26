@@ -1,0 +1,9 @@
+This is browse. A quiet, native browser for the Mac. Press Command S to hide the tabs, and give the page the whole window.
+
+Move between tabs with Command Shift right bracket, and back with Command Shift left bracket. The highlight slides to the tab you choose.
+
+Within a tab, Command right bracket moves forward in page history. Command left bracket takes you back.
+
+As you scroll, the tab fills to show how far you have read. It follows the page as you move down, and returns as you scroll back up.
+
+Less retyping. More room for the page. Browse, for the Mac.
