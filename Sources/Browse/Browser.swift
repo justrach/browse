@@ -12,6 +12,7 @@ final class Browser: NSObject, ObservableObject {
     @Published var activeID: Tab.ID? {
         didSet {
             guard oldValue != activeID else { return }
+            guess()
             // Another tab picked, opened or come to the front while the talk
             // fills the stage is a page wanted: the stage goes back to it.
             if talkOnStage { leaveStage() }
@@ -126,13 +127,17 @@ final class Browser: NSObject, ObservableObject {
     /// tab otherwise — and the stage goes back to the page.
     @discardableResult
     func visit(_ typed: String) -> Bool {
-        guard let url = destination(for: typed.trimmingCharacters(in: .whitespacesAndNewlines)) else { return false }
+        let words = typed.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard let url = destination(for: words) else { return false }
+        let searched = Address.url(from: words) == nil ? words : nil
         if let tab = active, tab.isBlank {
+            if let searched { rememberSearch(searched, url: url, in: tab) }
             tab.go(to: url)
             leaveStage()
         } else {
             // Opening it brings it to the front, and that leaves the stage.
-            open(url, foreground: true)
+            let tab = open(url, foreground: true)
+            if let searched { rememberSearch(searched, url: url, in: tab) }
         }
         return true
     }
@@ -218,19 +223,36 @@ final class Browser: NSObject, ObservableObject {
 
     /// The address field, raised over a page by ⌘L. A blank tab shows it
     /// without being asked — there is nothing else for that tab to show.
-    @Published var editing = false
+    @Published var editing = false {
+        didSet { if !editing { cancelGoogleSuggestions() } }
+    }
     /// What is in the field. Every change re-reads the history, because the
     /// list under the field and the grey ending inside it are both just
     /// answers to this string.
     @Published var typed = "" { didSet { guess() } }
 
     let history = History()
+    /// Count a submitted search now; its matching page finish adds a title.
+    private var submittedSearches: [Tab.ID: String] = [:]
     /// What the field is offering, best first.
     @Published private(set) var offers: [Suggestion] = []
     /// The rest of the best match, drawn grey after the caret. Tab takes it.
     @Published private(set) var ending: String?
     /// Which row the arrow keys have walked to, if any.
     @Published var picked: Int?
+    private var googleTask: Task<Void, Never>?
+    private var googleGeneration = 0
+    private lazy var googleSession: URLSession = {
+        let config = URLSessionConfiguration.ephemeral
+        config.httpShouldSetCookies = false
+        config.httpCookieAcceptPolicy = .never
+        config.httpCookieStorage = nil
+        config.urlCache = nil
+        config.requestCachePolicy = .reloadIgnoringLocalCacheData
+        config.timeoutIntervalForRequest = 4
+        config.timeoutIntervalForResource = 4
+        return URLSession(configuration: config)
+    }()
     /// Bumped when what was typed isn't an address and can't be searched for.
     @Published private(set) var refusals = 0
     /// Bumped whenever the cursor should go back into the field.
@@ -884,8 +906,25 @@ final class Browser: NSObject, ObservableObject {
         // The History menu lists what the history holds, and the menu is drawn
         // from this object's changes — so the history's are passed on.
         history.objectWillChange
-            .sink { [weak self] in self?.objectWillChange.send() }
+            .sink { [weak self] in
+                self?.objectWillChange.send()
+                // This publisher fires before visits change. Recompute later
+                // so a forgotten search disappears from an open field.
+                DispatchQueue.main.async { [weak self] in
+                    guard let self, self.fieldShowing else { return }
+                    self.guess()
+                }
+            }
             .store(in: &bag)
+        for changed in [prefs.$engine.map { _ in () }.eraseToAnyPublisher(),
+                        prefs.$customEngine.map { _ in () }.eraseToAnyPublisher(),
+                        prefs.$recentSearches.map { _ in () }.eraseToAnyPublisher(),
+                        prefs.$googleSuggestions.map { _ in () }.eraseToAnyPublisher()] {
+            changed.dropFirst().sink { [weak self] in
+                self?.cancelGoogleSuggestions()
+                DispatchQueue.main.async { [weak self] in self?.guess() }
+            }.store(in: &bag)
+        }
         bookmarks.objectWillChange
             .sink { [weak self] in self?.objectWillChange.send() }
             .store(in: &bag)
@@ -1277,6 +1316,7 @@ final class Browser: NSObject, ObservableObject {
             } else {
                 let fresh = Tab()
                 remember(tab, at: 0)
+                submittedSearches[tab.id] = nil
                 tab.close()
                 adopt(fresh)
                 tabs = [fresh]
@@ -1287,6 +1327,7 @@ final class Browser: NSObject, ObservableObject {
         }
 
         remember(tab, at: index)
+        submittedSearches[tab.id] = nil
         tab.close()
         tabs.remove(at: index)
         if activeID == tab.id {
@@ -1827,6 +1868,7 @@ final class Browser: NSObject, ObservableObject {
     }
 
     private func guess() {
+        cancelGoogleSuggestions()
         guard !summoning else {
             offers = openPages(matching: typed)
             ending = nil
@@ -1836,8 +1878,14 @@ final class Browser: NSObject, ObservableObject {
             return
         }
 
+        let engines = Engine.allCases.map { $0.template(custom: prefs.customEngine) }
+        let privateTab = active?.shy == true
         guard !typed.trimmingCharacters(in: .whitespaces).isEmpty else {
-            offers = []
+            offers = prefs.recentSearches && !privateTab
+                ? history.searches(for: "", engines: engines, limit: 5).compactMap { words in
+                    searchURL(for: words).map { Suggestion(key: words, title: "", url: $0, kind: .searched) }
+                }
+                : []
             ending = nil
             picked = nil
             return
@@ -1846,12 +1894,11 @@ final class Browser: NSObject, ObservableObject {
         // Three places and, if it can't be a place, a search. No open pages:
         // ⌘K exists for those, and mixing them in here made the list long
         // enough that reading it cost more than typing the address would have.
-        let engines = Engine.allCases.map { $0.template(custom: prefs.customEngine) }
-        var list = history.suggestions(for: typed, limit: 3, engines: engines)
-        // Searched for before: two at most, so the words needn't be typed
+        var list = privateTab ? [] : history.suggestions(for: typed, limit: 3, engines: engines)
+        // Searched for before: a few ranked matches, so the words needn't be typed
         // out again. Above the places once there's a space in what was
         // typed — by then it's words, not the start of an address.
-        let again = history.searches(for: typed, engines: engines, limit: 2)
+        let again = (privateTab ? [] : history.searches(for: typed, engines: engines, limit: 4))
             .compactMap { words in searchURL(for: words).map { Suggestion(key: words, title: "", url: $0, kind: .searched) } }
         list = typed.contains(" ") ? again + list : list + again
         // Last in the list, and only when what was typed cannot be a place.
@@ -1877,6 +1924,57 @@ final class Browser: NSObject, ObservableObject {
         // A row that was picked stops being the right row the moment the
         // question changes.
         picked = nil
+        suggestGoogle(for: typed)
+    }
+
+    private func cancelGoogleSuggestions() {
+        googleGeneration &+= 1
+        googleTask?.cancel()
+        googleTask = nil
+    }
+
+    private func suggestGoogle(for text: String) {
+        guard let tab = active, canSuggestGoogle(text, in: tab.id) else { return }
+        let generation = googleGeneration
+        let tabID = tab.id
+        googleTask = Task { [weak self] in
+            try? await Task.sleep(nanoseconds: 250_000_000)
+            guard let self, !Task.isCancelled, generation == self.googleGeneration,
+                  self.canSuggestGoogle(text, in: tabID)
+            else { return }
+            let words = await GoogleSuggestions.fetch(text, using: self.googleSession)
+            guard !Task.isCancelled, generation == self.googleGeneration,
+                  self.canSuggestGoogle(text, in: tabID)
+            else { return }
+            let selected = self.picked.flatMap { self.offers.indices.contains($0) ? self.offers[$0].id : nil }
+            let existing = Set(self.offers.map { Searched.plain($0.key) })
+            let fresh = words.filter { !existing.contains(Searched.plain($0)) }
+                .compactMap { words in
+                    self.searchURL(for: words).map {
+                        Suggestion(key: words, title: "Google suggestion", url: $0, kind: .google)
+                    }
+                }
+            guard !fresh.isEmpty else { return }
+            var list = self.offers
+            let before = list.firstIndex { $0.kind == .search || $0.kind == .ask } ?? list.endIndex
+            list.insert(contentsOf: fresh, at: before)
+            self.offers = list
+            self.picked = selected.flatMap { id in list.firstIndex { $0.id == id } }
+        }
+    }
+
+    private func canSuggestGoogle(_ text: String, in tabID: Tab.ID) -> Bool {
+        prefs.googleSuggestions && prefs.engine == .google &&
+        activeID == tabID && active?.shy == false && active?.bench == false &&
+        typed == text && fieldShowing && !summoning && NSApp.isActive &&
+        Address.url(from: text) == nil && GoogleSuggestions.eligible(text)
+    }
+
+    private func rememberSearch(_ words: String, url: URL, in tab: Tab) {
+        guard !words.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty,
+              !tab.shy, !tab.bench else { return }
+        submittedSearches[tab.id] = url.absoluteString
+        history.record(url, title: "")
     }
 
     /// What is open, most recently looked at first, filtered by what has been
@@ -1918,7 +2016,13 @@ final class Browser: NSObject, ObservableObject {
         if let id = offer.tab, let tab = tabs.first(where: { $0.id == id }) {
             select(tab)
         } else {
-            (active ?? tabs.first)?.go(to: offer.url)
+            let url = offer.kind == .google ? searchURL(for: offer.key) : offer.url
+            if let url, let tab = active ?? tabs.first {
+                if offer.kind == .search || offer.kind == .searched || offer.kind == .google {
+                    rememberSearch(offer.key, url: url, in: tab)
+                }
+                tab.go(to: url)
+            }
         }
         editing = false
         typed = ""
@@ -2001,20 +2105,28 @@ final class Browser: NSObject, ObservableObject {
         }
 
         let target: URL?
+        let searched: String?
         if let picked, offers.indices.contains(picked) {
-            target = offers[picked].url
+            let offer = offers[picked]
+            target = offer.kind == .google ? searchURL(for: offer.key) : offer.url
+            searched = offer.kind == .search || offer.kind == .searched || offer.kind == .google ? offer.key : nil
         } else if ending != nil {
             // The grey ending can finish a search as well as an address.
             target = Address.url(from: completed) ?? searchURL(for: completed)
+            searched = Address.url(from: completed) == nil ? completed : nil
         } else {
             target = destination(for: typed)
+            searched = Address.url(from: typed) == nil ? typed : nil
         }
 
         guard let url = target else {
             refusals += 1
             return
         }
-        (active ?? tabs.first)?.go(to: url)
+        if let tab = active ?? tabs.first {
+            if let searched { rememberSearch(searched, url: url, in: tab) }
+            tab.go(to: url)
+        }
         // Somewhere typed with ⌘L over the talk: the page is what was asked for.
         leaveStage()
         editing = false
@@ -2348,7 +2460,12 @@ extension Browser: WKNavigationDelegate, WKUIDelegate {
         // fetch looks broken.
         Favicons.shared.fetch(for: tab)
         guard !tab.shy, !tab.bench else { return }
-        history.record(url, title: tab.title)
+        if submittedSearches[tab.id] == url.absoluteString {
+            submittedSearches[tab.id] = nil
+            history.retitle(url, tab.title)
+        } else {
+            history.record(url, title: tab.title)
+        }
         // Wait until a real page is in front of them. A blank tab or a page
         // loading behind the welcome walk-through is not the moment to ask.
         if tab === active, !welcoming, !showingShortcuts,
@@ -2469,6 +2586,3 @@ extension Browser: WKDownloadDelegate {
         return candidate
     }
 }
-
-
-

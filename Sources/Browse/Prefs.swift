@@ -75,6 +75,14 @@ final class Preferences: ObservableObject {
     @Published var customEngine: String {
         didSet { store.set(customEngine, forKey: "search.custom") }
     }
+    /// Recent searches under an empty address field. Off until asked for.
+    @Published var recentSearches: Bool {
+        didSet { store.set(recentSearches, forKey: "search.recent") }
+    }
+    /// Sends eligible text to Google's suggestion service while typing.
+    @Published var googleSuggestions: Bool {
+        didSet { store.set(googleSuggestions, forKey: "search.google.suggestions") }
+    }
     /// Tabs nobody has looked at for half an hour give their page back and
     /// keep where they were. On unless turned off.
     @Published var sleepsTabs: Bool {
@@ -285,6 +293,8 @@ final class Preferences: ObservableObject {
         glyph = store.string(forKey: "glyph").flatMap(Glyph.init) ?? .letters
         engine = store.string(forKey: "search.engine").flatMap(Engine.init) ?? .standard
         customEngine = store.string(forKey: "search.custom") ?? ""
+        recentSearches = store.bool(forKey: "search.recent")
+        googleSuggestions = store.bool(forKey: "search.google.suggestions")
         sleepsTabs = store.object(forKey: "tabs.sleep") as? Bool ?? true
         showsReading = store.object(forKey: "tabs.reading") as? Bool ?? true
         shielded = store.object(forKey: "shield") as? Bool ?? true

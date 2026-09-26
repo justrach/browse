@@ -11,6 +11,14 @@ in [ROADMAP.md](ROADMAP.md).
 
 ## Unreleased
 
+### Added
+
+- Optional recent searches in the empty address field and Google query suggestions while typing, with separate switches in Settings › General. Google suggestions only run with Google selected and stay off in private tabs.
+
+### Fixed
+
+- Search recall offers more useful history matches and keeps queries available when a results page fails to load.
+
 ## 1.0.3 — 26 September 2026
 
 ### Added

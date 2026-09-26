@@ -13,7 +13,7 @@ struct Suggestion: Identifiable, Equatable {
     /// Set when this is a page you already have open somewhere.
     var tab: UUID?
 
-    enum Kind {
+    enum Kind: String {
         /// A page that is open right now.
         case open
         /// Somewhere you have actually been.
@@ -24,6 +24,8 @@ struct Suggestion: Identifiable, Equatable {
         case search
         /// Words searched for before, to search for again.
         case searched
+        /// A live suggestion from Google, kept only while this field is open.
+        case google
         /// The same words, for Codegraff instead (see Agent.swift).
         case ask
     }
@@ -36,7 +38,7 @@ struct Suggestion: Identifiable, Equatable {
 
     /// The same words can be both a search and a question; the list tells
     /// the two rows apart.
-    var id: String { kind == .ask ? "ask:" + key : key }
+    var id: String { tab.map { "open:" + $0.uuidString } ?? kind.rawValue + ":" + key }
 }
 
 private struct Visit: Codable {
@@ -311,10 +313,10 @@ final class History: ObservableObject {
     }
 
     /// Things searched for before that what has been typed could be, best
-    /// first. `engines` are the search addresses to read words out of.
+    /// first. With an empty field, the most recent ones. `engines` are the
+    /// search addresses to read words out of.
     func searches(for typed: String, engines: [String], limit: Int) -> [String] {
-        // Two letters before anything is worth offering, or worth reading.
-        guard typed.trimmingCharacters(in: .whitespaces).count >= 2 else { return [] }
+        let needle = typed.trimmingCharacters(in: .whitespaces)
         if searched == nil || searchedEngines != engines {
             let results = pages(for: engines)
             searched = Searched(visits.values.compactMap { visit in
@@ -323,7 +325,9 @@ final class History: ObservableObject {
             })
             searchedEngines = engines
         }
-        return searched?.matching(typed, limit: limit) ?? []
+        return needle.isEmpty
+            ? searched?.recent(limit: limit) ?? []
+            : searched?.matching(typed, limit: limit) ?? []
     }
 
     /// Where these engines keep their words, worked out once for them.
@@ -341,7 +345,7 @@ final class History: ObservableObject {
     func completion(for typed: String, among options: [Suggestion]) -> String? {
         let lower = typed.lowercased()
         guard !lower.isEmpty, lower.count >= 2 else { return nil }
-        guard let hit = options.first(where: { $0.key.hasPrefix(lower) }) else { return nil }
+        guard let hit = options.first(where: { $0.key.lowercased().hasPrefix(lower) }) else { return nil }
         let rest = String(hit.key.dropFirst(lower.count))
         return rest.isEmpty ? nil : rest
     }
