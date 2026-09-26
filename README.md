@@ -47,6 +47,22 @@ Sign in with your Codegraff account to use the agent. It is the same account use
 
 Codegraff runs as the `graff` command on your Mac, installed by the Codegraff app. It can run commands and edit files as well as use the browser, without a permission prompt for each action. You can switch the agent off in Settings › Agent.
 
+## Size and memory
+
+Measured on one Mac with equal 1100 × 750 windows, including each browser's helper processes:
+
+| Local test | browse | Chrome |
+| --- | ---: | ---: |
+| One page | 186 MiB | 340 MiB |
+| Ten mixed pages | 289 MiB | 701 MiB |
+| 30 seconds after closing nine mixed pages | 298 MiB | 761 MiB |
+
+The first two rows are physical-footprint medians sampled at 140, 145, and 150 seconds. browse kept four of the ten tabs awake; its mixed-workload samples ranged from 288 to 718 MiB. These are synthetic-workload observations from one run per browser, with default tab management enabled.
+
+The installed app bundles occupied **9.38 MiB for browse and 2.09 GiB for Chrome**. browse uses macOS's shared WebKit; Chrome bundles its engine and both CPU architectures. Those disk figures exclude profiles, caches, system WebKit, and the separate Codegraff installation.
+
+[Full RAM and app comparison](docs/performance.md) includes the workloads, raw readings, limitations, feature differences, and the next steps for making browse lighter. Both browsers are free to download; agent usage has separate terms. Page speed has not been established by these measurements.
+
 ## Build from source
 
 You need macOS 14 or later and Xcode 16.
