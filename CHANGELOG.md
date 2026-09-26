@@ -11,6 +11,8 @@ in [ROADMAP.md](ROADMAP.md).
 
 ## Unreleased
 
+## 1.0.4 — 27 September 2026
+
 ### Added
 
 - Optional recent searches in the empty address field and Google query suggestions while typing, with separate switches in Settings › General. Google suggestions only run with Google selected and stay off in private tabs.
