@@ -232,8 +232,14 @@ final class Browser: NSObject, ObservableObject {
     @Published var typed = "" { didSet { guess() } }
 
     let history = History()
-    /// Count a submitted search now; its matching page finish adds a title.
-    private var submittedSearches: [Tab.ID: String] = [:]
+    /// Count a submitted search now; its resulting page finish adds a title.
+    private struct SubmittedSearch {
+        let url: URL
+        let words: String
+        let template: String
+        var navigation: WKNavigation?
+    }
+    private var submittedSearches: [Tab.ID: SubmittedSearch] = [:]
     /// What the field is offering, best first.
     @Published private(set) var offers: [Suggestion] = []
     /// The rest of the best match, drawn grey after the caret. Tab takes it.
@@ -1973,7 +1979,10 @@ final class Browser: NSObject, ObservableObject {
     private func rememberSearch(_ words: String, url: URL, in tab: Tab) {
         guard !words.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty,
               !tab.shy, !tab.bench else { return }
-        submittedSearches[tab.id] = url.absoluteString
+        submittedSearches[tab.id] = SubmittedSearch(
+            url: url, words: words, template: prefs.engine.template(custom: prefs.customEngine),
+            navigation: nil
+        )
         history.record(url, title: "")
     }
 
@@ -2394,7 +2403,26 @@ extension Browser: WKNavigationDelegate, WKUIDelegate {
         }
     }
 
+    func webView(_ webView: WKWebView, didStartProvisionalNavigation navigation: WKNavigation!) {
+        guard let tab = tab(for: webView), var submitted = submittedSearches[tab.id] else { return }
+        if let started = submitted.navigation {
+            if started !== navigation { submittedSearches[tab.id] = nil }
+        } else if webView.url == submitted.url || tab.address == submitted.url {
+            submitted.navigation = navigation
+            submittedSearches[tab.id] = submitted
+        } else {
+            submittedSearches[tab.id] = nil
+        }
+    }
+
+    private func finishSubmittedSearch(_ navigation: WKNavigation?, in webView: WKWebView) {
+        guard let navigation, let tab = tab(for: webView),
+              submittedSearches[tab.id]?.navigation === navigation else { return }
+        submittedSearches[tab.id] = nil
+    }
+
     func webView(_ webView: WKWebView, didFail navigation: WKNavigation!, withError error: Error) {
+        finishSubmittedSearch(navigation, in: webView)
         fail(webView, error)
     }
 
@@ -2403,6 +2431,7 @@ extension Browser: WKNavigationDelegate, WKUIDelegate {
         didFailProvisionalNavigation navigation: WKNavigation!,
         withError error: Error
     ) {
+        finishSubmittedSearch(navigation, in: webView)
         fail(webView, error)
     }
 
@@ -2460,9 +2489,14 @@ extension Browser: WKNavigationDelegate, WKUIDelegate {
         // fetch looks broken.
         Favicons.shared.fetch(for: tab)
         guard !tab.shy, !tab.bench else { return }
-        if submittedSearches[tab.id] == url.absoluteString {
-            submittedSearches[tab.id] = nil
-            history.retitle(url, tab.title)
+        let submitted = submittedSearches[tab.id]?.navigation === navigation
+            ? submittedSearches.removeValue(forKey: tab.id) : nil
+        let sameSearch = submitted.map { search in
+            search.url == url || Searched.Pages([search.template]).words(in: url)
+                .map { Searched.plain($0) == Searched.plain(search.words) } == true
+        } == true
+        if sameSearch, let submitted {
+            history.retitle(submitted.url, tab.title)
         } else {
             history.record(url, title: tab.title)
         }
