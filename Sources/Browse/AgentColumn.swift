@@ -29,26 +29,15 @@ struct AgentColumn: View {
                 // Nothing said yet, and the whole page to say it on:
                 // Codegraff's own page, with the chats so far.
                 AgentHome(browser: browser, agent: agent)
+            } else if full {
+                conversation
             } else {
-                head
-                if !full {
-                    Rectangle().fill(Palette.hairline).frame(height: 1)
-                }
-                said
-                if let ask = agent.asking {
-                    measure(
-                        AskCard(ask: ask) { agent.answer(ask, with: $0) }
-                            .padding(.horizontal, 12)
-                            .padding(.bottom, 8)
-                    )
-                    .transition(.move(edge: .bottom).combined(with: .opacity))
-                }
-                measure(foot)
+                insetConversation
             }
         }
         .frame(width: full ? nil : prefs.agentWidth)
         .frame(maxWidth: full ? .infinity : nil, maxHeight: .infinity)
-        .background(Palette.ground)
+        .background(full ? Palette.ground : Palette.wash)
         .overlay(alignment: .leading) {
             if !full {
                 Rectangle().fill(Palette.hairline).frame(width: 1)
@@ -72,6 +61,37 @@ struct AgentColumn: View {
         .onChange(of: agent.entries.isEmpty) { _, empty in
             if !empty { DispatchQueue.main.async { typing = true } }
         }
+    }
+
+    private var conversation: some View {
+        VStack(spacing: 0) {
+            head
+            if !full {
+                Rectangle().fill(Palette.hairline).frame(height: 1)
+            }
+            said
+            if let ask = agent.asking {
+                measure(
+                    AskCard(ask: ask) { agent.answer(ask, with: $0) }
+                        .padding(.horizontal, 12)
+                        .padding(.bottom, 8)
+                )
+                .transition(.move(edge: .bottom).combined(with: .opacity))
+            }
+            measure(foot)
+        }
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
+    }
+
+    /// Leave the resize edge at the true column boundary while the talk sits
+    /// inside the column as one surface.
+    private var insetConversation: some View {
+        let shape = RoundedRectangle(cornerRadius: 18, style: .continuous)
+        return conversation
+            .background(Palette.ground, in: shape)
+            .clipShape(shape)
+            .overlay(shape.strokeBorder(Palette.hairline, lineWidth: 1))
+            .padding(6)
     }
 
     // MARK: - the head
@@ -269,6 +289,7 @@ struct AgentColumn: View {
                         .onSubmit(send)
                 }
                 .font(.system(size: full ? 14.5 : 13.5))
+                .frame(minHeight: full ? nil : 38, alignment: .topLeading)
                 HStack(alignment: .center, spacing: 8) {
                     choices
                     Spacer(minLength: 0)
@@ -280,20 +301,20 @@ struct AgentColumn: View {
                     }
                 }
             }
-            .padding(.leading, full ? 16 : 13)
+            .padding(.leading, full ? 16 : 12)
             .padding(.trailing, full ? 10 : 8)
-            .padding(.top, full ? 13 : 11)
-            .padding(.bottom, full ? 9 : 8)
-            .background(Palette.ground, in: RoundedRectangle(cornerRadius: full ? 20 : 16, style: .continuous))
+            .padding(.top, full ? 13 : 12)
+            .padding(.bottom, 9)
+            .background(Palette.ground, in: RoundedRectangle(cornerRadius: full ? 20 : 19, style: .continuous))
             .overlay(
-                RoundedRectangle(cornerRadius: full ? 20 : 16, style: .continuous)
+                RoundedRectangle(cornerRadius: full ? 20 : 19, style: .continuous)
                     .strokeBorder(typing ? Palette.accent.opacity(0.45) : Palette.hairline, lineWidth: 1)
             )
             .shadow(color: .black.opacity(0.06), radius: 10, y: 3)
             .animation(Motion.quick, value: typing)
             .onTapGesture { typing = true }
         }
-        .padding(.horizontal, 12)
+        .padding(.horizontal, full ? 12 : 8)
         .padding(.top, 4)
         .padding(.bottom, 12)
     }

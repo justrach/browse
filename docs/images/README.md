@@ -51,7 +51,7 @@ the actual CI build of PR #3 (source commit `8452b4d`) in an isolated test profi
 The conversation is a seeded UI fixture visibly labeled “Layout preview — sample
 conversation”; it is not evidence of a model completing a task. The light capture
 uses a 440-point column, and the dark capture checks the 280-point minimum width.
-These images preview the proposed rounded column, not the installed release.
+These images document the rounded column from PR #3; the capture source is identified above.
 
 ```text
 Use case: stylized-concept

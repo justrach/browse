@@ -42,6 +42,19 @@ final class Browser: NSObject, ObservableObject {
     @Published var tuning = false
     /// The first-launch walk-through, over everything. Also from the menu.
     @Published var welcoming = false
+    /// The guide in Help, and its one-time invitation after setup.
+    @Published var showingShortcuts = false
+    @Published var shortcutReminder = false
+
+    func requestShortcutReminder() {
+        guard !Store.settings.bool(forKey: "shortcuts.reminder.shown") else { return }
+        Store.settings.set(true, forKey: "shortcuts.reminder.pending")
+    }
+
+    func showShortcuts() {
+        shortcutReminder = false
+        showingShortcuts = true
+    }
 
     // MARK: - the agent
 
@@ -2336,6 +2349,15 @@ extension Browser: WKNavigationDelegate, WKUIDelegate {
         Favicons.shared.fetch(for: tab)
         guard !tab.shy, !tab.bench else { return }
         history.record(url, title: tab.title)
+        // Wait until a real page is in front of them. A blank tab or a page
+        // loading behind the welcome walk-through is not the moment to ask.
+        if tab === active, !welcoming, !showingShortcuts,
+           url.scheme == "http" || url.scheme == "https",
+           Store.settings.bool(forKey: "shortcuts.reminder.pending") {
+            Store.settings.set(false, forKey: "shortcuts.reminder.pending")
+            Store.settings.set(true, forKey: "shortcuts.reminder.shown")
+            shortcutReminder = true
+        }
     }
 
     private func fail(_ webView: WKWebView, _ error: Error) {
@@ -2447,8 +2469,6 @@ extension Browser: WKDownloadDelegate {
         return candidate
     }
 }
-
-
 
 
 

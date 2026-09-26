@@ -1,0 +1,58 @@
+{
+  "measured_at_utc": "2026-09-26T03:49:12+00:00",
+  "host": {
+    "mac_model": "Mac15,14",
+    "macos_version": "27.0",
+    "macos_build": "26A428"
+  },
+  "method": "du -sk app bundle; logical bytes sum regular files without following symlinks",
+  "excludes": [
+    "user profiles and caches",
+    "system WebKit frameworks used by browse",
+    "external graff engine or other helper costs outside the app bundle",
+    "runtime memory and performance"
+  ],
+  "apps": [
+    {
+      "label": "browse_installed",
+      "bundle": "browse.app",
+      "code_label": "installed",
+      "version": "1.0.2",
+      "build": "202609251554",
+      "allocated_kib": 9604,
+      "logical_file_bytes": 9823249,
+      "executable": "Browse",
+      "executable_architectures": [
+        "arm64"
+      ]
+    },
+    {
+      "label": "chrome_installed",
+      "bundle": "Google Chrome.app",
+      "code_label": "installed",
+      "version": "153.0.8010.54",
+      "build": "8010.54",
+      "allocated_kib": 2192536,
+      "logical_file_bytes": 2241871143,
+      "executable": "Google Chrome",
+      "executable_architectures": [
+        "x86_64",
+        "arm64"
+      ]
+    },
+    {
+      "label": "browse_ci_8452b4d",
+      "bundle": "browse.app",
+      "code_label": "CI commit 8452b4d",
+      "version": "1.0.2",
+      "build": "202609260345",
+      "allocated_kib": 9820,
+      "logical_file_bytes": 10036619,
+      "executable": "Browse",
+      "executable_architectures": [
+        "arm64"
+      ]
+    }
+  ],
+  "chrome_to_browse_allocated_ratio": 228.294
+}

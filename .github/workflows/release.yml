@@ -59,8 +59,59 @@ jobs:
           VERSION="$(tr -d '[:space:]' < VERSION)"
           [ "v$VERSION" = "$TAG" ] || { echo "VERSION says $VERSION but the tag is $TAG" >&2; exit 1; }
 
-      - name: A keychain of the run's own, with the certificate in it
+      - name: Choose signing path
         if: steps.done.outputs.skip != 'true'
+        id: signing
+        env:
+          CERTIFICATE: ${{ secrets.MACOS_CERTIFICATE }}
+          CERTIFICATE_PASSWORD: ${{ secrets.MACOS_CERTIFICATE_PASSWORD }}
+          APPLE_ID: ${{ secrets.APPLE_ID }}
+          APPLE_APP_PASSWORD: ${{ secrets.APPLE_APP_PASSWORD }}
+          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+        run: |
+          if [ -n "$CERTIFICATE" ] && [ -n "$CERTIFICATE_PASSWORD" ] \
+            && [ -n "$APPLE_ID" ] && [ -n "$APPLE_APP_PASSWORD" ] && [ -n "$APPLE_TEAM_ID" ]; then
+            echo "available=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "available=false" >> "$GITHUB_OUTPUT"
+            echo "Signing configuration incomplete: saving a prebuilt app for local signing, without publishing"
+          fi
+
+      - name: Build an unsigned release candidate
+        if: steps.done.outputs.skip != 'true' && steps.signing.outputs.available == 'false'
+        run: |
+          ./build.sh release
+          codesign --verify --deep --strict build/browse.app
+          mkdir -p "$RUNNER_TEMP/release-candidate"
+          ditto -c -k --sequesterRsrc --keepParent build/browse.app "$RUNNER_TEMP/release-candidate/browse-app.zip"
+          python3 - "$RUNNER_TEMP/release-candidate/metadata.json" "$(git rev-parse HEAD)" "$TAG" <<'PY'
+          import hashlib, json, plistlib, sys
+          output, commit, tag = sys.argv[1:]
+          with open("build/browse.app/Contents/Info.plist", "rb") as source:
+              info = plistlib.load(source)
+          with open("build/browse.app/Contents/MacOS/Browse", "rb") as source:
+              executable_sha256 = hashlib.sha256(source.read()).hexdigest()
+          with open(output, "w") as target:
+              json.dump({
+                  "source_commit": commit,
+                  "tag": tag,
+                  "version": info["CFBundleShortVersionString"],
+                  "build": info["CFBundleVersion"],
+                  "bundle_id": info["CFBundleIdentifier"],
+                  "executable_sha256": executable_sha256,
+              }, target, indent=2)
+          PY
+
+      - name: Keep the release candidate for local signing
+        if: steps.done.outputs.skip != 'true' && steps.signing.outputs.available == 'false'
+        uses: actions/upload-artifact@v4
+        with:
+          name: browse-release-candidate-${{ env.TAG }}
+          path: ${{ runner.temp }}/release-candidate/
+          retention-days: 3
+
+      - name: A keychain of the run's own, with the certificate in it
+        if: steps.done.outputs.skip != 'true' && steps.signing.outputs.available == 'true'
         env:
           CERTIFICATE: ${{ secrets.MACOS_CERTIFICATE }}
           CERTIFICATE_PASSWORD: ${{ secrets.MACOS_CERTIFICATE_PASSWORD }}
@@ -85,7 +136,7 @@ jobs:
           echo "SEARCH_SIGN_IDENTITY=$(security find-identity -v -p codesigning "$KEYCHAIN" | grep -o '"Developer ID Application: [^"]*"' | head -1 | tr -d '"')" >> "$GITHUB_ENV"
 
       - name: The passkey profile, when there is one
-        if: steps.done.outputs.skip != 'true'
+        if: steps.done.outputs.skip != 'true' && steps.signing.outputs.available == 'true'
         env:
           PROFILE: ${{ secrets.MACOS_PROVISION_PROFILE }}
         run: |
@@ -96,20 +147,20 @@ jobs:
           fi
 
       - name: Build, sign, notarise
-        if: steps.done.outputs.skip != 'true'
+        if: steps.done.outputs.skip != 'true' && steps.signing.outputs.available == 'true'
         env:
           SEARCH_NOTARY_PROFILE: release
         run: ./build.sh release ship
 
       - name: Checked the way a Mac that downloads it will check it
-        if: steps.done.outputs.skip != 'true'
+        if: steps.done.outputs.skip != 'true' && steps.signing.outputs.available == 'true'
         run: |
           spctl --assess --type open --context context:primary-signature -v build/browse.dmg
           xcrun stapler validate build/browse.dmg
           codesign --verify --deep --strict build/browse.app
 
       - name: Published — installed copies pick it up from here
-        if: steps.done.outputs.skip != 'true'
+        if: steps.done.outputs.skip != 'true' && steps.signing.outputs.available == 'true'
         env:
           GH_TOKEN: ${{ github.token }}
         run: ./publish.sh github

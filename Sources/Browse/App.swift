@@ -195,6 +195,7 @@ struct BrowseApp: App {
                     .keyboardShortcut("l", modifiers: [.command, .option])
             }
             CommandGroup(replacing: .help) {
+                Button("Keyboard Shortcuts…") { browser.showShortcuts() }
                 Button("Send Feedback…") { Links.writeFeedback() }
             }
         }
@@ -472,6 +473,10 @@ struct ContentView: View {
             WelcomePanel(browser: browser, prefs: browser.prefs)
                 .ignoresSafeArea()
         }
+        if browser.showingShortcuts {
+            sheet { ShortcutGuide(browser: browser) }
+                close: { browser.showingShortcuts = false }
+        }
         if browser.managing {
             sheet { PasswordsPanel(browser: browser) } close: { browser.managing = false }
         }
@@ -509,6 +514,16 @@ struct ContentView: View {
                     .ignoresSafeArea()
             }
             .overlay { field.id(themes.tick) }
+            .overlay(alignment: .top) {
+                if browser.shortcutReminder, !browser.welcoming {
+                    ShortcutReminder(
+                        show: { browser.showShortcuts() },
+                        dismiss: { browser.shortcutReminder = false }
+                    )
+                    .padding(.top, Metrics.strip + 12)
+                    .transition(.move(edge: .top).combined(with: .opacity))
+                }
+            }
             .overlay { panels.id(themes.tick) }
             // The field comes on its spring, and goes quickly: once Return
             // is pressed the page is on its way, and the field is not what
@@ -546,6 +561,8 @@ struct ContentView: View {
             .animation(Motion.settle, value: browser.hoarding)
             .animation(Motion.settle, value: browser.tuning)
             .animation(Motion.settle, value: browser.welcoming)
+            .animation(Motion.settle, value: browser.shortcutReminder)
+            .animation(Motion.settle, value: browser.showingShortcuts)
             .animation(Motion.settle, value: browser.bookmarking)
             .animation(Motion.settle, value: browser.managing)
             .animation(Motion.settle, value: browser.reviewing)
@@ -860,6 +877,10 @@ struct ContentView: View {
             }
             if browser.tuning {
                 browser.tuning = false
+                return true
+            }
+            if browser.showingShortcuts {
+                browser.showingShortcuts = false
                 return true
             }
             if browser.bookmarking {

@@ -6,6 +6,9 @@
 #   ./build.sh                 debug-free release build, ad-hoc signed: runs here
 #   ./build.sh release dmg     + branded DMG, ZIP and appcast.json
 #   ./build.sh release ship    + both notarised, the DMG stapled
+#   SEARCH_PREBUILT_APP=/path/to/browse.app SEARCH_PREBUILT_METADATA=/path/to/metadata.json \
+#     ./build.sh release ship
+#                               package an already-built CI app without SwiftPM
 #
 # Same shape as the one next door: SwiftPM builds the executable, and a macOS
 # app bundle is just a folder with a plist and the binary in the right place.
@@ -38,20 +41,73 @@ NAME="browse"
 SLUG="browse"
 APP="build/$NAME.app"
 VERSION="$(tr -d '[:space:]' < VERSION)"
-# A build number that only ever goes up, so the updater can tell newer from
-# older without parsing version strings.
-BUILD="$(date +%Y%m%d%H%M)"
+BUILD=""
 # The oldest macOS this runs on — in the plist, and in the appcast so an
 # older Mac is not handed a build it can't open.
 MINIMUM="14.0"
 
-swift build -c "$CONFIG"
-BINARY=".build/$CONFIG/Browse"
+if [ -n "${SEARCH_PREBUILT_APP:-}" ]; then
+  [ "$CONFIG" = "release" ] || { echo "a prebuilt app requires release configuration" >&2; exit 1; }
+  [ -d "$SEARCH_PREBUILT_APP" ] || { echo "prebuilt app is missing: $SEARCH_PREBUILT_APP" >&2; exit 1; }
+  SOURCE="$(cd "$SEARCH_PREBUILT_APP" && pwd -P)"
+  mkdir -p build
+  DEST="$(cd build && pwd -P)/$NAME.app"
+  python3 - "$SOURCE" "$DEST" <<'PY'
+import os, sys
+source, dest = sys.argv[1:]
+if os.path.commonpath((source, dest)) in (source, dest):
+    sys.exit("prebuilt app must be outside build/browse.app")
+PY
+  PLIST="$SOURCE/Contents/Info.plist"
+  [ -f "$PLIST" ] || { echo "prebuilt app has no Info.plist" >&2; exit 1; }
+  [ "$(plutil -extract CFBundleIdentifier raw -o - "$PLIST")" = "com.codegraff.search" ] \
+    || { echo "prebuilt app has the wrong bundle identifier" >&2; exit 1; }
+  [ "$(plutil -extract CFBundleShortVersionString raw -o - "$PLIST")" = "$VERSION" ] \
+    || { echo "prebuilt app version does not match VERSION ($VERSION)" >&2; exit 1; }
+  [ "$(plutil -extract CFBundleExecutable raw -o - "$PLIST")" = "Browse" ] \
+    || { echo "prebuilt app has the wrong executable" >&2; exit 1; }
+  [ -x "$SOURCE/Contents/MacOS/Browse" ] \
+    || { echo "prebuilt app has no executable Browse" >&2; exit 1; }
+  BUILD="$(plutil -extract CFBundleVersion raw -o - "$PLIST")"
+  [[ "$BUILD" =~ ^[0-9]+$ ]] || { echo "prebuilt app has an invalid build number" >&2; exit 1; }
+  MINIMUM="$(plutil -extract LSMinimumSystemVersion raw -o - "$PLIST")"
+  [[ "$MINIMUM" =~ ^[0-9]+\.[0-9]+$ ]] || { echo "prebuilt app has an invalid minimum macOS version" >&2; exit 1; }
+  [ -f "${SEARCH_PREBUILT_METADATA:-}" ] \
+    || { echo "prebuilt app requires CI metadata.json" >&2; exit 1; }
+  TAG_COMMIT="$(git rev-parse -q --verify "refs/tags/v$VERSION^{commit}")" \
+    || { echo "v$VERSION is not a local tag" >&2; exit 1; }
+  [ "$TAG_COMMIT" = "$(git rev-parse HEAD)" ] \
+    || { echo "check out the exact v$VERSION commit before packaging" >&2; exit 1; }
+  python3 - "$SEARCH_PREBUILT_METADATA" "$SOURCE" "$VERSION" "$BUILD" "$TAG_COMMIT" <<'PY'
+import hashlib, json, sys
+metadata_path, app, version, build, commit = sys.argv[1:]
+with open(metadata_path) as source:
+    metadata = json.load(source)
+with open(f"{app}/Contents/MacOS/Browse", "rb") as source:
+    executable_sha256 = hashlib.sha256(source.read()).hexdigest()
+if (metadata.get("source_commit") != commit
+        or metadata.get("tag") != f"v{version}"
+        or metadata.get("version") != version
+        or str(metadata.get("build")) != build
+        or metadata.get("bundle_id") != "com.codegraff.search"
+        or metadata.get("executable_sha256") != executable_sha256):
+    sys.exit("prebuilt app does not match the CI tag, build and executable")
+PY
+  codesign --verify --deep --strict "$SOURCE" \
+    || { echo "prebuilt app has an invalid signature" >&2; exit 1; }
+  rm -rf "$APP"
+  ditto "$SOURCE" "$APP"
+else
+  # A build number that only ever goes up, so the updater can tell newer
+  # builds from older ones without parsing version strings.
+  BUILD="$(date +%Y%m%d%H%M)"
+  swift build -c "$CONFIG"
+  BINARY=".build/$CONFIG/Browse"
 
-rm -rf "$APP"
-mkdir -p "$APP/Contents/MacOS" "$APP/Contents/Resources"
-cp "$BINARY" "$APP/Contents/MacOS/Browse"
-cp LICENSE LICENSE.MIT "$APP/Contents/Resources/"
+  rm -rf "$APP"
+  mkdir -p "$APP/Contents/MacOS" "$APP/Contents/Resources"
+  cp "$BINARY" "$APP/Contents/MacOS/Browse"
+  cp LICENSE LICENSE.MIT "$APP/Contents/Resources/"
 
 # Symbols stay out of the app. The linker leaves every function's name and a
 # map back to the source in the binary — 15,000 entries, more than half of
@@ -82,6 +138,8 @@ for POINTS in 16 32 128 256 512; do
 done
 iconutil -c icns "$ICONSET" -o "$APP/Contents/Resources/AppIcon.icns"
 cp "$SOURCE_ICON" "$APP/Contents/Resources/BrandMark.png"
+mkdir -p "$APP/Contents/Resources/PreviewFavicons"
+cp Assets/PreviewFavicons/*.png "$APP/Contents/Resources/PreviewFavicons/"
 rm -rf "$ICONSET"
 
 cat > "$APP/Contents/Info.plist" <<PLIST
@@ -146,6 +204,7 @@ cat > "$APP/Contents/Info.plist" <<PLIST
 </dict>
 </plist>
 PLIST
+fi
 
 # Signing. A Developer ID certificate, when there is one, with the hardened
 # runtime Gatekeeper insists on for anything notarised; otherwise ad-hoc,
@@ -163,6 +222,7 @@ ENTITLEMENTS="Browse.entitlements"
 # entitlement would sign an app that can't use it — both are refused, and the
 # app is signed without passkeys, as before.
 PROFILE="${SEARCH_PROVISION_PROFILE:-browse.provisionprofile}"
+rm -f "$APP/Contents/embedded.provisionprofile"
 if [ -n "$IDENTITY" ] && [ -f "$PROFILE" ]; then
   DECODED="$(security cms -D -i "$PROFILE" 2>/dev/null || true)"
   APPID="$(printf '%s' "$DECODED" | plutil -extract Entitlements.com\.apple\.application-identifier raw -o - - 2>/dev/null || true)"

@@ -1,0 +1,670 @@
+{
+  "measured_at_utc": "2026-09-26T04:09:14+00:00",
+  "host": {
+    "mac_model": "Mac15,14",
+    "macos_version": "27.0",
+    "macos_build": "26A428",
+    "logical_cpu_count": 28,
+    "physical_memory_bytes": 274877906944
+  },
+  "apps": {
+    "browse": {
+      "bundle": "browse.app",
+      "version": "1.0.2",
+      "code_label": "CI commit 8452b4d"
+    },
+    "chrome": {
+      "bundle": "Google Chrome.app",
+      "version": "153.0.8010.54",
+      "code_label": "installed"
+    }
+  },
+  "metric": "footprint multi-PID de-duplicated total physical footprint, bytes",
+  "method": "Fresh isolated profiles; identical local static page in 1/5/10 regular tabs; app resource coalition includes launchd-managed WebKit helpers; no AI prompt",
+  "settle_seconds": {
+    "one_tab": 30,
+    "five_and_ten_tabs": 150
+  },
+  "results": [
+    {
+      "browser": "browse",
+      "tabs": 1,
+      "coalition_id": 5578,
+      "process_count": 10,
+      "initial_process_count": 10,
+      "initial_physical_footprint_bytes": 1098815464,
+      "initial_browse_awake_tabs": 1,
+      "settled_browse_awake_tabs": 1,
+      "snapshots": [
+        {
+          "elapsed_seconds": 20.3,
+          "physical_footprint_bytes": 227383392,
+          "process_count": 10
+        },
+        {
+          "elapsed_seconds": 25.3,
+          "physical_footprint_bytes": 227235936,
+          "process_count": 10
+        },
+        {
+          "elapsed_seconds": 30.3,
+          "physical_footprint_bytes": 227072072,
+          "process_count": 10
+        }
+      ],
+      "final_three_median_physical_footprint_bytes": 227235936,
+      "processes": [
+        {
+          "pid": 32420,
+          "role": "Browse",
+          "physical_footprint_bytes": 71124336
+        },
+        {
+          "pid": 32436,
+          "role": "MTLCompilerService",
+          "physical_footprint_bytes": 63537752
+        },
+        {
+          "pid": 32433,
+          "role": "com.apple.WebKit.WebContent",
+          "physical_footprint_bytes": 25494248
+        },
+        {
+          "pid": 32446,
+          "role": "MTLCompilerService",
+          "physical_footprint_bytes": 21414368
+        },
+        {
+          "pid": 32432,
+          "role": "com.apple.WebKit.GPU",
+          "physical_footprint_bytes": 13714056
+        },
+        {
+          "pid": 32434,
+          "role": "com.apple.SafariPlatformSupport.Helper",
+          "physical_footprint_bytes": 13681216
+        },
+        {
+          "pid": 32431,
+          "role": "com.apple.WebKit.Networking",
+          "physical_footprint_bytes": 7176672
+        },
+        {
+          "pid": 32441,
+          "role": "com.apple.audio.SandboxHelper",
+          "physical_footprint_bytes": 6177320
+        },
+        {
+          "pid": 32444,
+          "role": "SetStoreUpdateService",
+          "physical_footprint_bytes": 2949504
+        },
+        {
+          "pid": 32430,
+          "role": "SetStoreUpdateService",
+          "physical_footprint_bytes": 2769256
+        }
+      ],
+      "physical_footprint_bytes": 227072072,
+      "footprint_process_count": 10
+    },
+    {
+      "browser": "chrome",
+      "tabs": 1,
+      "coalition_id": 5580,
+      "process_count": 18,
+      "initial_process_count": 12,
+      "initial_physical_footprint_bytes": 1125218656,
+      "initial_browse_awake_tabs": null,
+      "settled_browse_awake_tabs": null,
+      "snapshots": [
+        {
+          "elapsed_seconds": 20.4,
+          "physical_footprint_bytes": 1363742448,
+          "process_count": 20
+        },
+        {
+          "elapsed_seconds": 25.4,
+          "physical_footprint_bytes": 630132464,
+          "process_count": 20
+        },
+        {
+          "elapsed_seconds": 30.4,
+          "physical_footprint_bytes": 498370800,
+          "process_count": 18
+        }
+      ],
+      "final_three_median_physical_footprint_bytes": 630132464,
+      "processes": [
+        {
+          "pid": 33367,
+          "role": "Google Chrome",
+          "physical_footprint_bytes": 91670376
+        },
+        {
+          "pid": 33474,
+          "role": "Google Chrome Helper",
+          "physical_footprint_bytes": 88163888
+        },
+        {
+          "pid": 33482,
+          "role": "Google Chrome Helper (Renderer)",
+          "physical_footprint_bytes": 56100592
+        },
+        {
+          "pid": 38293,
+          "role": "Google Chrome Helper",
+          "physical_footprint_bytes": 52430000
+        },
+        {
+          "pid": 33514,
+          "role": "MTLCompilerService",
+          "physical_footprint_bytes": 36635176
+        },
+        {
+          "pid": 33766,
+          "role": "Google Chrome Helper (Renderer)",
+          "physical_footprint_bytes": 33047992
+        },
+        {
+          "pid": 33509,
+          "role": "Google Chrome Helper (Renderer)",
+          "physical_footprint_bytes": 31638944
+        },
+        {
+          "pid": 33475,
+          "role": "Google Chrome Helper",
+          "physical_footprint_bytes": 27542704
+        },
+        {
+          "pid": 33765,
+          "role": "Google Chrome Helper (Renderer)",
+          "physical_footprint_bytes": 27477312
+        },
+        {
+          "pid": 33476,
+          "role": "Google Chrome Helper",
+          "physical_footprint_bytes": 22709496
+        },
+        {
+          "pid": 36357,
+          "role": "GoogleUpdater",
+          "physical_footprint_bytes": 4555376
+        },
+        {
+          "pid": 36353,
+          "role": "GoogleUpdater",
+          "physical_footprint_bytes": 4489912
+        },
+        {
+          "pid": 36347,
+          "role": "GoogleUpdater",
+          "physical_footprint_bytes": 4473576
+        },
+        {
+          "pid": 36355,
+          "role": "GoogleUpdater",
+          "physical_footprint_bytes": 4211312
+        },
+        {
+          "pid": 36349,
+          "role": "GoogleUpdater",
+          "physical_footprint_bytes": 4194952
+        },
+        {
+          "pid": 36359,
+          "role": "GoogleUpdater",
+          "physical_footprint_bytes": 4096600
+        },
+        {
+          "pid": 33470,
+          "role": "chrome_crashpad_handler",
+          "physical_footprint_bytes": 3867224
+        },
+        {
+          "pid": 33484,
+          "role": "SetStoreUpdateService",
+          "physical_footprint_bytes": 2834840
+        }
+      ],
+      "physical_footprint_bytes": 496666864,
+      "footprint_process_count": 18
+    },
+    {
+      "browser": "chrome",
+      "tabs": 5,
+      "coalition_id": 5582,
+      "process_count": 15,
+      "initial_process_count": 17,
+      "initial_physical_footprint_bytes": 1379226120,
+      "initial_browse_awake_tabs": null,
+      "settled_browse_awake_tabs": null,
+      "snapshots": [
+        {
+          "elapsed_seconds": 30.5,
+          "physical_footprint_bytes": 625615376,
+          "process_count": 23
+        },
+        {
+          "elapsed_seconds": 140.5,
+          "physical_footprint_bytes": 520079672,
+          "process_count": 15
+        },
+        {
+          "elapsed_seconds": 145.4,
+          "physical_footprint_bytes": 519964984,
+          "process_count": 15
+        },
+        {
+          "elapsed_seconds": 150.4,
+          "physical_footprint_bytes": 519981368,
+          "process_count": 15
+        }
+      ],
+      "final_three_median_physical_footprint_bytes": 519981368,
+      "processes": [
+        {
+          "pid": 39998,
+          "role": "Google Chrome",
+          "physical_footprint_bytes": 109758384
+        },
+        {
+          "pid": 40106,
+          "role": "Google Chrome Helper",
+          "physical_footprint_bytes": 78464560
+        },
+        {
+          "pid": 40192,
+          "role": "Google Chrome Helper (Renderer)",
+          "physical_footprint_bytes": 49350360
+        },
+        {
+          "pid": 40262,
+          "role": "Google Chrome Helper (Renderer)",
+          "physical_footprint_bytes": 32802256
+        },
+        {
+          "pid": 40247,
+          "role": "Google Chrome Helper (Renderer)",
+          "physical_footprint_bytes": 32212456
+        },
+        {
+          "pid": 40295,
+          "role": "MTLCompilerService",
+          "physical_footprint_bytes": 32178776
+        },
+        {
+          "pid": 40251,
+          "role": "Google Chrome Helper (Renderer)",
+          "physical_footprint_bytes": 31786424
+        },
+        {
+          "pid": 40252,
+          "role": "Google Chrome Helper (Renderer)",
+          "physical_footprint_bytes": 31753704
+        },
+        {
+          "pid": 40254,
+          "role": "Google Chrome Helper (Renderer)",
+          "physical_footprint_bytes": 31720888
+        },
+        {
+          "pid": 40108,
+          "role": "Google Chrome Helper",
+          "physical_footprint_bytes": 28247288
+        },
+        {
+          "pid": 40721,
+          "role": "Google Chrome Helper (Renderer)",
+          "physical_footprint_bytes": 27329856
+        },
+        {
+          "pid": 40124,
+          "role": "Google Chrome Helper",
+          "physical_footprint_bytes": 20923520
+        },
+        {
+          "pid": 40284,
+          "role": "com.apple.SafariPlatformSupport.Helper",
+          "physical_footprint_bytes": 12452440
+        },
+        {
+          "pid": 40047,
+          "role": "chrome_crashpad_handler",
+          "physical_footprint_bytes": 3916424
+        },
+        {
+          "pid": 40207,
+          "role": "SetStoreUpdateService",
+          "physical_footprint_bytes": 2736512
+        }
+      ],
+      "physical_footprint_bytes": 519964984,
+      "footprint_process_count": 15
+    },
+    {
+      "browser": "browse",
+      "tabs": 5,
+      "coalition_id": 5585,
+      "process_count": 11,
+      "initial_process_count": 12,
+      "initial_physical_footprint_bytes": 1140842488,
+      "initial_browse_awake_tabs": 5,
+      "settled_browse_awake_tabs": 4,
+      "snapshots": [
+        {
+          "elapsed_seconds": 30.3,
+          "physical_footprint_bytes": 264134720,
+          "process_count": 12
+        },
+        {
+          "elapsed_seconds": 140.3,
+          "physical_footprint_bytes": 251125104,
+          "process_count": 11
+        },
+        {
+          "elapsed_seconds": 145.2,
+          "physical_footprint_bytes": 251125104,
+          "process_count": 11
+        },
+        {
+          "elapsed_seconds": 150.2,
+          "physical_footprint_bytes": 251141488,
+          "process_count": 11
+        }
+      ],
+      "final_three_median_physical_footprint_bytes": 251125104,
+      "processes": [
+        {
+          "pid": 63290,
+          "role": "Browse",
+          "physical_footprint_bytes": 70665584
+        },
+        {
+          "pid": 63304,
+          "role": "MTLCompilerService",
+          "physical_footprint_bytes": 66568840
+        },
+        {
+          "pid": 63301,
+          "role": "com.apple.WebKit.WebContent",
+          "physical_footprint_bytes": 25428736
+        },
+        {
+          "pid": 63324,
+          "role": "MTLCompilerService",
+          "physical_footprint_bytes": 22118880
+        },
+        {
+          "pid": 63300,
+          "role": "com.apple.WebKit.GPU",
+          "physical_footprint_bytes": 13992584
+        },
+        {
+          "pid": 63326,
+          "role": "com.apple.WebKit.WebContent",
+          "physical_footprint_bytes": 12436176
+        },
+        {
+          "pid": 63337,
+          "role": "com.apple.WebKit.WebContent",
+          "physical_footprint_bytes": 12370640
+        },
+        {
+          "pid": 63325,
+          "role": "com.apple.WebKit.WebContent",
+          "physical_footprint_bytes": 12239568
+        },
+        {
+          "pid": 63299,
+          "role": "com.apple.WebKit.Networking",
+          "physical_footprint_bytes": 7242208
+        },
+        {
+          "pid": 63322,
+          "role": "com.apple.audio.SandboxHelper",
+          "physical_footprint_bytes": 6193704
+        },
+        {
+          "pid": 63296,
+          "role": "SetStoreUpdateService",
+          "physical_footprint_bytes": 2736536
+        }
+      ],
+      "physical_footprint_bytes": 251272560,
+      "footprint_process_count": 11
+    },
+    {
+      "browser": "browse",
+      "tabs": 10,
+      "coalition_id": 5587,
+      "process_count": 11,
+      "initial_process_count": 17,
+      "initial_physical_footprint_bytes": 348384944,
+      "initial_browse_awake_tabs": 10,
+      "settled_browse_awake_tabs": 4,
+      "snapshots": [
+        {
+          "elapsed_seconds": 30.3,
+          "physical_footprint_bytes": 311504656,
+          "process_count": 17
+        },
+        {
+          "elapsed_seconds": 140.2,
+          "physical_footprint_bytes": 235740576,
+          "process_count": 11
+        },
+        {
+          "elapsed_seconds": 145.2,
+          "physical_footprint_bytes": 235740576,
+          "process_count": 11
+        },
+        {
+          "elapsed_seconds": 150.2,
+          "physical_footprint_bytes": 235740576,
+          "process_count": 11
+        }
+      ],
+      "final_three_median_physical_footprint_bytes": 235740576,
+      "processes": [
+        {
+          "pid": 69508,
+          "role": "MTLCompilerService",
+          "physical_footprint_bytes": 63455832
+        },
+        {
+          "pid": 69499,
+          "role": "Browse",
+          "physical_footprint_bytes": 58066264
+        },
+        {
+          "pid": 69507,
+          "role": "com.apple.WebKit.WebContent",
+          "physical_footprint_bytes": 25494248
+        },
+        {
+          "pid": 69512,
+          "role": "MTLCompilerService",
+          "physical_footprint_bytes": 21823968
+        },
+        {
+          "pid": 69506,
+          "role": "com.apple.WebKit.GPU",
+          "physical_footprint_bytes": 14058168
+        },
+        {
+          "pid": 69556,
+          "role": "com.apple.WebKit.WebContent",
+          "physical_footprint_bytes": 12600040
+        },
+        {
+          "pid": 69557,
+          "role": "com.apple.WebKit.WebContent",
+          "physical_footprint_bytes": 12419816
+        },
+        {
+          "pid": 69542,
+          "role": "com.apple.WebKit.WebContent",
+          "physical_footprint_bytes": 12354280
+        },
+        {
+          "pid": 69505,
+          "role": "com.apple.WebKit.Networking",
+          "physical_footprint_bytes": 7307768
+        },
+        {
+          "pid": 69511,
+          "role": "com.apple.audio.SandboxHelper",
+          "physical_footprint_bytes": 6226496
+        },
+        {
+          "pid": 69504,
+          "role": "SetStoreUpdateService",
+          "physical_footprint_bytes": 2752896
+        }
+      ],
+      "physical_footprint_bytes": 235838880,
+      "footprint_process_count": 11
+    },
+    {
+      "browser": "chrome",
+      "tabs": 10,
+      "coalition_id": 5598,
+      "process_count": 19,
+      "initial_process_count": 21,
+      "initial_physical_footprint_bytes": 1708158264,
+      "initial_browse_awake_tabs": null,
+      "settled_browse_awake_tabs": null,
+      "snapshots": [
+        {
+          "elapsed_seconds": 30.7,
+          "physical_footprint_bytes": 747584664,
+          "process_count": 27
+        },
+        {
+          "elapsed_seconds": 140.6,
+          "physical_footprint_bytes": 653337512,
+          "process_count": 19
+        },
+        {
+          "elapsed_seconds": 145.6,
+          "physical_footprint_bytes": 653337512,
+          "process_count": 19
+        },
+        {
+          "elapsed_seconds": 150.6,
+          "physical_footprint_bytes": 653337512,
+          "process_count": 19
+        }
+      ],
+      "final_three_median_physical_footprint_bytes": 653337512,
+      "processes": [
+        {
+          "pid": 74524,
+          "role": "Google Chrome",
+          "physical_footprint_bytes": 114542488
+        },
+        {
+          "pid": 74537,
+          "role": "Google Chrome Helper",
+          "physical_footprint_bytes": 76596808
+        },
+        {
+          "pid": 74541,
+          "role": "Google Chrome Helper (Renderer)",
+          "physical_footprint_bytes": 54544040
+        },
+        {
+          "pid": 74558,
+          "role": "Google Chrome Helper (Renderer)",
+          "physical_footprint_bytes": 33900032
+        },
+        {
+          "pid": 74548,
+          "role": "Google Chrome Helper (Renderer)",
+          "physical_footprint_bytes": 32065072
+        },
+        {
+          "pid": 74554,
+          "role": "Google Chrome Helper (Renderer)",
+          "physical_footprint_bytes": 32048712
+        },
+        {
+          "pid": 74549,
+          "role": "Google Chrome Helper (Renderer)",
+          "physical_footprint_bytes": 32032280
+        },
+        {
+          "pid": 74550,
+          "role": "Google Chrome Helper (Renderer)",
+          "physical_footprint_bytes": 31868320
+        },
+        {
+          "pid": 74557,
+          "role": "Google Chrome Helper (Renderer)",
+          "physical_footprint_bytes": 31753728
+        },
+        {
+          "pid": 74551,
+          "role": "Google Chrome Helper (Renderer)",
+          "physical_footprint_bytes": 31671736
+        },
+        {
+          "pid": 74553,
+          "role": "Google Chrome Helper (Renderer)",
+          "physical_footprint_bytes": 31622584
+        },
+        {
+          "pid": 74546,
+          "role": "Google Chrome Helper (Renderer)",
+          "physical_footprint_bytes": 31557000
+        },
+        {
+          "pid": 74555,
+          "role": "Google Chrome Helper (Renderer)",
+          "physical_footprint_bytes": 31507848
+        },
+        {
+          "pid": 74538,
+          "role": "Google Chrome Helper",
+          "physical_footprint_bytes": 29213992
+        },
+        {
+          "pid": 74626,
+          "role": "Google Chrome Helper (Renderer)",
+          "physical_footprint_bytes": 27378984
+        },
+        {
+          "pid": 74539,
+          "role": "Google Chrome Helper",
+          "physical_footprint_bytes": 21431376
+        },
+        {
+          "pid": 74561,
+          "role": "com.apple.SafariPlatformSupport.Helper",
+          "physical_footprint_bytes": 12255832
+        },
+        {
+          "pid": 74526,
+          "role": "chrome_crashpad_handler",
+          "physical_footprint_bytes": 3883632
+        },
+        {
+          "pid": 74543,
+          "role": "SetStoreUpdateService",
+          "physical_footprint_bytes": 2752872
+        }
+      ],
+      "physical_footprint_bytes": 653698056,
+      "footprint_process_count": 19
+    }
+  ],
+  "limitations": [
+    "All tabs share one local origin; browser process allocation can differ for separate sites.",
+    "WebKit frameworks are system resources and shared with other apps.",
+    "No AI prompt is sent; external graff engine costs and user profiles are excluded.",
+    "Other user apps remain open; background machine activity may affect results.",
+    "Per-process footprint rows are not additive because shared memory is de-duplicated only in the total.",
+    "No runtime speed or user-session memory claim is inferred."
+  ]
+}

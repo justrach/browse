@@ -433,7 +433,10 @@ struct SettingsPanel: View {
                     Text("browse")
                         .font(.system(size: 15, weight: .semibold))
                         .foregroundStyle(Palette.ink)
-                    Text("A Codegraff product · AGPL-3.0 · version \(Updater.version)")
+                    Text("By Codegraff · WebKit on macOS")
+                        .font(.system(size: 12))
+                        .foregroundStyle(Palette.muted)
+                    Text("Version \(Updater.version) · build \(String(Updater.build)) · AGPL-3.0")
                         .font(.system(size: 12))
                         .foregroundStyle(Palette.muted)
                 }
@@ -445,37 +448,34 @@ struct SettingsPanel: View {
                 Rule()
                 WebKitLine()
                 Rule()
-                Line("Install updates on its own", "Off, browse still looks once a day and tells you, and installs only when you press Install") {
+                Line("Install updates automatically", "Checks daily; when off, installation waits for your choice") {
                     Switch(on: $prefs.installsUpdates)
                 }
                 Rule()
-                Line("Found something wrong?", "Opens a draft with the version already in it") {
-                    Pill("Send Feedback") { Links.writeFeedback() }
+                Line("Feedback", "Open a feedback draft with this build's details") {
+                    Pill("Open draft") { Links.writeFeedback() }
                 }
             }
 
             Card {
-                Shortcut("⌘L", "Address")
+                Line("Keyboard shortcuts", "The full guide is also in Help") {
+                    Pill("View guide") {
+                        browser.tuning = false
+                        browser.showShortcuts()
+                    }
+                }
                 Rule()
-                Shortcut("⌘K", "Switch tab")
+                Line("Source code", "Browse the project on GitHub") {
+                    Pill("View source") { openAbout("https://github.com/justrach/browse") }
+                }
                 Rule()
-                Shortcut("⌘T  ⌘W  ⇧⌘T", "New, close, reopen tab")
+                Line("Releases", "Downloads and release notes") {
+                    Pill("View releases") { openAbout("https://github.com/justrach/browse/releases") }
+                }
                 Rule()
-                Shortcut("⇧⌘V", "Paste and go")
-                Rule()
-                Shortcut("⇧⌘C", "Copy address")
-                Rule()
-                Shortcut("⌃⇥  ⌘1–9", "Next tab, a tab by its place")
-                Rule()
-                Shortcut("⇧⌘S", "Tabs in a sidebar")
-                Rule()
-                Shortcut("⌘S", "Fold the sidebar away")
-                Rule()
-                Shortcut("⇧⌘R", "Reading mode")
-                Rule()
-                Shortcut("⇧⌘H", "Hide something on this site")
-                Rule()
-                Shortcut("⇧⌘P", "Float the video")
+                Line("License", "AGPL-3.0; other notices are in the app bundle") {
+                    Pill("View license") { openAbout("https://github.com/justrach/browse/blob/main/LICENSE") }
+                }
             }
         }
     }
@@ -485,25 +485,25 @@ struct SettingsPanel: View {
     private var versionTitle: String {
         switch updater.stage {
         case .none: return "Updates"
-        case .fetching(let next): return "browse \(next.version) is downloading…"
-        case .ready(let next): return "browse \(next.version) is ready"
-        case .offered(let next), .waiting(let next): return "browse \(next.version) is out"
+        case .fetching(let next): return "Downloading browse \(next.version)"
+        case .ready(let next): return "browse \(next.version) ready"
+        case .offered(let next), .waiting(let next): return "browse \(next.version) available"
         }
     }
 
     private var versionDetail: String {
         switch updater.stage {
         case .none:
-            return updater.lastChecked.map { "Checked \($0.formatted(.relative(presentation: .named))) — once a day on its own" }
-                ?? "Checked once a day on its own"
-        case .fetching(let next):
-            return next.notes ?? "Quietly, in the background — nothing you have set is touched"
-        case .ready(let next):
-            return next.notes ?? "It's there the next time you open browse"
-        case .offered(let next):
-            return next.notes ?? "Open the disk image, the same as the first time"
-        case .waiting(let next):
-            return next.notes ?? "Checked and put in place when you press Install"
+            return updater.lastChecked.map { "Last checked \($0.formatted(.relative(presentation: .named)))" }
+                ?? "Checks for updates daily"
+        case .fetching:
+            return "Downloading and preparing the update"
+        case .ready:
+            return "Update ready; relaunch to use this version"
+        case .offered:
+            return "Open the disk image to install manually"
+        case .waiting:
+            return "Select Install to apply the update"
         }
     }
 
@@ -513,7 +513,7 @@ struct SettingsPanel: View {
         case .none:
             Pill(updater.checking ? "Checking…" : "Check now") {
                 updater.check { found in
-                    if found == nil { browser.announce("This is the latest one") }
+                    if found == nil { browser.announce("Update check complete") }
                 }
             }
             .disabled(updater.checking)
@@ -533,6 +533,12 @@ struct SettingsPanel: View {
 
     // MARK: - doing
 
+    private func openAbout(_ address: String) {
+        guard let url = URL(string: address) else { return }
+        browser.tuning = false
+        browser.open(url, foreground: true)
+    }
+
     private func chooseFolder() {
         let panel = NSOpenPanel()
         panel.canChooseDirectories = true
@@ -544,28 +550,6 @@ struct SettingsPanel: View {
         prefs.downloads = url
     }
 
-    // MARK: - pieces
-
-    /// A keystroke and what it does.
-    private struct Shortcut: View {
-        let keys: String
-        let does: String
-        init(_ keys: String, _ does: String) { self.keys = keys; self.does = does }
-
-        var body: some View {
-            HStack {
-                Text(does)
-                    .font(.system(size: 13))
-                    .foregroundStyle(Palette.ink)
-                Spacer()
-                Text(keys)
-                    .font(.system(size: 12, design: .rounded))
-                    .foregroundStyle(Palette.muted)
-            }
-            .padding(.horizontal, 14)
-            .padding(.vertical, 9)
-        }
-    }
 }
 
 /// A row of choices in a grey track, one of them lifted out in white. The
