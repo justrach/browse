@@ -1983,7 +1983,7 @@ final class Browser: NSObject, ObservableObject {
             url: url, words: words, template: prefs.engine.template(custom: prefs.customEngine),
             navigation: nil
         )
-        history.record(url, title: "")
+        history.record(url, title: words)
     }
 
     /// What is open, most recently looked at first, filtered by what has been
@@ -2496,7 +2496,7 @@ extension Browser: WKNavigationDelegate, WKUIDelegate {
                 .map { Searched.plain($0) == Searched.plain(search.words) } == true
         } == true
         if sameSearch, let submitted {
-            history.retitle(submitted.url, tab.title)
+            history.retitle(submitted.url, webView.title ?? tab.title)
         } else {
             history.record(url, title: tab.title)
         }
