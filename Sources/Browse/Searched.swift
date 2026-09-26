@@ -98,15 +98,34 @@ struct Searched {
     /// Where each engine keeps the words: its host, its path and the name
     /// of the part of the address that holds them.
     struct Pages {
-        private let known: [(host: String, path: String, name: String)]
+        private static let mark = "SEARCHWORDS"
+
+        private enum Slot {
+            case query(name: String, pattern: String)
+            case path(pattern: String)
+            case fragment(pattern: String)
+        }
+
+        private let known: [(host: String, path: String, slot: Slot)]
 
         init(_ templates: [String]) {
             known = templates.compactMap { template in
-                guard let parts = URLComponents(string: template.replacingOccurrences(of: "%s", with: "SEARCHWORDS")),
-                      let host = parts.host?.lowercased(),
-                      let name = parts.queryItems?.first(where: { $0.value == "SEARCHWORDS" })?.name
+                guard let parts = URLComponents(string: template.replacingOccurrences(of: "%s", with: Pages.mark)),
+                      let host = parts.host?.lowercased()
                 else { return nil }
-                return (Pages.bare(host), parts.path.isEmpty ? "/" : parts.path, name)
+                let path = parts.path.isEmpty ? "/" : parts.path
+                if let items = parts.queryItems, let encoded = parts.percentEncodedQueryItems {
+                    for (item, raw) in zip(items, encoded) where raw.value?.contains(Pages.mark) == true {
+                        return (Pages.bare(host), path, .query(name: item.name, pattern: raw.value ?? ""))
+                    }
+                }
+                if parts.percentEncodedPath.contains(Pages.mark) {
+                    return (Pages.bare(host), path, .path(pattern: parts.percentEncodedPath))
+                }
+                if let fragment = parts.percentEncodedFragment, fragment.contains(Pages.mark) {
+                    return (Pages.bare(host), path, .fragment(pattern: fragment))
+                }
+                return nil
             }
         }
 
@@ -120,19 +139,43 @@ struct Searched {
         /// The words `url` searched for, if it is a page of results.
         func words(in url: URL) -> String? {
             guard let host = url.host()?.lowercased(),
-                  let items = URLComponents(url: url, resolvingAgainstBaseURL: false)?.queryItems
+                  let parts = URLComponents(url: url, resolvingAgainstBaseURL: false)
             else { return nil }
             let path = url.path.isEmpty ? "/" : url.path
-            for engine in known where engine.host == Pages.bare(host) && engine.path == path {
-                // An engine's own box sends spaces as "+".
-                guard let value = items.first(where: { $0.name == engine.name })?.value?
-                    .replacingOccurrences(of: "+", with: " ")
-                    .trimmingCharacters(in: .whitespacesAndNewlines),
-                    !value.isEmpty
+            for engine in known where engine.host == Pages.bare(host) {
+                let raw: String?
+                let formEncoded: Bool
+                switch engine.slot {
+                case let .query(name, pattern):
+                    guard engine.path == path else { continue }
+                    let items = zip(parts.queryItems ?? [], parts.percentEncodedQueryItems ?? [])
+                    raw = items.first(where: { $0.0.name == name }).flatMap { Pages.capture(pattern, in: $0.1.value ?? "") }
+                    formEncoded = true
+                case let .path(pattern):
+                    raw = Pages.capture(pattern, in: parts.percentEncodedPath)
+                    formEncoded = false
+                case let .fragment(pattern):
+                    guard engine.path == path else { continue }
+                    raw = parts.percentEncodedFragment.flatMap { Pages.capture(pattern, in: $0) }
+                    formEncoded = false
+                }
+                // A query's raw "+" is a space, while %2B is a literal plus.
+                guard let raw,
+                      let value = (formEncoded ? raw.replacingOccurrences(of: "+", with: " ") : raw)
+                        .removingPercentEncoding?.trimmingCharacters(in: .whitespacesAndNewlines),
+                      !value.isEmpty
                 else { continue }
                 return value
             }
             return nil
+        }
+
+        private static func capture(_ pattern: String, in value: String) -> String? {
+            guard let slot = pattern.range(of: mark) else { return nil }
+            let before = pattern[..<slot.lowerBound]
+            let after = pattern[slot.upperBound...]
+            guard value.hasPrefix(before), value.hasSuffix(after), value.count >= before.count + after.count else { return nil }
+            return String(value.dropFirst(before.count).dropLast(after.count))
         }
 
         private static func bare(_ host: String) -> String {
