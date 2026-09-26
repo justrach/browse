@@ -566,6 +566,47 @@ final class Browser: NSObject, ObservableObject {
         }
     }
 
+    /// Each of the other browser's profiles as a space of its own, signed in
+    /// where that profile was: its cookies put in the space's own store. The
+    /// first profile goes into the first space only while that has no
+    /// sign-ins of its own — a first run — so nothing here is written over;
+    /// a profile brought in before goes back into its space.
+    func takeSignIns(from source: Chromium.Source) async -> String {
+        let profiles = Chromium.profiles(in: source)
+        let read = await Task.detached(priority: .userInitiated) { () -> Result<[(Chromium.Profile, [HTTPCookie])], Error> in
+            Result {
+                let key = try Chromium.key(for: source)
+                return try profiles.map { ($0, try Chromium.cookies(in: $0, key: key)) }
+            }
+        }.value
+        guard case .success(let found) = read else {
+            return "sign-ins: macOS didn't hand over \(source.name)'s key — allow it and try again"
+        }
+        var firstFree = await Store.websites.httpCookieStore.allCookies().isEmpty
+        var spacesUsed = 0
+        var count = 0
+        for (profile, jar) in found where !jar.isEmpty {
+            let id: UUID
+            if firstFree {
+                id = Space.firstID
+                firstFree = false
+            } else if let kept = spaces.first(where: { $0.name == profile.name && !$0.isFirst && $0.sharesSignIns != true }) {
+                id = kept.id
+            } else {
+                let made = Space(id: UUID(), name: profile.name, colour: 0, icon: freeIcon, sharesSignIns: false)
+                spaces.append(made)
+                Spaces.write(spaces)
+                id = made.id
+            }
+            let store = Spaces.store(for: id).httpCookieStore
+            for cookie in jar { await store.setCookie(cookie) }
+            spacesUsed += 1
+            count += jar.count
+        }
+        if spacesUsed > 1 { prefs.usesSpaces = true }
+        return spacesUsed > 1 ? "signed in as \(spacesUsed) profiles, each a space" : "\(count) sign-ins"
+    }
+
     /// Takes in a CSV as Google Password Manager exports one. The file is read
     /// once and never copied.
     func importPasswords() {
@@ -586,6 +627,49 @@ final class Browser: NSObject, ObservableObject {
                 ? "\(result.kept) passwords in the keychain"
                 : "\(result.kept) in the keychain, \(result.skipped) skipped"
         )
+    }
+
+    /// Safari's things, from the zip its File › Export Browsing Data to
+    /// File… writes (see SafariImport.swift) — or a bookmarks file from any
+    /// browser. `done` hears what came over, as the announcement says it.
+    func importExport(then done: ((String) -> Void)? = nil) {
+        let panel = NSOpenPanel()
+        panel.allowedContentTypes = [.zip, .html, .json]
+        panel.allowsMultipleSelection = false
+        panel.prompt = "Import"
+        panel.message = "In Safari, File › Export Browsing Data to File… makes this zip. A bookmarks file from any browser works too."
+        guard panel.runModal() == .OK, let url = panel.url else { return }
+        DispatchQueue.global(qos: .userInitiated).async {
+            let outcome = Result { try SafariExport.read(url) }
+            DispatchQueue.main.async {
+                guard case .success(let found) = outcome else {
+                    self.announce("Nothing to bring in from that file")
+                    done?("nothing readable in that file")
+                    return
+                }
+                var lines: [String] = []
+                if !found.bookmarks.isEmpty {
+                    self.bookmarks.take(found.bookmarks, from: found.from)
+                    lines.append("\(Bookmarks.count(found.bookmarks)) bookmarks")
+                }
+                if !found.places.isEmpty {
+                    for place in found.places {
+                        self.history.take(place.url, title: place.title, count: place.count, last: place.last)
+                    }
+                    self.history.settle()
+                    lines.append("\(found.places.count) places")
+                }
+                if let csv = found.passwords {
+                    let result = Vault.take(csv: csv)
+                    lines.append("\(result.kept) passwords")
+                }
+                self.relist()
+                var said = lines.joined(separator: " · ")
+                if found.passwords != nil { said += " — the export has your passwords unencrypted, so delete it" }
+                self.announce(said.isEmpty ? "Nothing to bring in from that file" : said)
+                done?(said)
+            }
+        }
     }
 
     // MARK: - what is kept, and getting rid of it
@@ -896,6 +980,7 @@ final class Browser: NSObject, ObservableObject {
         super.init()
         Shield.shared.enabled = prefs.shielded
         Shield.shared.compile()
+        Connect.shared.start(for: self)
         if #available(macOS 15.4, *) { Extensions.shared.start(for: self) }
         if prefs.bench {
             Bench.shared.start(for: self)

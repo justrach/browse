@@ -101,23 +101,31 @@ enum Chromium {
     // MARK: - what they kept
 
     /// The other browser's bookmarks: the bar first, then anything filed
-    /// elsewhere, folders and all. Chromium keeps them as one JSON file.
+    /// elsewhere, folders and all. Chromium keeps them as one JSON file a
+    /// profile; with more than one profile, each comes in as a folder under
+    /// the profile's name.
     static func bookmarks(in source: Source) -> [Bookmark] {
+        let all = profiles(in: source)
+        guard all.count > 1 else { return all.first.map { bookmarks(at: $0.folder) } ?? [] }
+        return all.compactMap { profile in
+            let marks = bookmarks(at: profile.folder)
+            return marks.isEmpty ? nil : .folder(profile.name, marks)
+        }
+    }
+
+    private static func bookmarks(at folder: URL) -> [Bookmark] {
+        guard let data = try? Data(contentsOf: folder.appendingPathComponent("Bookmarks")),
+              let top = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+              let roots = top["roots"] as? [String: Any]
+        else { return [] }
         var out: [Bookmark] = []
-        for file in source.files {
-            let marks = file.deletingLastPathComponent().appendingPathComponent("Bookmarks")
-            guard let data = try? Data(contentsOf: marks),
-                  let top = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
-                  let roots = top["roots"] as? [String: Any]
-            else { continue }
-            if let bar = roots["bookmark_bar"] as? [String: Any] {
-                out += nodes(in: bar["children"] as? [[String: Any]] ?? [])
-            }
-            for key in ["other", "synced"] {
-                if let more = roots[key] as? [String: Any] {
-                    let kids = nodes(in: more["children"] as? [[String: Any]] ?? [])
-                    if !kids.isEmpty { out.append(.folder(key == "other" ? "Other" : "Mobile", kids)) }
-                }
+        if let bar = roots["bookmark_bar"] as? [String: Any] {
+            out += nodes(in: bar["children"] as? [[String: Any]] ?? [])
+        }
+        for key in ["other", "synced"] {
+            if let more = roots[key] as? [String: Any] {
+                let kids = nodes(in: more["children"] as? [[String: Any]] ?? [])
+                if !kids.isEmpty { out.append(.folder(key == "other" ? "Other" : "Mobile", kids)) }
             }
         }
         return out
@@ -192,6 +200,126 @@ enum Chromium {
             }
         }
         return out
+    }
+
+    // MARK: - profiles and their sign-ins
+
+    /// One person's side of the other browser: its folder, and the name it
+    /// goes by there ("Work", "Personal"), from the browser's Local State.
+    struct Profile: Identifiable, Hashable {
+        let folder: URL
+        let name: String
+        var id: String { folder.path }
+    }
+
+    /// Every profile with something in it, the one it opens with first.
+    static func profiles(in source: Source) -> [Profile] {
+        let state = (try? Data(contentsOf: source.root.appendingPathComponent("Local State")))
+            .flatMap { try? JSONSerialization.jsonObject(with: $0) as? [String: Any] }
+        let cache = (state?["profile"] as? [String: Any])?["info_cache"] as? [String: Any] ?? [:]
+        return source.files.map { file -> Profile in
+            let folder = file.deletingLastPathComponent()
+            let name = (cache[folder.lastPathComponent] as? [String: Any])?["name"] as? String
+            return Profile(folder: folder, name: name?.isEmpty == false ? name! : folder.lastPathComponent)
+        }
+        .sorted { ($0.folder.lastPathComponent == "Default" ? 0 : 1, $0.name) < ($1.folder.lastPathComponent == "Default" ? 0 : 1, $1.name) }
+    }
+
+    /// The key the other browser seals its cookies and passwords with.
+    /// macOS asks once, as it does for the passwords.
+    static func key(for source: Source) throws -> [UInt8] {
+        guard let passphrase = safeStorage(source) else { throw Trouble.noPassphrase }
+        return stretch(passphrase)
+    }
+
+    /// A profile's cookies — its sign-ins — as WebKit takes them. Ones
+    /// partitioned under another site, and ones already expired, stay behind.
+    static func cookies(in profile: Profile, key: [UInt8]) throws -> [HTTPCookie] {
+        let file = [profile.folder.appendingPathComponent("Network/Cookies"), profile.folder.appendingPathComponent("Cookies")]
+            .first { FileManager.default.fileExists(atPath: $0.path) }
+        guard let file else { return [] }
+        // The database with its journal beside it, so what the browser
+        // hasn't folded in yet comes too.
+        let temp = FileManager.default.temporaryDirectory.appendingPathComponent("office-import-\(UUID().uuidString)", isDirectory: true)
+        try FileManager.default.createDirectory(at: temp, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: temp) }
+        for suffix in ["", "-wal", "-journal"] {
+            let from = URL(fileURLWithPath: file.path + suffix)
+            if FileManager.default.fileExists(atPath: from.path) {
+                try FileManager.default.copyItem(at: from, to: temp.appendingPathComponent("Cookies" + suffix))
+            }
+        }
+        var db: OpaquePointer?
+        guard sqlite3_open_v2(temp.appendingPathComponent("Cookies").path, &db, SQLITE_OPEN_READONLY, nil) == SQLITE_OK, let db else {
+            throw Trouble.unreadable
+        }
+        defer { sqlite3_close(db) }
+
+        // From version 24 each value starts with a hash of its site.
+        var version = 0
+        var meta: OpaquePointer?
+        if sqlite3_prepare_v2(db, "SELECT value FROM meta WHERE key = 'version'", -1, &meta, nil) == SQLITE_OK, let meta {
+            if sqlite3_step(meta) == SQLITE_ROW, let text = sqlite3_column_text(meta, 0) { version = Int(String(cString: text)) ?? 0 }
+            sqlite3_finalize(meta)
+        }
+        let partitioned = version >= 18 ? "AND top_frame_site_key = ''" : ""
+        let sql = """
+        SELECT host_key, name, value, encrypted_value, path, expires_utc, is_secure, is_httponly, samesite
+        FROM cookies WHERE 1 = 1 \(partitioned)
+        """
+        var statement: OpaquePointer?
+        guard sqlite3_prepare_v2(db, sql, -1, &statement, nil) == SQLITE_OK, let statement else { throw Trouble.unreadable }
+        defer { sqlite3_finalize(statement) }
+
+        var out: [HTTPCookie] = []
+        let now = Date()
+        while sqlite3_step(statement) == SQLITE_ROW {
+            func text(_ i: Int32) -> String { sqlite3_column_text(statement, i).map { String(cString: $0) } ?? "" }
+            let host = text(0), name = text(1), path = text(4)
+            var value = text(2)
+            if let bytes = sqlite3_column_blob(statement, 3) {
+                let blob = Data(bytes: bytes, count: Int(sqlite3_column_bytes(statement, 3)))
+                guard let opened = open(blob, key: key, hashed: version >= 24) else { continue }
+                value = opened
+            }
+            guard !host.isEmpty, !name.isEmpty else { continue }
+            let stamp = sqlite3_column_int64(statement, 5)
+            var properties: [HTTPCookiePropertyKey: Any] = [.domain: host, .path: path.isEmpty ? "/" : path, .name: name, .value: value]
+            if stamp > 0 {
+                let expires = Date(timeIntervalSince1970: Double(stamp) / 1_000_000 - 11_644_473_600)
+                guard expires > now else { continue }
+                properties[.expires] = expires
+            }
+            if sqlite3_column_int(statement, 6) != 0 { properties[.secure] = "TRUE" }
+            if sqlite3_column_int(statement, 7) != 0 { properties[HTTPCookiePropertyKey("HttpOnly")] = "TRUE" }
+            switch sqlite3_column_int(statement, 8) {
+            case 1: properties[.sameSitePolicy] = HTTPCookieStringPolicy.sameSiteLax
+            case 2: properties[.sameSitePolicy] = HTTPCookieStringPolicy.sameSiteStrict
+            default: break
+            }
+            if let cookie = HTTPCookie(properties: properties) { out.append(cookie) }
+        }
+        return out
+    }
+
+    /// A cookie's value: "v10" and AES-128-CBC, as a password is, and past
+    /// version 24 a 32-byte hash of its site in front. Nil if it won't open.
+    private static func open(_ blob: Data, key: [UInt8], hashed: Bool) -> String? {
+        guard !blob.isEmpty else { return "" }
+        guard blob.count > 3, blob.prefix(3) == Data("v10".utf8) else { return String(data: blob, encoding: .utf8) }
+        let body = [UInt8](blob.dropFirst(3))
+        let iv = [UInt8](repeating: 0x20, count: 16)
+        var out = [UInt8](repeating: 0, count: body.count + kCCBlockSizeAES128)
+        var moved = 0
+        guard CCCrypt(CCOperation(kCCDecrypt), CCAlgorithm(kCCAlgorithmAES128), CCOptions(kCCOptionPKCS7Padding),
+                      key, key.count, iv, body, body.count, &out, out.count, &moved) == kCCSuccess
+        else { return nil }
+        var plain = Data(out.prefix(moved))
+        if hashed {
+            guard plain.count >= 32 else { return nil }
+            plain = plain.dropFirst(32)
+        }
+        return String(data: plain, encoding: .utf8)
     }
 
     // MARK: - where they have been

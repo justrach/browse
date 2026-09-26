@@ -141,6 +141,9 @@ iconutil -c icns "$ICONSET" -o "$APP/Contents/Resources/AppIcon.icns"
 cp "$SOURCE_ICON" "$APP/Contents/Resources/BrandMark.png"
 mkdir -p "$APP/Contents/Resources/PreviewFavicons"
 cp Assets/PreviewFavicons/*.png "$APP/Contents/Resources/PreviewFavicons/"
+# The ad blocker's lists, as ./shield-lists last made them.
+mkdir -p "$APP/Contents/Resources/Shield"
+cp Assets/Shield/*.json.xz Assets/Shield/version Assets/Shield/NOTICE "$APP/Contents/Resources/Shield/"
 rm -rf "$ICONSET"
 
 cat > "$APP/Contents/Info.plist" <<PLIST

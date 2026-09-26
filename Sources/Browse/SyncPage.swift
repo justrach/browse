@@ -27,6 +27,19 @@ struct SyncPage: View {
                 }
                 if prefs.sync {
                     Rule()
+                    Line(
+                        "Passwords too",
+                        "Sealed the same way, so Codegraff can't read them. Anyone with the sync code and your Codegraff sign-in could — keep the code as you would a password"
+                    ) {
+                        Switch(on: Binding(
+                            get: { prefs.syncPasswords },
+                            set: { on in
+                                prefs.syncPasswords = on
+                                if on { sync.nudge(after: 1) } else { sync.stopPasswords() }
+                            }
+                        ))
+                    }
+                    Rule()
                     Line(status.0, status.1) {
                         if case .syncing = sync.phase {
                             Ring(size: 12)

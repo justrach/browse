@@ -51,6 +51,11 @@ final class Sync: ObservableObject {
         ?? "https://gateway.codegraff.com")!
     private static var testing: Bool { ProcessInfo.processInfo.environment["SEARCH_SYNC_URL"] != nil }
 
+    /// How long a Mac making the account's key waits before looking whether
+    /// another made one at the same time: well past the moment between the
+    /// other's look and its write.
+    private static let settle: UInt64 = 2_000_000_000
+
     /// This Mac, as history counts its visits. Made once.
     nonisolated static let device: String = {
         if let made = Store.settings.string(forKey: "sync.device") { return made }
@@ -193,23 +198,40 @@ final class Sync: ObservableObject {
                     return
                 }
                 let master = SymmetricKey(size: .bits256)
+                let keys = Keys(master)
+                try await writeCheck(keys, login: login)
+                // Two Macs switched on at once both found no key, both made
+                // one, and the server kept whichever wrote last. So a moment
+                // later, a look: the Mac whose check isn't there gives way and
+                // asks for the other's code — before it has kept the key or
+                // sent anything under it.
+                try await Task.sleep(nanoseconds: Sync.settle)
+                guard let check = try await checkRecord(login), keys.open(check, as: "meta", id: Keys.checkID) != nil else {
+                    phase = .needsCode
+                    return
+                }
                 Keychain.store(master)
-                try await writeCheck(Keys(master), login: login)
                 state = State()
                 state.checked = true
                 state.save()
-                return await finish(Keys(master), login: login, browser: browser)
+                return await finish(keys, login: login, browser: browser)
             }
             let keys = Keys(master)
-            if !state.checked {
-                if let check = try await checkRecord(login) {
-                    guard keys.open(check, as: "meta", id: Keys.checkID) != nil else {
-                        phase = .wrongCode
-                        return
-                    }
-                } else {
-                    try await writeCheck(keys, login: login)
+            // Every round, not just the first: the key is still the one the
+            // account is sealed with. Another Mac that won a first round at
+            // the same moment, or made a fresh key after the account was
+            // emptied, shows here — before anything goes up that no other
+            // Mac could open. The account emptied from another Mac gets this
+            // Mac's check back, so the next Mac to join asks for its code.
+            if let check = try await checkRecord(login) {
+                guard keys.open(check, as: "meta", id: Keys.checkID) != nil else {
+                    phase = .wrongCode
+                    return
                 }
+            } else {
+                try await writeCheck(keys, login: login)
+            }
+            if !state.checked {
                 state.checked = true
                 state.save()
             }
@@ -224,6 +246,7 @@ final class Sync: ObservableObject {
             try await history(keys, login: login, history: browser.history)
             try await bookmarks(keys, login: login, bookmarks: browser.bookmarks)
             try await themes(keys, login: login, prefs: browser.prefs)
+            if browser.prefs.syncPasswords { try await passwords(keys, login: login) }
             state.save()
             phase = .synced(Date())
         } catch {
@@ -374,6 +397,69 @@ final class Sync: ObservableObject {
             for item in out[sent] { pushed[item.id] = item.signature }
         }
         state.pushedThemes = pushed
+    }
+
+    // MARK: - passwords
+
+    /// A saved password as it travels. Sealed like everything else; only
+    /// ever read back on a Mac with the sync code.
+    private struct Secret: Codable {
+        var host: String
+        var user: String
+        var password: String
+        var used: Date?
+        var clear: Bool
+    }
+
+    /// Each sign-in under a name made from its site and account, which says
+    /// neither. What was last sent is remembered by a keyed hash, never a
+    /// plain one: a plain hash of a weak password in sync.json could be
+    /// guessed back.
+    private func passwords(_ keys: Keys, login: String) async throws {
+        func id(_ host: String, _ user: String) -> String { keys.id("p:\(host)\u{1}\(user)") }
+        func signature(_ secret: Secret) -> String {
+            keys.id("sig:" + ((try? Sync.encoder.encode(secret)).map { $0.base64EncodedString() } ?? ""))
+        }
+        var pushed = state.pushedPasswords ?? [:]
+        var local: [String: Secret] = [:]
+        for login in Vault.all() {
+            local[id(login.host, login.user)] = Secret(host: login.host, user: login.user, password: login.password, used: login.used, clear: login.clear)
+        }
+        try await pull("passwords", login: login) { id, body in
+            // Changed here since the last round: this Mac's wins.
+            if let mine = local[id], signature(mine) != pushed[id] { return }
+            if let body {
+                guard let data = keys.open(body, as: "passwords", id: id),
+                      let secret = try? Sync.decoder.decode(Secret.self, from: data),
+                      Vault.save(host: secret.host, user: secret.user, password: secret.password, used: secret.used, clear: secret.clear)
+                else { return }
+                local[id] = secret
+                pushed[id] = signature(secret)
+            } else if let mine = local[id] {
+                Vault.forget(host: mine.host, user: mine.user)
+                local[id] = nil
+                pushed[id] = nil
+            }
+        }
+
+        var out: [(id: String, body: String?, signature: String?)] = []
+        for id in pushed.keys.sorted() where local[id] == nil { out.append((id, nil, nil)) }
+        for (id, secret) in local.sorted(by: { $0.key < $1.key }) {
+            let now = signature(secret)
+            guard pushed[id] != now, let data = try? Sync.encoder.encode(secret) else { continue }
+            out.append((id, try keys.seal(data, as: "passwords", id: id), now))
+        }
+        try await push("passwords", out.map { ($0.id, $0.body) }, login: login) { sent in
+            for item in out[sent] { pushed[item.id] = item.signature }
+        }
+        state.pushedPasswords = pushed
+    }
+
+    /// Switched off: nothing more goes, and what was sent is left for the
+    /// other Macs rather than deleted from under them.
+    func stopPasswords() {
+        state.pushedPasswords = nil
+        state.save()
     }
 
     /// The tree as records: every node by its id, with its folder and its
@@ -538,6 +624,8 @@ final class Sync: ObservableObject {
         /// The same for theme files; optional so a file from before themes
         /// synced still reads.
         var pushedThemes: [String: String]? = [:]
+        /// The same for passwords, by a keyed hash (see `passwords`).
+        var pushedPasswords: [String: String]? = [:]
         /// Pages forgotten here and not yet forgotten everywhere.
         var forgotten: Set<String> = []
         /// The key was checked against the account's.

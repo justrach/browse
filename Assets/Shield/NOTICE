@@ -1,0 +1,9 @@
+The ad blocker's lists are made from EasyList and EasyPrivacy
+(https://easylist.to), by The EasyList authors, used under the GNU General
+Public License version 3 (dual-licensed with Creative Commons
+Attribution-ShareAlike 3.0).
+
+They are converted into WebKit content blocker rules with adblock-rust
+(https://github.com/brave/adblock-rust), by Brave Software, under the
+Mozilla Public License 2.0. The conversion is ./shield-lists in browse's
+source.

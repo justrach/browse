@@ -1225,6 +1225,7 @@ struct AgentPage: View {
                 Pill("Open…") { agent.loginInTerminal() }
             }
         }
+        ConnectCard()
         .task(id: prefs.agentPath) {
             looked = false
             found = await Agent.locate(custom: prefs.agentPath)?.program.path

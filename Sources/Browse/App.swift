@@ -413,6 +413,7 @@ struct ContentView: View {
     private var bars: some View {
         VStack(spacing: 8) {
             announcement
+            ConnectPill()
             if let ask = browser.asking {
                 captureAsking(ask)
                     .transition(.move(edge: .bottom).combined(with: .opacity))

@@ -51,11 +51,20 @@ final class AgentTools {
     /// Listening, and the file that tells graff where, written. False if the
     /// port couldn't be had — graff then runs with its own tools only.
     func start() async -> Bool {
+        guard await listening() else { return false }
+        return announce()
+    }
+
+    /// Only listening, not telling graff: for connected apps (Connect.swift),
+    /// which find the server through a file of their own.
+    func listening() async -> Bool {
         if port != nil { return true }
         if listener == nil { listen() }
         strip()
         return await withCheckedContinuation { waiting.append($0) }
     }
+
+    var listeningPort: UInt16? { port }
 
     /// For a page opened only to be read, then closed (search, read_pages):
     /// no pictures, video or fonts, which are most of what a page fetches
@@ -90,7 +99,7 @@ final class AgentTools {
                 switch state {
                 case .ready:
                     self.port = listener.port?.rawValue
-                    self.settle(self.announce())
+                    self.settle(self.port != nil)
                 case .failed, .cancelled:
                     self.listener = nil
                     self.port = nil
@@ -183,23 +192,106 @@ final class AgentTools {
         guard request.method == "POST" else {
             return HTTPRequest.reply(405, nil)
         }
+        // A connected app, which signs instead of carrying the token.
+        if request.headers["x-client-id"] != nil || request.path.hasPrefix("/pair") || request.path == "/session/close" {
+            return await connected(request)
+        }
         guard request.headers["authorization"] == "Bearer \(token)" else {
             return HTTPRequest.reply(401, nil)
         }
         guard let message = (try? JSONSerialization.jsonObject(with: request.body)) as? [String: Any] else {
             return HTTPRequest.reply(400, nil)
         }
-        guard let reply = await rpc(message) else {
+        guard let reply = await rpc(message, owner: AgentTools.graff, caller: nil) else {
             return HTTPRequest.reply(202, nil)
         }
         let body = (try? JSONSerialization.data(withJSONObject: reply, options: [.withoutEscapingSlashes])) ?? Data()
         return HTTPRequest.reply(200, body)
     }
 
+    /// graff's pages are graff's; each connected app's, and each of its
+    /// sessions', are its own.
+    private static let graff = "graff"
+
+    /// A connected app's request (Connect.swift): from this Mac and no web
+    /// page, signed by a key that paired, and inside what it was allowed.
+    /// Every answer is signed back.
+    private func connected(_ request: HTTPRequest) async -> Data {
+        let connect = Connect.shared
+        func json(_ status: Int, _ value: [String: Any], signed nonce: String?) -> Data {
+            let body = (try? JSONSerialization.data(withJSONObject: value, options: [.withoutEscapingSlashes])) ?? Data()
+            return HTTPRequest.reply(status, body, headers: nonce.map { ["X-Signature": connect.sign(body, nonce: $0)] } ?? [:])
+        }
+        // A page in a browser can reach 127.0.0.1 too: it sends an Origin,
+        // or — rebinding a name of its own to this address — the wrong Host.
+        guard request.headers["origin"] == nil, let port, request.headers["host"] == "127.0.0.1:\(port)" else {
+            return json(403, ["error": "bad_origin"], signed: nil)
+        }
+        if request.path == "/pair" {
+            let (status, value) = connect.pair(request.body)
+            return json(status, value, signed: nil)
+        }
+        let nonce = request.headers["x-nonce"] ?? ""
+        let caller: Connect.Caller
+        switch connect.verify(method: request.method, path: request.path, headers: request.headers, body: request.body) {
+        case .failure(let refusal): return json(401, ["error": refusal.rawValue], signed: nonce)
+        case .success(let who): caller = who
+        }
+        if request.path == "/pair/status" { return json(200, connect.status(caller), signed: nonce) }
+        guard !caller.pending else { return json(401, ["error": Connect.Refusal.unknown.rawValue], signed: nonce) }
+        let asked = (try? JSONSerialization.jsonObject(with: request.body)) as? [String: Any]
+
+        switch request.path {
+        case "/session/close":
+            guard let session = asked?["session"] as? String, let owner = AgentTools.owner(caller, session) else {
+                return json(400, ["error": "bad_request"], signed: nonce)
+            }
+            let closing = pages.filter { $0.owner == owner }
+            closing.forEach(close)
+            return json(200, ["closed": closing.count], signed: nonce)
+        case "/mcp":
+            guard let message = asked else { return json(400, ["error": "bad_request"], signed: nonce) }
+            let params = message["params"] as? [String: Any] ?? [:]
+            let session = (params["_meta"] as? [String: Any])?["browse/session"] as? String
+            guard let owner = AgentTools.owner(caller, session) else { return json(400, ["error": "bad_session"], signed: nonce) }
+            if message["method"] as? String == "tools/call" {
+                let name = params["name"] as? String ?? ""
+                let scope = Connect.scope(of: name)
+                guard let scope, caller.may(scope) else {
+                    return json(403, ["error": "out_of_scope", "tool": name, "scope": scope?.rawValue ?? "none"], signed: nonce)
+                }
+            }
+            connect.drove(caller, pages: pages.filter { $0.owner.hasPrefix(caller.id) }.count)
+            guard let reply = await rpc(message, owner: owner, caller: caller) else {
+                // A notification: nothing to say, and that is signed too.
+                return HTTPRequest.reply(202, Data(), headers: ["X-Signature": connect.sign(Data(), nonce: nonce)])
+            }
+            connect.drove(caller, pages: pages.filter { $0.owner.hasPrefix(caller.id) }.count)
+            if let result = reply["result"] as? [String: Any], let refusal = result[AgentTools.refusal] as? [String: Any] {
+                return json(403, refusal, signed: nonce)
+            }
+            return json(200, reply, signed: nonce)
+        default:
+            return json(404, ["error": "not_found"], signed: nonce)
+        }
+    }
+
+    /// A connected app's pages, or one session's of them: `browse/session`
+    /// in a call's _meta, up to 64 of [A-Za-z0-9._:-]. Nil for one that isn't.
+    private static func owner(_ caller: Connect.Caller, _ session: String?) -> String? {
+        guard let session else { return caller.id }
+        guard (1...64).contains(session.count), session.allSatisfy({ $0.isASCII && ($0.isLetter || $0.isNumber || "._:-".contains($0)) }) else { return nil }
+        return caller.id + "/" + session
+    }
+
+    /// A tool's answer that is really a refusal — the user said no, or the
+    /// app hasn't the scope for the tab it named — sent as a 403.
+    private static let refusal = "__refusal"
+
     // MARK: - MCP
 
     /// One JSON-RPC message; nothing back for a notification.
-    private func rpc(_ message: [String: Any]) async -> [String: Any]? {
+    private func rpc(_ message: [String: Any], owner: String, caller: Connect.Caller?) async -> [String: Any]? {
         guard let id = message["id"], !(id is NSNull) else { return nil }
         let method = message["method"] as? String ?? ""
         let params = message["params"] as? [String: Any] ?? [:]
@@ -215,11 +307,17 @@ final class AgentTools {
         case "ping":
             reply["result"] = [String: Any]()
         case "tools/list":
-            reply["result"] = ["tools": AgentTools.tools]
+            // A connected app sees only what it may use.
+            let offered = caller.map { caller in
+                AgentTools.tools.filter { tool in
+                    Connect.scope(of: tool["name"] as? String ?? "").map(caller.may) ?? false
+                }
+            } ?? AgentTools.tools
+            reply["result"] = ["tools": offered]
         case "tools/call":
             let name = params["name"] as? String ?? ""
             let arguments = params["arguments"] as? [String: Any] ?? [:]
-            reply["result"] = await call(name, arguments)
+            reply["result"] = await call(name, arguments, owner: owner, caller: caller)
         default:
             // `server/discover` among them: graff asks it first, and an
             // error here is what tells it this is the simpler, older kind
@@ -333,14 +431,14 @@ final class AgentTools {
 
     // MARK: - the tools
 
-    private func call(_ name: String, _ arguments: [String: Any]) async -> [String: Any] {
+    private func call(_ name: String, _ arguments: [String: Any], owner: String, caller: Connect.Caller?) async -> [String: Any] {
         guard let browser else { return AgentTools.failed("browse has no window") }
         switch name {
         case "search":
             guard let query = arguments["query"] as? String, let url = browser.searchURL(for: query) else {
                 return AgentTools.failed("search needs a query")
             }
-            let sheet = await load(url, as: "Search: \(query)", reading: true)
+            let sheet = await load(url, as: "Search: \(query)", reading: true, owner: owner)
             let (text, error) = await sheet.run("document.body ? document.body.innerText : ''")
             if let error { return AgentTools.failed(error) }
             let (found, _) = await sheet.run(AgentTools.results(excluding: url.host() ?? ""))
@@ -362,7 +460,7 @@ final class AgentTools {
             let read = await withTaskGroup(of: (Int, String).self) { group in
                 for (index, url) in chosen.enumerated() {
                     group.addTask { @MainActor in
-                        let sheet = await self.load(url, as: nil, reading: true)
+                        let sheet = await self.load(url, as: nil, reading: true, owner: owner)
                         let (text, error) = await sheet.run("document.body ? document.body.innerText : ''")
                         let body = error.map { "(couldn't read it: \($0))" } ?? AgentTools.cut(text as? String ?? "", each)
                         let said = "## \(sheet.title)\n\(sheet.address)\n\n\(body)"
@@ -379,11 +477,11 @@ final class AgentTools {
 
         case "open":
             guard let url = address(arguments["url"], browser) else { return AgentTools.failed("open needs a url") }
-            let sheet = await load(url, as: nil)
+            let sheet = await load(url, as: nil, owner: owner)
             return AgentTools.said(describe(sheet))
 
         case "read":
-            return await on(arguments, browser) { target in
+            return await on(arguments, browser, owner, caller) { target in
                 let (text, error) = await target.run("document.body ? document.body.innerText : ''")
                 if let error { return AgentTools.failed(error) }
                 let body = AgentTools.cut(text as? String ?? "", arguments["limit"] as? Int ?? 60_000)
@@ -391,7 +489,7 @@ final class AgentTools {
             }
 
         case "links":
-            return await on(arguments, browser) { target in
+            return await on(arguments, browser, owner, caller) { target in
                 let (value, error) = await target.run(AgentTools.allLinks)
                 if let error { return AgentTools.failed(error) }
                 return AgentTools.text(value as? String ?? "")
@@ -399,7 +497,7 @@ final class AgentTools {
 
         case "go":
             guard let url = address(arguments["url"], browser) else { return AgentTools.failed("go needs a url") }
-            return await on(arguments, browser) { target in
+            return await on(arguments, browser, owner, caller) { target in
                 target.go(url)
                 await target.settled()
                 self.seen(target)
@@ -407,7 +505,7 @@ final class AgentTools {
             }
 
         case "back", "forward", "reload":
-            return await on(arguments, browser) { target in
+            return await on(arguments, browser, owner, caller) { target in
                 switch name {
                 case "back": target.web.goBack()
                 case "forward": target.web.goForward()
@@ -418,7 +516,7 @@ final class AgentTools {
             }
 
         case "form_fields":
-            return await on(arguments, browser) { target in
+            return await on(arguments, browser, owner, caller) { target in
                 let (value, error) = await target.run(AgentTools.fields)
                 if let error { return AgentTools.failed(error) }
                 return AgentTools.text("\(target.id) · \(target.title)\n\(target.address)\n\n" + (value as? String ?? ""))
@@ -432,8 +530,9 @@ final class AgentTools {
                 wanted = [["selector": selector, "value": arguments["text"] as? String ?? ""]]
             }
             guard !wanted.isEmpty else { return AgentTools.failed("\(name) needs fields, each a selector and a value") }
-            guard let script = AgentTools.fill(wanted) else { return AgentTools.failed("Those values can't be sent to the page") }
-            return await on(arguments, browser) { target in
+            // A connected app never types into a password field.
+            guard let script = AgentTools.fill(wanted, passwords: caller == nil) else { return AgentTools.failed("Those values can't be sent to the page") }
+            return await on(arguments, browser, owner, caller) { target in
                 let (value, error) = await target.run(script)
                 if let error { return AgentTools.failed(error) }
                 // A field's own scripts — a search as you type, a form that
@@ -444,7 +543,7 @@ final class AgentTools {
 
         case "click", "submit":
             guard let selector = arguments["selector"] as? String else { return AgentTools.failed("\(name) needs a selector") }
-            return await on(arguments, browser) { target in
+            return await on(arguments, browser, owner, caller) { target in
                 let (value, error) = await target.run(Bench.act(name, selector: selector, text: arguments["text"] as? String ?? ""))
                 if let error { return AgentTools.failed(error) }
                 guard value as? String == "ok" else { return AgentTools.failed(value as? String ?? "didn't work") }
@@ -463,7 +562,7 @@ final class AgentTools {
             }
             let values = (arguments["values"] as? [Any] ?? []).compactMap { $0 as? String ?? ($0 as? NSNumber)?.stringValue }
             let steps = min(max(arguments["steps"] as? Int ?? 25, 1), 60)
-            return await on(arguments, browser) { target in
+            return await on(arguments, browser, owner, caller) { target in
                 let (said, failed) = await Jev.drive(goal: goal, values: values, steps: steps, on: target.web)
                 self.seen(target)
                 return failed ? AgentTools.failed(said) : AgentTools.text("\(target.id) · " + said)
@@ -484,7 +583,7 @@ final class AgentTools {
 
         case "run_js":
             guard let script = arguments["script"] as? String else { return AgentTools.failed("run_js needs a script") }
-            return await on(arguments, browser) { target in
+            return await on(arguments, browser, owner, caller) { target in
                 let (value, error) = await target.run(script)
                 if let error { return AgentTools.failed(error) }
                 let plain = Bench.plain(value)
@@ -493,7 +592,7 @@ final class AgentTools {
             }
 
         case "screenshot":
-            return await on(arguments, browser) { target in
+            return await on(arguments, browser, owner, caller) { target in
                 guard target.web.window != nil else {
                     return AgentTools.failed("That tab isn't drawn right now — `show` it first")
                 }
@@ -510,26 +609,28 @@ final class AgentTools {
                     "in front": tab.id == browser.activeID,
                 ]
             }
-            return AgentTools.said(["your pages": pages.map(describe), "the user's tabs": theirs])
+            return AgentTools.said(["your pages": pages.filter { $0.owner == owner }.map(describe), "the user's tabs": theirs])
 
         case "show":
             let ref = (arguments["page"] as? String ?? "").lowercased()
-            if let sheet = pages.first(where: { $0.id == ref }) {
+            if let sheet = pages.first(where: { $0.id == ref && $0.owner == owner }) {
                 guard let url = sheet.web.url else { return AgentTools.failed("\(ref) has no address yet") }
                 let tab = browser.open(url, foreground: true, atEnd: true)
                 return AgentTools.said(["tab": AgentTools.short(tab), "url": url.absoluteString])
             }
             guard let tab = tab(ref, browser) else { return AgentTools.failed("No page or tab “\(ref)” — see `tabs`") }
+            if let refused = await refusedTabs(caller) { return refused }
             browser.select(tab)
             return AgentTools.said(["tab": AgentTools.short(tab), "in front": true])
 
         case "close":
             let ref = (arguments["page"] as? String ?? "").lowercased()
-            if let index = pages.firstIndex(where: { $0.id == ref }) {
-                pages.remove(at: index).drop()
+            if let sheet = pages.first(where: { $0.id == ref && $0.owner == owner }) {
+                close(sheet)
                 return AgentTools.said(["closed": ref])
             }
             guard let tab = tab(ref, browser) else { return AgentTools.failed("No page or tab “\(ref)” — see `tabs`") }
+            if let refused = await refusedTabs(caller) { return refused }
             browser.close(tab)
             return AgentTools.said(["closed": ref])
 
@@ -540,10 +641,11 @@ final class AgentTools {
 
     // MARK: - graff's pages
 
-    /// A page of graff's own, loaded and listed in its column. One only
-    /// `reading` is to be read and closed, and loads without its pictures.
-    private func load(_ url: URL, as label: String?, reading: Bool = false) async -> Sheet {
-        let sheet = make(reading: reading)
+    /// A page of its own for whoever asked — graff, or a connected app —
+    /// loaded, and for graff listed in its column. One only `reading` is to
+    /// be read and closed, and loads without its pictures.
+    private func load(_ url: URL, as label: String?, reading: Bool = false, owner: String) async -> Sheet {
+        let sheet = make(reading: reading, owner: owner)
         sheet.go(url)
         await sheet.settled()
         seen(sheet, as: label)
@@ -551,32 +653,39 @@ final class AgentTools {
     }
 
     /// Every page graff has open, gone: it has stopped (Agent.rest), and a
-    /// page kept for a graff that isn't there holds memory for no one. The
-    /// off-screen window goes with them.
+    /// page kept for a graff that isn't there holds memory for no one. A
+    /// connected app's pages are its own to close; the off-screen window
+    /// goes once nobody has one.
     func dropPages() {
-        pages.forEach { $0.drop() }
-        pages = []
-        room?.close()
-        room = nil
+        pages.filter { $0.owner == AgentTools.graff }.forEach(close)
+        if pages.isEmpty {
+            room?.close()
+            room = nil
+        }
     }
 
-    /// A page of graff's put away once it has been read.
+    /// A page put away once it has been read, or when asked.
     private func close(_ sheet: Sheet) {
         pages.removeAll { $0 === sheet }
         sheet.drop()
     }
 
-    private func make(reading: Bool) -> Sheet {
+    /// Each owner keeps its latest few; its oldest goes when another is wanted.
+    private func make(reading: Bool, owner: String) -> Sheet {
         made += 1
         let window = room ?? makeRoom()
-        let sheet = Sheet(id: "p\(made)", in: window, bare: reading ? bare : nil)
+        let sheet = Sheet(id: "p\(made)", owner: owner, in: window, bare: reading ? bare : nil)
         pages.append(sheet)
-        while pages.count > AgentTools.most { pages.removeFirst().drop() }
+        while pages.filter({ $0.owner == owner }).count > AgentTools.most, let oldest = pages.first(where: { $0.owner == owner }) {
+            close(oldest)
+        }
         return sheet
     }
 
-    /// Named in the column, where a click opens it as a tab of the user's.
+    /// Named in graff's column, where a click opens it as a tab of the
+    /// user's. A connected app's pages aren't graff's to list.
     private func seen(_ sheet: any Target, as label: String? = nil) {
+        if let sheet = sheet as? Sheet, sheet.owner != AgentTools.graff { return }
         guard let url = sheet.web.url else { return }
         browser?.agent.saw(url, title: label ?? sheet.title)
     }
@@ -598,14 +707,31 @@ final class AgentTools {
         return window
     }
 
-    /// The page an action is for: one of graff's, a tab of the user's, or —
-    /// named by neither — graff's latest.
-    private func on(_ arguments: [String: Any], _ browser: Browser, _ act: (Target) async -> [String: Any]) async -> [String: Any] {
+    /// The page an action is for: one of the owner's own, a tab of the
+    /// user's, or — named by neither — the owner's latest. A connected app
+    /// reaches a tab of the user's only with act-user-tabs and the user's
+    /// yes (Connect.allowTabs).
+    private func on(_ arguments: [String: Any], _ browser: Browser, _ owner: String, _ caller: Connect.Caller?, _ act: (Target) async -> [String: Any]) async -> [String: Any] {
         let ref = (arguments["page"] as? String ?? "").lowercased()
-        if ref.isEmpty, let latest = pages.last { return await act(latest) }
-        if let sheet = pages.first(where: { $0.id == ref }) { return await act(sheet) }
-        if let tab = tab(ref, browser) { return await act(TabTarget(tab: tab)) }
+        let mine = pages.filter { $0.owner == owner }
+        if ref.isEmpty, let latest = mine.last { return await act(latest) }
+        if let sheet = mine.first(where: { $0.id == ref }) { return await act(sheet) }
+        if let tab = tab(ref, browser) {
+            if let refused = await refusedTabs(caller) { return refused }
+            return await act(TabTarget(tab: tab))
+        }
         return AgentTools.failed(ref.isEmpty ? "No page open yet — `open` one" : "No page or tab “\(ref)” — see `tabs`")
+    }
+
+    /// Nil when the user's tabs are this caller's to use; otherwise the
+    /// refusal a connected app gets as a 403.
+    private func refusedTabs(_ caller: Connect.Caller?) async -> [String: Any]? {
+        guard let caller else { return nil }
+        guard caller.may(.userTabs) else {
+            return [AgentTools.refusal: ["error": "out_of_scope", "tool": "the user's tabs", "scope": Connect.Scope.userTabs.rawValue]]
+        }
+        guard await Connect.shared.allowTabs(caller) else { return [AgentTools.refusal: ["error": "declined"]] }
+        return nil
     }
 
     private func tab(_ ref: String, _ browser: Browser) -> Tab? {
@@ -775,7 +901,7 @@ final class AgentTools {
     /// The script that fills in fields as a person would: focused, typed
     /// through the editor so the page's own scripts hear real input, and
     /// read back after. Nil if the values can't be written as JSON.
-    private static func fill(_ wanted: [[String: Any]]) -> String? {
+    private static func fill(_ wanted: [[String: Any]], passwords: Bool = true) -> String? {
         let items = wanted.map { item -> [String: Any] in
             ["selector": item["selector"] as? String ?? "", "value": item["value"] ?? ""]
         }
@@ -812,6 +938,7 @@ final class AgentTools {
             var el = null;
             try { el = document.querySelector(item.selector); } catch (e) { out.push(item.selector + ': not a selector'); return; }
             if (!el) { out.push(item.selector + ': nothing matches'); return; }
+            if (!\(passwords) && (el.type === 'password' || /password/i.test(el.autocomplete || ''))) { out.push((label(el) || item.selector) + ': a password field — that is for the user to fill'); return; }
             if (el.scrollIntoView) el.scrollIntoView({ block: 'center', inline: 'nearest' });
             var v = item.value, kind = (el.type || el.getAttribute('role') || '').toLowerCase(), name = label(el) || item.selector;
             // A list for a group of checkboxes: those named are ticked, the
@@ -962,10 +1089,13 @@ extension Target {
 @MainActor
 private final class Sheet: Target {
     let id: String
+    /// Whose it is: graff, a connected app, or one session of one.
+    let owner: String
     let web: WKWebView
 
-    init(id: String, in room: NSWindow, bare: WKContentRuleList?) {
+    init(id: String, owner: String, in room: NSWindow, bare: WKContentRuleList?) {
         self.id = id
+        self.owner = owner
         let config = WKWebViewConfiguration()
         config.websiteDataStore = Store.websites
         config.applicationNameForUserAgent = Web.userAgentName
@@ -1008,10 +1138,11 @@ private struct TabTarget: Target {
     func go(_ url: URL) { tab.go(to: url) }
 }
 
-/// An HTTP/1.1 request, once all of it has arrived: its method, headers by
-/// lower-case name, and body.
+/// An HTTP/1.1 request, once all of it has arrived: its method, the path it
+/// asked for, headers by lower-case name, and body.
 private struct HTTPRequest {
     let method: String
+    let path: String
     let headers: [String: String]
     let body: Data
 
@@ -1021,7 +1152,7 @@ private struct HTTPRequest {
         else { return nil }
         var lines = head.components(separatedBy: "\r\n")
         let first = lines.removeFirst().split(separator: " ")
-        guard let method = first.first else { return nil }
+        guard let method = first.first, first.count >= 2 else { return nil }
         var headers: [String: String] = [:]
         for line in lines {
             guard let colon = line.firstIndex(of: ":") else { continue }
@@ -1032,14 +1163,16 @@ private struct HTTPRequest {
         let body = data[end.upperBound...]
         guard body.count >= length else { return nil }
         self.method = String(method)
+        self.path = String(first[1])
         self.headers = headers
         self.body = Data(body.prefix(length))
     }
 
-    static func reply(_ status: Int, _ body: Data?) -> Data {
-        let words = [200: "OK", 202: "Accepted", 400: "Bad Request", 401: "Unauthorized", 405: "Method Not Allowed"][status] ?? "OK"
+    static func reply(_ status: Int, _ body: Data?, headers: [String: String] = [:]) -> Data {
+        let words = [200: "OK", 202: "Accepted", 400: "Bad Request", 401: "Unauthorized", 403: "Forbidden", 404: "Not Found", 405: "Method Not Allowed", 409: "Conflict"][status] ?? "OK"
         var head = "HTTP/1.1 \(status) \(words)\r\nConnection: close\r\nContent-Length: \(body?.count ?? 0)\r\n"
         if body != nil { head += "Content-Type: application/json\r\n" }
+        for (name, value) in headers.sorted(by: { $0.key < $1.key }) { head += "\(name): \(value)\r\n" }
         head += "\r\n"
         var out = Data(head.utf8)
         if let body { out.append(body) }

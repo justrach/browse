@@ -68,6 +68,8 @@
     ./bench ui KEY VALUE               settings/passwords/welcome/history/downloads/bookmarks/hidden on|off,
                                        agent on|off, agentfull on|off, chat N|none (the Nth saved chat, newest 0), rest on, ask WORDS (test run),
                                        syncnow on, syncjoin CODE, forget URL, signin on (test run; probe shows sync, account),
+                                       connect yes|no (test run: answer a connected app's pairing or tabs question),
+                                       vault HOST|USER|PASSWORD (test run: save a login; probe lists logins, never passwords),
                                        look light|dark|system, theme ID, sidebar on|off, spaces on|off, hides on|off,
                                        folded on|off, peek on|off, peeklink keep|close, pages120 on|off
 
@@ -151,7 +153,7 @@ def main(argv):
     elif verb == "ui":
         if len(args) != 2: sys.exit("usage: bench ui KEY VALUE")
         key, value = args
-        request[key] = value if key in ("look", "theme", "edittab", "chat", "ask", "syncjoin", "forget", "peeklink") else value in ("on", "true", "1", "yes")
+        request[key] = value if key in ("look", "theme", "edittab", "chat", "ask", "syncjoin", "forget", "peeklink", "connect", "vault") else value in ("on", "true", "1", "yes")
     elif verb in ("ext-add", "ext-press", "ext-remove", "ext-reload"):
         if len(args) != 1: sys.exit(f"usage: bench {verb} ID")
         request["id"] = args[0]
