@@ -6,10 +6,12 @@ Unreleased into the version's section, commits, tags `v1.0.2`, and pushes.
 The tag starts `.github/workflows/release.yml`, which:
 
 1. builds the app on a macOS runner,
-2. signs it with the Developer ID and the hardened runtime,
-3. has Apple notarise the DMG and the ZIP, and staples the DMG,
-4. checks the DMG the way a Mac that downloads it will (`spctl`, `stapler validate`),
-5. publishes a GitHub release with `browse.dmg`, `browse.zip` and `appcast.json`.
+2. when all signing secrets are present, signs it with the Developer ID and
+   the hardened runtime, notarises the DMG and ZIP, staples and checks the
+   DMG, then publishes `browse.dmg`, `browse.zip` and `appcast.json`;
+3. otherwise, keeps a three-day release-candidate artifact with the ad-hoc
+   signed app, source commit, version, build, and executable hash. It does
+   **not** publish that candidate.
 
 Every installed copy reads `releases/latest/download/appcast.json` once a day
 (`Updater.swift`), fetches the ZIP, checks it is this app, newer, and signed
@@ -46,6 +48,30 @@ rm DeveloperID.p12
 ```
 
 Export that one certificate only, not the whole keychain.
+
+## Finish a CI candidate on the signing Mac
+
+When the repository has no signing secrets, wait for the tag's release job to
+finish. On the signing Mac, with the exact tagged commit checked out, download
+that run's `browse-release-candidate-vX.Y.Z` artifact (the run ID is on its
+Actions page):
+
+```sh
+TAG=vX.Y.Z
+gh run download RUN_ID -R justrach/browse -n "browse-release-candidate-$TAG" -D "/tmp/browse-$TAG"
+ditto -x -k "/tmp/browse-$TAG/browse-app.zip" "/tmp/browse-$TAG"
+SEARCH_PREBUILT_APP="/tmp/browse-$TAG/browse.app" \
+SEARCH_PREBUILT_METADATA="/tmp/browse-$TAG/metadata.json" \
+SEARCH_NOTARY_PROFILE=codedb-notary ./build.sh release ship
+./publish.sh github
+```
+
+`build.sh` checks the candidate's bundle ID, version, build, executable
+hash, and source commit against the local release tag before copying it. It
+re-signs the copied app and uses the existing DMG, ZIP, appcast and notarisation
+path. `publish.sh` refuses to publish unless the DMG passes Gatekeeper and
+stapler checks, the app is signed by team `WWP9DLJ27P`, and the appcast
+matches the app and ZIP. Nothing in this path exports the local certificate.
 
 ## By hand, without CI
 
