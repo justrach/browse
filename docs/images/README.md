@@ -46,6 +46,13 @@ the clean presentation of event signup pages. It uses fictional details and was
 filled through the browser's bench tools. No signup was submitted, no agent
 conversation was fabricated, and the form is not an official Luma page.
 
+`../screenshots/column-rounded-light.png` and `column-rounded-dark.png` show
+the actual CI build of PR #3 (source commit `8452b4d`) in an isolated test profile.
+The conversation is a seeded UI fixture visibly labeled “Layout preview — sample
+conversation”; it is not evidence of a model completing a task. The light capture
+uses a 440-point column, and the dark capture checks the 280-point minimum width.
+These images preview the proposed rounded column, not the installed release.
+
 ```text
 Use case: stylized-concept
 Asset type: desktop wallpaper backdrop for a real macOS browser screenshot showcase.
