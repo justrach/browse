@@ -11,6 +11,10 @@ in [ROADMAP.md](ROADMAP.md).
 
 ## Unreleased
 
+### Added
+
+- Searches you've made come back as you type: a few of their words, in any order, bring up the whole search — from your history, whichever engine it went to and wherever it was typed — and the field finishes it in grey for Return. Pages of search results stop showing up as places.
+
 ### Changed
 
 - Codegraff's answers read cleaner: a source it cites becomes a small number, the same number each time, and the sources sit once under the answer as chips you can click. The field holds everything in one box — what you type, the model, how hard it thinks, and a send button in the theme's accent.

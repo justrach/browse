@@ -22,6 +22,8 @@ struct Suggestion: Identifiable, Equatable {
         case known
         /// Not a place at all — words, and an engine to ask.
         case search
+        /// Words searched for before, to search for again.
+        case searched
         /// The same words, for Codegraff instead (see Agent.swift).
         case ask
     }
@@ -63,9 +65,14 @@ final class History: ObservableObject {
     private var visits: [String: Visit] = [:] {
         didSet {
             recentCache = nil
+            searched = nil
             objectWillChange.send()
         }
     }
+    /// Every search in the history, ready to be found again (Searched.swift):
+    /// read out of it once, and again only after it changes or the engines do.
+    private var searched: Searched?
+    private var searchedEngines: [String] = []
     /// The last few places, as the History menu lists them. The menu bar is
     /// drawn again whenever anything in the window changes — every key typed
     /// into the address field included — and sorting the whole history for
@@ -261,7 +268,10 @@ final class History: ObservableObject {
     /// Best matches first. A place you have been always beats a place the app
     /// merely knows the name of, and among places you have been, one you go to
     /// often and recently beats one you saw once in March.
-    func suggestions(for typed: String, limit: Int = 5) -> [Suggestion] {
+    /// A page of results is left out when `engines` are given: it is offered
+    /// as the words it searched for instead (`searches`), not its address.
+    func suggestions(for typed: String, limit: Int = 5, engines: [String]? = nil) -> [Suggestion] {
+        let results = engines.map(pages(for:))
         let needle = strip(typed)
         // An empty field proposes nothing. A list of guesses in front of
         // someone who has not yet said what they want is noise, and it is in
@@ -274,6 +284,7 @@ final class History: ObservableObject {
         for visit in visits.values {
             guard let rank = rank(visit.key, against: needle) else { continue }
             guard let url = URL(string: visit.url) else { continue }
+            if let results, results.might(visit.key), results.words(in: url) != nil { continue }
             scored.append((
                 Suggestion(key: visit.key, title: visit.title, url: url, kind: .visited),
                 // The front door before the room inside it: a bare domain is
@@ -298,6 +309,32 @@ final class History: ObservableObject {
             .prefix(limit)
             .map(\.0)
     }
+
+    /// Things searched for before that what has been typed could be, best
+    /// first. `engines` are the search addresses to read words out of.
+    func searches(for typed: String, engines: [String], limit: Int) -> [String] {
+        // Two letters before anything is worth offering, or worth reading.
+        guard typed.trimmingCharacters(in: .whitespaces).count >= 2 else { return [] }
+        if searched == nil || searchedEngines != engines {
+            let results = pages(for: engines)
+            searched = Searched(visits.values.compactMap { visit in
+                guard results.might(visit.key) else { return nil }
+                return URL(string: visit.url).flatMap(results.words(in:)).map { ($0, visit.count, visit.last) }
+            })
+            searchedEngines = engines
+        }
+        return searched?.matching(typed, limit: limit) ?? []
+    }
+
+    /// Where these engines keep their words, worked out once for them.
+    private func pages(for engines: [String]) -> Searched.Pages {
+        if let known = searchPages, known.engines == engines { return known.pages }
+        let made = Searched.Pages(engines)
+        searchPages = (engines, made)
+        return made
+    }
+
+    private var searchPages: (engines: [String], pages: Searched.Pages)?
 
     /// What the field should draw greyed out after the caret: the rest of the
     /// best match, or nothing if it doesn't carry on from what was typed.

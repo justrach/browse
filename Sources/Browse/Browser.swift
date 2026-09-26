@@ -1833,7 +1833,14 @@ final class Browser: NSObject, ObservableObject {
         // Three places and, if it can't be a place, a search. No open pages:
         // ⌘K exists for those, and mixing them in here made the list long
         // enough that reading it cost more than typing the address would have.
-        var list = history.suggestions(for: typed, limit: 3)
+        let engines = Engine.allCases.map { $0.template(custom: prefs.customEngine) }
+        var list = history.suggestions(for: typed, limit: 3, engines: engines)
+        // Searched for before: two at most, so the words needn't be typed
+        // out again. Above the places once there's a space in what was
+        // typed — by then it's words, not the start of an address.
+        let again = history.searches(for: typed, engines: engines, limit: 2)
+            .compactMap { words in searchURL(for: words).map { Suggestion(key: words, title: "", url: $0, kind: .searched) } }
+        list = typed.contains(" ") ? again + list : list + again
         // Last in the list, and only when what was typed cannot be a place.
         if !typed.isEmpty,
            Address.url(from: typed) == nil,
@@ -1984,7 +1991,8 @@ final class Browser: NSObject, ObservableObject {
         if let picked, offers.indices.contains(picked) {
             target = offers[picked].url
         } else if ending != nil {
-            target = Address.url(from: completed)
+            // The grey ending can finish a search as well as an address.
+            target = Address.url(from: completed) ?? searchURL(for: completed)
         } else {
             target = destination(for: typed)
         }
