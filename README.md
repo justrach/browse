@@ -6,7 +6,7 @@ browse is a small WebKit browser for reading, searching, and getting things done
 
 **[Download browse for macOS](https://github.com/justrach/browse/releases/latest)** · macOS 14 or later · signed and notarized
 
-![browse showing a Wikipedia article in a light window](docs/screenshots/browse.png)
+![browse showing a Wikipedia article with its tab bar hidden on a quiet desktop](docs/screenshots/quiet-desktop.png)
 
 ## Room for the page
 
@@ -14,45 +14,27 @@ The tabs and the page are the whole window. Press **⌘L** for an address or sea
 
 The things you expect from a browser are here too: blocking for ads and trackers before pages load, picture-in-picture video, passwords in your Mac keychain, and Chrome extensions on macOS 15.4 or later. Peek, a bookmarks bar, and a small window for links from other apps are available in Settings when you want them.
 
-### Just the page
-
-For a quieter window, press **⌘S** to hide the tab bar or sidebar. The page fills the window; rest the pointer at the top edge (or left edge for sidebar tabs) to bring the tabs back temporarily. Press **⌘S** again to keep them visible. **⌘L** still opens the address and search field.
-
-![browse with the tab bar hidden against a soft coastal desktop backdrop](docs/screenshots/quiet-desktop.png)
-
-*Just the page. A real browse capture with ⌘S, shown over an original desktop backdrop.*
-
-To start with the sidebar tucked away every time, enable **Tabs in a sidebar**, then **Hide the sidebar until the pointer reaches the edge** in Settings › Tabs.
+Press **⌘S** to hide the tab bar or sidebar and give the page the whole window. Rest the pointer at the top or left edge to bring tabs back temporarily; press **⌘S** again to keep them visible. **⌘L** still opens the address and search field. You can also set the sidebar to tuck itself away in Settings › Tabs.
 
 ### Beside Chrome
 
-The same Wikipedia page, in two equally sized windows: Chrome with its standard tabs and address bar, and browse with the tab bar hidden using **⌘S**.
+The same Wikipedia page in two equally sized windows: Chrome with its standard tabs and address bar, and browse with the tab bar hidden using **⌘S**. [How the images were captured](docs/images/README.md).
 
 ![Chrome and browse showing the same page at equal window sizes](docs/screenshots/browser-comparison.png)
 
 ## Ask, without leaving
 
-The Ask tab gives Codegraff a place for a question or a task. Ask about the page you're reading with **⇧⌘A**, or press **⌘↩** in the address field to send the page with your question. The conversation can stay in a column next to the site, with its answer and sources in sight.
+The Ask tab gives Codegraff a place for a question or a task, with a choice of models from your Codegraff account. Ask about the page you're reading with **⇧⌘A**, or press **⌘↩** in the address field to send the page with your question. The conversation can stay in a column next to the site, with its answer and sources in sight.
 
-![Codegraff making a theme beside a Wikipedia page](docs/screenshots/make-a-theme.png)
+![Codegraff's rounded conversation column beside an event form](docs/screenshots/column-rounded-light.png)
 
-*A theme made from a sentence, beside the page.*
+*The rounded column in the upcoming build, with a sample conversation beside a local demo form.*
 
-Codegraff can search, read several pages, click, type, and fill forms on your tab. It reads the fields and their labels before filling them, then leaves you to check anything that matters. It is instructed to ask before submitting a payment, post, booking, or signup.
-
-![A polished event-registration demo filled in browse](docs/screenshots/event-registration-window.png)
-
-*A local event-registration demo, filled through browse's browser tools. Fictional details; nothing submitted. [Demo source](docs/demos/event-registration.html).*
-
-Your Codegraff account supplies the models available in the picker.
-
-![Two illustrated mice reading and filing pages](docs/images/reading-workshop-v1.png)
+Codegraff can read and fill a form on your tab, then leave you to review it; it is instructed to ask before sending a payment, post, booking, or signup. [See a filled event form](docs/screenshots/event-registration-window.png) (local demo; nothing submitted). [Capture notes](docs/images/README.md).
 
 ## Make it feel like yours
 
-Choose a light or dark look in Settings › Themes: browse, Codegraff, Codegraff Paper, Nord, or Forest. You can also describe a theme to Codegraff, import one from a JSON file, or edit one yourself.
-
-![Theme choices in browse settings](docs/screenshots/themes.png)
+Choose a light or dark look in Settings › Themes: browse, Codegraff, Codegraff Paper, Nord, or Forest. You can also describe a theme to Codegraff, import one from a JSON file, or edit one yourself. [See the theme picker](docs/screenshots/themes.png).
 
 Sign in with your Codegraff account to use the agent. It is the same account used by `graff` in your terminal. When Codegraff's sync server supports it, you can switch on end-to-end encrypted sync for bookmarks, history, and themes; the sync key stays with your Macs and moves to a new Mac through a sync code. Settings › Sync shows when the service is available.
 
