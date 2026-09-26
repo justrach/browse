@@ -82,6 +82,8 @@ for POINTS in 16 32 128 256 512; do
 done
 iconutil -c icns "$ICONSET" -o "$APP/Contents/Resources/AppIcon.icns"
 cp "$SOURCE_ICON" "$APP/Contents/Resources/BrandMark.png"
+mkdir -p "$APP/Contents/Resources/PreviewFavicons"
+cp Assets/PreviewFavicons/*.png "$APP/Contents/Resources/PreviewFavicons/"
 rm -rf "$ICONSET"
 
 cat > "$APP/Contents/Info.plist" <<PLIST

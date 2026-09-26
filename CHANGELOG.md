@@ -14,6 +14,7 @@ in [ROADMAP.md](ROADMAP.md).
 ### Added
 
 - Searches you've made come back as you type: a few of their words, in any order, bring up the whole search — from your history, whichever engine it went to and wherever it was typed — and the field finishes it in grey for Return. Pages of search results stop showing up as places.
+- The first-run layout previews show sample site icons or letters as you choose, and setup teaches more of the browser's real keyboard shortcuts. The full guide is in Help › Keyboard Shortcuts; if you ask during setup, a one-time reminder appears after you open a page.
 
 ### Changed
 
@@ -23,6 +24,11 @@ in [ROADMAP.md](ROADMAP.md).
 - Codegraff reads a page once its text is in and has stopped changing, not once the last ad and tracker has loaded — on busy sites that's a second or two instead of up to fifteen, with the same text read.
 - The pages Codegraff opens for itself block ads and trackers as your tabs do, and follow the same switch and the same sites you've paused it on: a third to three-fifths fewer requests on news sites, and a busy page done loading two seconds sooner.
 - A page Codegraff only reads — a search, a batch of pages — loads without its pictures, video or fonts, and no page it opens plays video or sound until it clicks.
+- Codegraff sits in a rounded, inset panel beside the page, with a roomier box for writing to it.
+
+### Fixed
+
+- Search history keeps literal plus signs in searches such as C++, and recognizes custom engines that put search words in the address path or fragment.
 
 ## 1.0.2 — 25 September 2026
 

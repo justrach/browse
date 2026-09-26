@@ -27,6 +27,7 @@ struct WelcomePanel: View {
     // The default browser.
     @State private var isDefault = Links.isDefault
     @State private var asked = false
+    @State private var remindShortcuts = false
 
     private let pages = 5
 
@@ -132,10 +133,10 @@ struct WelcomePanel: View {
         VStack(alignment: .leading, spacing: 22) {
             heading("Two ways to hold it.", "Titles across the top, or down the side. The grey slides to the tab you pick either way, and you can change your mind with ⇧⌘S.")
             HStack(spacing: 12) {
-                Way(title: "Tab strip", sidebar: false, chosen: !prefs.sidebar) {
+                Way(title: "Tab strip", sidebar: false, chosen: !prefs.sidebar, glyph: prefs.glyph) {
                     withAnimation(Motion.glide) { prefs.sidebar = false }
                 }
-                Way(title: "Sidebar", sidebar: true, chosen: prefs.sidebar) {
+                Way(title: "Sidebar", sidebar: true, chosen: prefs.sidebar, glyph: prefs.glyph) {
                     withAnimation(Motion.glide) { prefs.sidebar = true }
                 }
             }
@@ -174,19 +175,21 @@ struct WelcomePanel: View {
             }
             .animation(Motion.settle, value: isDefault)
 
-            VStack(alignment: .leading, spacing: 8) {
-                Text("A few things worth knowing")
+            VStack(alignment: .leading, spacing: 9) {
+                Text("A few useful keys")
                     .font(.system(size: 11, weight: .medium))
                     .foregroundStyle(Palette.faint)
                     .textCase(.uppercase)
                     .tracking(0.6)
                     .padding(.top, 6)
-                Key("⌘T", "A new tab. Type a place, or words to search.")
-                Key("⌘K", "Every open tab, by name.")
-                Key("⌘,", "Settings, including passwords and updates.")
-                Key("⌃1", "Spaces: separate tabs and sign-ins. Turn them on in Settings › Tabs.")
-                Key("⌘O", "Links from other apps can open in a small window. Settings › General.")
+                LazyVGrid(columns: [GridItem(.flexible()), GridItem(.flexible())], alignment: .leading, spacing: 9) {
+                    ForEach(Shortcuts.first) { ShortcutLine(shortcut: $0) }
+                }
+                Text("The full guide is in Help › Keyboard Shortcuts.")
+                    .font(.system(size: 11.5))
+                    .foregroundStyle(Palette.faint)
             }
+            Choice("Remind me of shortcuts later", "Once, after you open a page", on: $remindShortcuts)
         }
     }
 
@@ -272,6 +275,7 @@ struct WelcomePanel: View {
     }
 
     private func finish() {
+        if remindShortcuts { browser.requestShortcutReminder() }
         prefs.welcomed = true
         withAnimation(Motion.settle) { browser.welcoming = false }
     }
@@ -354,8 +358,23 @@ struct WelcomePanel: View {
         let title: String
         let sidebar: Bool
         let chosen: Bool
+        let glyph: Glyph
         let pick: () -> Void
         @State private var hovering = false
+
+        private static let letters = ["G", "W", "Y"]
+        private static let icons: [NSImage?] = ["github", "wikipedia", "youtube"].map { name in
+            Bundle.main.url(forResource: name, withExtension: "png", subdirectory: "PreviewFavicons")
+                .flatMap { NSImage(contentsOf: $0) }
+        }
+
+        private func mark(_ index: Int) -> some View {
+            Mark(icon: glyph == .icons ? Way.icons[index] : nil, letter: Way.letters[index], size: 16)
+                .frame(width: 20, height: 20)
+                // The sample sites' marks include black on transparency; a
+                // small white tile lets them read in both looks.
+                .background(glyph == .icons ? Color.white : .clear, in: RoundedRectangle(cornerRadius: 5))
+        }
 
         var body: some View {
             Button(action: pick) {
@@ -364,15 +383,23 @@ struct WelcomePanel: View {
                         RoundedRectangle(cornerRadius: 8, style: .continuous).fill(Palette.ground)
                         if sidebar {
                             HStack(spacing: 0) {
-                                VStack(alignment: .leading, spacing: 4) {
+                                VStack(alignment: .leading, spacing: 5) {
                                     HStack(spacing: 3) { ForEach(0..<3, id: \.self) { _ in Circle().fill(Palette.faint).frame(width: 5, height: 5) } }
-                                        .padding(.bottom, 4)
-                                    ForEach(0..<4, id: \.self) { i in
-                                        RoundedRectangle(cornerRadius: 3).fill(i == 0 ? Palette.wash : Palette.hover).frame(height: 8)
+                                        .padding(.bottom, 2)
+                                    ForEach(0..<3, id: \.self) { i in
+                                        HStack(spacing: 5) {
+                                            mark(i)
+                                            RoundedRectangle(cornerRadius: 2)
+                                                .fill(Palette.faint.opacity(0.7))
+                                                .frame(width: 23, height: 4)
+                                        }
+                                        .padding(.horizontal, 3)
+                                        .frame(height: 20)
+                                        .background(i == 0 ? Palette.wash : .clear, in: RoundedRectangle(cornerRadius: 4))
                                     }
                                 }
                                 .padding(8)
-                                .frame(width: 62)
+                                .frame(width: 72)
                                 Rectangle().fill(Palette.hairline).frame(width: 1)
                                 Spacer()
                             }
@@ -380,8 +407,10 @@ struct WelcomePanel: View {
                             HStack(spacing: 3) {
                                 HStack(spacing: 3) { ForEach(0..<3, id: \.self) { _ in Circle().fill(Palette.faint).frame(width: 5, height: 5) } }
                                     .padding(.trailing, 6)
-                                ForEach(0..<4, id: \.self) { i in
-                                    RoundedRectangle(cornerRadius: 3).fill(i == 0 ? Palette.wash : Palette.hover).frame(width: 30, height: 8)
+                                ForEach(0..<3, id: \.self) { i in
+                                    mark(i)
+                                        .frame(width: 36, height: 24)
+                                        .background(i == 0 ? Palette.wash : Palette.hover, in: RoundedRectangle(cornerRadius: 4))
                                 }
                             }
                             .padding(8)
@@ -408,24 +437,8 @@ struct WelcomePanel: View {
             .onHover { hovering = $0 }
             .animation(Motion.quick, value: hovering)
             .animation(Motion.settle, value: chosen)
+            .animation(Motion.quick, value: glyph)
         }
     }
 
-    private struct Key: View {
-        let keys: String
-        let what: String
-        init(_ keys: String, _ what: String) { self.keys = keys; self.what = what }
-        var body: some View {
-            HStack(spacing: 10) {
-                Text(keys)
-                    .font(.system(size: 12, weight: .medium, design: .rounded))
-                    .foregroundStyle(Palette.ink)
-                    .padding(.horizontal, 7)
-                    .padding(.vertical, 3)
-                    .background(Palette.wash, in: RoundedRectangle(cornerRadius: 6, style: .continuous))
-                    .frame(minWidth: 44)
-                Text(what).font(.system(size: 13)).foregroundStyle(Palette.muted)
-            }
-        }
-    }
 }
