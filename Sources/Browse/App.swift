@@ -83,7 +83,7 @@ struct BrowseApp: App {
                 // Two tabs side by side (Split.swift): this one and the one
                 // before it.
                 Button(browser.shownSplit != nil ? "Leave Split View" : "Split View") { browser.toggleSplit() }
-                    .keyboardShortcut("s", modifiers: [.command, .control])
+                    .keyboardShortcut("d")
                     .disabled(browser.shownSplit == nil && browser.tabs.filter { !$0.isBlank }.count < 2)
                 if browser.shownSplit != nil {
                     Button("Swap Sides") { browser.swapSplit() }
@@ -146,7 +146,7 @@ struct BrowseApp: App {
                 Button("Rename Tab") { if let tab = browser.active { browser.beginTabRename(tab) } }
                     .disabled(browser.active == nil)
                 Button("Duplicate Tab") { browser.duplicate() }
-                    .keyboardShortcut("d")
+                    .keyboardShortcut("d", modifiers: [.command, .shift])
                     .disabled(browser.active?.isBlank ?? true)
                 Button("Copy Address") { browser.copyAddress() }
                     .keyboardShortcut("c", modifiers: [.command, .shift])
@@ -353,6 +353,9 @@ struct ContentView: View {
                     .transition(.opacity)
             } else {
                 page
+                    // A tab carried out of the sidebar: the half it would
+                    // open on (Split.swift).
+                    .overlay { SplitDropZone(browser: browser) }
                 if consulting {
                     AgentColumn(browser: browser, agent: browser.agent, prefs: browser.prefs)
                         .transition(.move(edge: .trailing))
@@ -1032,6 +1035,9 @@ struct ContentView: View {
         case "c" where shifted:
             browser.copyAddress()
         case "d" where !shifted:
+            // Two tabs side by side, or back to one (Split.swift).
+            browser.toggleSplit()
+        case "d" where shifted:
             browser.duplicate()
         case "n" where shifted:
             browser.newShyTab()

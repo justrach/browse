@@ -32,6 +32,11 @@ final class Browser: NSObject, ObservableObject {
     /// Two tabs kept side by side (Split.swift). Shown whenever either is
     /// the tab in front.
     @Published var split: Split?
+    /// A tab carried out of the sidebar over the page, where it is in the
+    /// window (SplitDropZone lights the half it's over).
+    @Published var splitDrag: CGPoint?
+    /// Where the stage is in the window, for the drop to know its halves.
+    var stageFrame: CGRect = .zero
 
     /// The tab whose page is currently out in the little window. Nothing
     /// floating means no window: the two are checked against each other rather
@@ -1834,7 +1839,7 @@ final class Browser: NSObject, ObservableObject {
         announce("A tab that keeps nothing")
     }
 
-    /// ⌘D. The same page, beside itself.
+    /// ⇧⌘D. The same page, beside itself.
     func duplicate() {
         guard let url = active?.address else { return }
         open(url, foreground: true, from: active)

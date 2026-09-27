@@ -24,6 +24,9 @@ struct SideBar: View {
     @Namespace private var before
     @Namespace private var after
 
+    /// Where the loose rows start in the window (see `loose`).
+    @State private var rowsOrigin: CGPoint = .zero
+
     @State private var pinDragging: Tab.ID?
     @State private var pinFrom = 0
     @State private var pinTravel: CGSize = .zero
@@ -439,6 +442,7 @@ struct SideBar: View {
         VStack(spacing: SideBar.gap) {
             // See the grid: the drag is measured in the column's space, not
             // the row's, so a row that has just moved keeps its bearings.
+            let tops = pairTops
             ForEach(Array(looseTabs.enumerated()), id: \.element.id) { index, tab in
                 let step = SideBar.row + SideBar.gap
                 SideRow(
@@ -449,14 +453,59 @@ struct SideBar: View {
                     pill: pill,
                     close: { browser.close(tab) }
                 )
+                // A pair side by side (Split.swift), held in one frame: drawn
+                // behind the upper of the two, reaching over the lower.
+                .background(alignment: .top) {
+                    if tops.contains(tab.id) {
+                        RoundedRectangle(cornerRadius: 11, style: .continuous)
+                            .fill(Palette.ink.opacity(0.035))
+                            .overlay(
+                                RoundedRectangle(cornerRadius: 11, style: .continuous)
+                                    .strokeBorder(Palette.ink.opacity(0.10), lineWidth: 1)
+                            )
+                            .padding(-3)
+                            .frame(height: SideBar.row * 2 + SideBar.gap)
+                            .allowsHitTesting(false)
+                            .transition(.opacity)
+                    }
+                }
                 // Positions here are among the loose rows; the pinned block
-                // sits in front of them in the real list.
-                .modifier(Carried(index: index, count: looseTabs.count, step: step, vertical: true, space: "rows") {
+                // sits in front of them in the real list. Carried out over
+                // the page, it opens there beside what's on it.
+                .modifier(Carried(
+                    index: index, count: looseTabs.count, step: step, vertical: true, space: "rows",
+                    outside: { point in
+                        let at = CGPoint(x: point.x + rowsOrigin.x, y: point.y + rowsOrigin.y)
+                        let out = at.x > prefs.sideWidth + 16
+                        browser.dragOut(tab, at: out ? at : nil)
+                        return out
+                    },
+                    land: { browser.dropOut(tab) }
+                ) {
                     browser.move(tab, to: $0 + browser.pinnedCount)
                 })
             }
         }
         .coordinateSpace(name: "rows")
+        // Where the rows start in the window, to turn a place among them
+        // into a place over the page.
+        .background {
+            GeometryReader { geo in
+                Color.clear
+                    .onAppear { rowsOrigin = geo.frame(in: .global).origin }
+                    .onChange(of: geo.frame(in: .global).origin) { _, new in rowsOrigin = new }
+            }
+        }
+    }
+
+    /// The upper row of each pair that sits together in the list — one, as
+    /// there's one pair at a time.
+    private var pairTops: Set<Tab.ID> {
+        guard let split = browser.split else { return [] }
+        let ids = looseTabs.map(\.id)
+        guard let l = ids.firstIndex(of: split.left), let r = ids.firstIndex(of: split.right),
+              abs(l - r) == 1 else { return [] }
+        return [ids[min(l, r)]]
     }
 
     /// The loose tabs and the row that makes another, which scroll as one.

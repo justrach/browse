@@ -665,6 +665,64 @@ final class Bench {
             }
             step(1)
 
+        case "carry":
+            // A tab held over a point of the window as if carried out of the
+            // tabs (Split.swift), or let go of there — the drop without the
+            // hand, for a window that can't be brought forward to drag in.
+            guard Store.testing else { answer(["error": "carry only works on a --test run"]); return }
+            guard let tab = find(request, in: browser) else { answer(missing(request)); return }
+            if request["drop"] as? Bool == true {
+                browser.dropOut(tab)
+                DispatchQueue.main.asyncAfter(deadline: .now() + 0.4) {
+                    answer(["shown": browser.shownSplit != nil, "left": browser.shownSplit?.left.title ?? "",
+                            "right": browser.shownSplit?.right.title ?? "", "active": browser.active?.title ?? ""])
+                }
+            } else if let x = request["x"] as? Double, let y = request["y"] as? Double {
+                browser.dragOut(tab, at: CGPoint(x: x, y: y))
+                answer(["side": browser.splitSide(at: CGPoint(x: x, y: y)) == .left ? "left" : "right",
+                        "stage": [browser.stageFrame.minX, browser.stageFrame.minY, browser.stageFrame.width, browser.stageFrame.height]])
+            } else {
+                answer(["error": "carry ID X Y, or carry ID drop"])
+            }
+
+        case "drag":
+            // A press, a pull and a let-go through the app's own queue, a
+            // frame apart, as a hand would: the split's gap, a tab carried
+            // out onto the page. Points from the window's top left.
+            guard Store.testing else { answer(["error": "drag only works on a --test run"]); return }
+            guard let window = Links.window,
+                  let x1 = request["x1"] as? Double, let y1 = request["y1"] as? Double,
+                  let x2 = request["x2"] as? Double, let y2 = request["y2"] as? Double
+            else { answer(["error": "drag needs x1 y1 x2 y2"]); return }
+            let steps = max(2, request["steps"] as? Int ?? 20)
+            let height = Double(window.frame.height)
+            // A window in the back takes a press as the click that brings it
+            // forward, and no drag follows: forward first, as a hand would.
+            NSApp.activate()
+            window.makeKeyAndOrderFront(nil)
+            func post(_ type: NSEvent.EventType, _ x: Double, _ y: Double) {
+                guard let event = NSEvent.mouseEvent(
+                    with: type, location: NSPoint(x: x, y: height - y), modifierFlags: [],
+                    timestamp: ProcessInfo.processInfo.systemUptime, windowNumber: window.windowNumber,
+                    context: nil, eventNumber: 0, clickCount: 1, pressure: type == .leftMouseUp ? 0 : 1
+                ) else { return }
+                NSApp.postEvent(event, atStart: false)
+            }
+            post(.leftMouseDown, x1, y1)
+            for i in 1...steps {
+                let t = Double(i) / Double(steps)
+                DispatchQueue.main.asyncAfter(deadline: .now() + 0.016 * Double(i)) {
+                    post(.leftMouseDragged, x1 + (x2 - x1) * t, y1 + (y2 - y1) * t)
+                }
+            }
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.016 * Double(steps + 2)) {
+                post(.leftMouseUp, x2, y2)
+                DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) {
+                    answer(["split": browser.split.map { ["fraction": $0.fraction, "shown": browser.shownSplit != nil] as [String: Any] } ?? [:],
+                            "active": browser.active?.title ?? ""])
+                }
+            }
+
         case "hit":
             // What a press at a point of the window lands on, and whether
             // AppKit would carry the window off on a drag from there — the
