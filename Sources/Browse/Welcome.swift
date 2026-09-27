@@ -18,7 +18,7 @@ struct WelcomePanel: View {
     // finding them looks through each browser's folders, and as an initial
     // value that ran every time the panel was made, the first window's
     // included, for a page that isn't showing yet.
-    @State private var source: Chromium.Source?
+    @State private var source: ImportSource?
     @State private var wantsPasswords = true
     @State private var wantsHistory = true
     @State private var wantsBookmarks = true
@@ -101,14 +101,14 @@ struct WelcomePanel: View {
             // Found by their folders, not by looking inside them: macOS asks
             // before letting another app read in there, and the question
             // belongs to "Bring them in", not to this page appearing.
-            let sources = Chromium.present()
+            let sources = ImportSource.present()
             if !sources.isEmpty {
                 DataFlow(from: (source ?? sources[0]).name)
             }
             if sources.isEmpty {
                 let unreadable = Chromium.unreadable()
                 Text(unreadable.isEmpty
-                     ? "No Chrome, Arc, Brave or other Chromium browser on this Mac."
+                     ? "No Chrome, Arc, Brave, Firefox or other browser on this Mac."
                      : unreadable.map { "\($0.source.name) is on this Mac, but nothing of it was found in \($0.looked)." }.joined(separator: "\n"))
                     .font(.system(size: 13))
                     .foregroundStyle(Palette.faint)
@@ -128,8 +128,10 @@ struct WelcomePanel: View {
                     Choice("Passwords", "macOS will ask once for that browser's keychain key", on: $wantsPasswords)
                     Choice("Bookmarks", "Folders and all, behind the bookmark button", on: $wantsBookmarks)
                     Choice("History", "Up to ten thousand places, the ones you go to most first", on: $wantsHistory)
-                    Choice("Sign-ins", "Stay signed in where you were; each profile becomes a space", on: $wantsSignIns)
-                    Text("On macOS 27, Chrome, Brave and Edge keep their folders to themselves: browse needs Full Disk Access to bring them in, and says how when you try.")
+                    if (source ?? sources[0]).chromium != nil {
+                        Choice("Sign-ins", "Stay signed in where you were; each profile becomes a space", on: $wantsSignIns)
+                    }
+                    Text("On macOS 27, Chrome, Brave, Edge and Firefox keep their folders to themselves: browse needs Full Disk Access to bring them in, and says how when you try.")
                         .font(.system(size: 11.5))
                         .foregroundStyle(Palette.faint)
                 }
@@ -334,34 +336,28 @@ struct WelcomePanel: View {
     // MARK: - doing
 
     private func bringAll() {
-        guard let source = source ?? Chromium.present().first else { return }
+        guard let source = source ?? ImportSource.present().first else { return }
         if !browser.unlock(source, then: { bring(from: source) }) {
             brought = "\(source.name)'s folder needs Full Disk Access for browse. Turned on from here, bringing starts by itself; if not, reopen browse and try again."
         }
     }
 
-    private func bring(from source: Chromium.Source) {
+    private func bring(from source: ImportSource) {
         bringing = true
         var lines: [String] = []
         let group = DispatchGroup()
         if wantsPasswords {
             group.enter()
             DispatchQueue.global(qos: .userInitiated).async {
-                let outcome = Result { try Chromium.read(source) }
+                let outcome = Result { try source.read() }
                 DispatchQueue.main.async {
                     switch outcome {
                     case .success(let found):
-                        var kept = 0
-                        for login in found.logins
-                        where Vault.save(host: login.host, user: login.user, password: login.password, used: login.used, clear: login.clear) {
-                            kept += 1
-                        }
-                        var never = Vault.never
-                        found.never.forEach { never.insert($0) }
-                        Vault.never = never
-                        lines.append("\(kept) passwords")
+                        lines.append("\(browser.keep(found)) passwords")
                     case .failure(Chromium.Trouble.noPassphrase):
                         lines.append("passwords: macOS didn't hand over the key — allow it and try again")
+                    case .failure(Mozilla.Trouble.primaryPassword):
+                        lines.append("passwords: \(source.name) has a primary password — export them from it and bring in the CSV")
                     case .failure:
                         lines.append("passwords: nothing readable")
                     }
@@ -370,12 +366,12 @@ struct WelcomePanel: View {
             }
         }
         if wantsBookmarks {
-            lines.append("\(browser.takeBookmarks(from: source)) bookmarks")
+            lines.append("\(browser.takeBookmarks(from: source).added) bookmarks")
         }
-        if wantsSignIns {
+        if wantsSignIns, let chromium = source.chromium {
             group.enter()
             Task {
-                lines.append(await browser.takeSignIns(from: source))
+                lines.append(await browser.takeSignIns(from: chromium))
                 group.leave()
             }
         }

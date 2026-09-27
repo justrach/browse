@@ -18,9 +18,18 @@ struct Login: Hashable {
     var clear = false
     var id: String { host + "\u{1}" + user }
 }
+enum Bookmarks {
+    static func count(_ nodes: [Bookmark]) -> Int {
+        nodes.reduce(0) { $0 + ($1.children.map { count($0) } ?? 1) }
+    }
+    static func urls(_ nodes: [Bookmark]) -> [URL] {
+        nodes.flatMap { $0.children.map(urls) ?? ($0.url.flatMap(URL.init(string:)).map { [$0] } ?? []) }
+    }
+}
 enum Store {
-    static let testing = false
-    static let folder = URL(fileURLWithPath: NSTemporaryDirectory())
+    // As a test run does: made-up browsers under the test folder's Import/.
+    static let testing = true
+    static let folder = URL(fileURLWithPath: ProcessInfo.processInfo.environment["CHROMIUM_TEST_DIR"]!, isDirectory: true)
 }
 enum Vault {
     static func host(of text: String) -> String { URL(string: text)?.host() ?? "" }
@@ -173,5 +182,59 @@ struct ChromiumChecks {
         let clear = Chromium.bookmarks(at: profile, key: { asked += 1; return key })
         precondition(clear.map(\.title) == ["Clear", "Account"] && asked == 0, "clear file first, no key: \(clear.map(\.title)) asked \(asked)")
         print("PASS: bookmarks from Bookmarks and AccountBookmarks, EncryptedBookmarks2 opened only when it's all there is")
+
+        // Counting before anything is brought: a browser under Import/, two
+        // profiles, one of them keeping only sealed bookmarks. No key.
+        let chrome = Chromium.base.appendingPathComponent("Test", isDirectory: true)
+        try FileManager.default.createDirectory(at: chrome, withIntermediateDirectories: true)
+        try FileManager.default.copyItem(at: profile, to: chrome.appendingPathComponent("Default"))
+        let sealedOnly = chrome.appendingPathComponent("Profile 2", isDirectory: true)
+        try FileManager.default.createDirectory(at: sealedOnly, withIntermediateDirectories: true)
+        try seal(Array(tree([("Hidden", "https://hidden.example/")]))).write(to: sealedOnly.appendingPathComponent("EncryptedBookmarks2"))
+        let test = Chromium.Source(name: "Test", folder: "Test", service: "none", account: "none", app: "Test.app")
+        precondition(Set(test.folders.map(\.lastPathComponent)) == ["Default", "Profile 2"], "profiles: \(test.folders)")
+        let whole = Chromium.preview(of: test, profile: "Default")
+        precondition(whole.places == 2 && whole.passwords == 3 && whole.bookmarks == 2 && !whole.sealedBookmarks,
+                     "Default counted: \(whole)")
+        let sealedPreview = Chromium.preview(of: test, profile: "Profile 2")
+        precondition(sealedPreview.bookmarks == 0 && sealedPreview.sealedBookmarks && sealedPreview.passwords == 0, "sealed: \(sealedPreview)")
+        precondition(Chromium.places(in: test, profile: "Profile 2", limit: 10).isEmpty, "one profile only")
+        let loose = try Chromium.read([chrome.appendingPathComponent("Default")], key: key)
+        precondition(loose.logins.count == 2 && loose.skipped == 0, "read: \(loose.logins.count), skipped \(loose.skipped)")
+        print("PASS: counted per profile without the key, sealed bookmarks said to be there, one profile read alone")
+
+        // Firefox: places.sqlite holds history and bookmarks together.
+        let fox = Chromium.base.appendingPathComponent("Firefox/Profiles/abc.default-release", isDirectory: true)
+        try FileManager.default.createDirectory(at: fox, withIntermediateDirectories: true)
+        var foxDB: OpaquePointer?
+        precondition(sqlite3_open(fox.appendingPathComponent("places.sqlite").path, &foxDB) == SQLITE_OK)
+        func micro(_ date: Date) -> Int64 { Int64(date.timeIntervalSince1970 * 1_000_000) }
+        sqlite3_exec(foxDB, """
+        CREATE TABLE moz_places(id INTEGER PRIMARY KEY, url TEXT, title TEXT, visit_count INTEGER, last_visit_date INTEGER, hidden INTEGER);
+        CREATE TABLE moz_bookmarks(id INTEGER PRIMARY KEY, type INTEGER, fk INTEGER, parent INTEGER, position INTEGER, title TEXT, guid TEXT);
+        INSERT INTO moz_places VALUES
+          (1, 'https://mozilla.org/', 'Mozilla', 9, \(micro(Date().addingTimeInterval(-30))), 0),
+          (2, 'https://docs.example/', 'Docs', 1, \(micro(Date().addingTimeInterval(-600))), 0),
+          (3, 'https://tagged.example/', 'Tagged', 0, NULL, 0);
+        INSERT INTO moz_bookmarks VALUES
+          (1, 2, NULL, 0, 0, '', 'root________'),
+          (2, 2, NULL, 1, 0, 'toolbar', 'toolbar_____'),
+          (3, 2, NULL, 1, 1, 'tags', 'tags________'),
+          (4, 1, 1, 2, 0, 'Mozilla', 'aaaaaaaaaaaa'),
+          (5, 2, NULL, 2, 1, 'Work', 'bbbbbbbbbbbb'),
+          (6, 1, 2, 5, 0, 'Docs', 'cccccccccccc'),
+          (7, 1, 3, 3, 0, 'Tagged', 'dddddddddddd');
+        """, nil, nil, nil)
+        sqlite3_close(foxDB)
+        let firefox = Mozilla.known.first { $0.name == "Firefox" }!
+        precondition(Mozilla.present().map(\.name).contains("Firefox") && !Mozilla.locked(firefox), "Firefox found, open")
+        let foxMarks = Mozilla.bookmarks(in: firefox)
+        precondition(Bookmarks.urls(foxMarks).map(\.absoluteString) == ["https://mozilla.org/", "https://docs.example/"],
+                     "Firefox bookmarks: \(Bookmarks.urls(foxMarks))")
+        let foxPlaces = Mozilla.places(in: firefox, limit: 10)
+        precondition(foxPlaces.map(\.title) == ["Mozilla", "Docs"] && foxPlaces[0].count == 9, "Firefox places: \(foxPlaces.map(\.title))")
+        let foxPreview = ImportSource.mozilla(firefox).preview(profile: nil)
+        precondition(foxPreview.places == 2 && foxPreview.bookmarks == 2, "Firefox counted: \(foxPreview)")
+        print("PASS: Firefox bookmarks (toolbar and folders, tags left out) and history, found and counted")
     }
 }
