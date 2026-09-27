@@ -505,6 +505,11 @@ final class Bench {
                 "split": browser.split.map { ["left": $0.left.uuidString, "right": $0.right.uuidString,
                                               "fraction": $0.fraction, "shown": browser.shownSplit != nil] as [String: Any] } ?? [:],
                 "talkOnStage": browser.talkOnStage,
+                // The tab whose page the keys go to, if any.
+                "keys": browser.tabs.first { tab in
+                    guard let web = tab.built, let responder = web.window?.firstResponder as? NSView else { return false }
+                    return responder.isDescendant(of: web)
+                }.map { String($0.id.uuidString.prefix(8)).lowercased() } ?? "",
                 "passwords": browser.managing,
                 "history": browser.recalling,
                 "downloads": browser.hoarding,
