@@ -20,7 +20,7 @@ import SwiftUI
 // visit count, and the latest visit wins the title. A bookmark is a record
 // of its own — title, address, folder, place in the folder — and one changed
 // here since the last round wins over the same one changed elsewhere.
-// Forgetting a page, or clearing history, forgets it on every Mac; the 2,000
+// Forgetting a page, or clearing history, forgets it on every Mac; the 10,000
 // places this Mac keeps on disk are only this Mac's cut, and nothing past
 // them is deleted anywhere.
 //
@@ -302,7 +302,7 @@ final class Sync: ObservableObject {
                 else { self.state.forgotten.remove(item.key) }
             }
         }
-        // Past the 2,000 this Mac keeps: not deleted, only no longer here.
+        // Past the 10,000 this Mac keeps: not deleted, only no longer here.
         for key in state.pushedHistory.keys where !present.contains(key) { state.pushedHistory[key] = nil }
     }
 

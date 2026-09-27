@@ -10,3 +10,9 @@ license = "AGPL-3.0-only"
 [dependencies]
 adblock = { version = "0.13", default-features = false, features = ["content-blocking", "embedded-domain-resolver", "full-regex-handling"] }
 serde_json = "1"
+# For `check`: matching the WebKit rules as WebKit does, to hold them
+# against what the lists mean.
+aho-corasick = "1"
+psl = "2"
+regex = "1"
+url = "2"

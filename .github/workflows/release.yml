@@ -31,7 +31,9 @@ concurrency:
 
 jobs:
   release:
-    runs-on: macos-15
+    # macOS 26 and its Xcode (26.6): the newest image GitHub calls stable,
+    # and the SDK with Liquid Glass. build.yml also tries xcode-27.
+    runs-on: macos-26
     env:
       TAG: ${{ github.event.inputs.tag || github.ref_name }}
     steps:
@@ -39,9 +41,9 @@ jobs:
         with:
           ref: ${{ github.event.inputs.tag || github.ref }}
 
-      - name: Xcode 16
+      - name: Xcode
         if: steps.done.outputs.skip != 'true'
-        run: sudo xcode-select -s /Applications/Xcode_16.4.app || sudo xcode-select -s "$(ls -d /Applications/Xcode_16*.app | tail -1)"
+        run: xcodebuild -version
 
       - name: Published already, by hand from a Mac?
         id: done

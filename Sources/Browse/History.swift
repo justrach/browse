@@ -376,7 +376,14 @@ final class History: ObservableObject {
 
     /// Often, and lately. A month-old visit counts for about a third of a
     /// fresh one, which is roughly how long a habit takes to stop being one.
+    /// How many places are kept on disk (see `save`).
+    nonisolated static let kept = 10_000
+
     private func frecency(_ visit: Visit, now: Date) -> Double {
+        History.frecency(visit, now: now)
+    }
+
+    nonisolated private static func frecency(_ visit: Visit, now: Date) -> Double {
         let days = max(0, now.timeIntervalSince(visit.last) / 86_400)
         return Double(visit.count) * exp(-days / 30)
     }
@@ -424,15 +431,18 @@ final class History: ObservableObject {
             guard let self else { return }
             saving = false
             let now = Date()
-            // A cap, so the file can't grow without end. What goes is what has
-            // been visited least and longest ago.
-            let list = self.visits.values
-                .sorted { self.frecency($0, now: now) > self.frecency($1, now: now) }
-                .prefix(2_000)
-                .map { $0 }
+            let all = Array(self.visits.values)
             let folder = History.folder
             let file = History.file
             DispatchQueue.global(qos: .utility).async {
+                // A cap, so the file can't grow without end: room for another
+                // browser's history brought in whole. What goes is what has
+                // been visited least and longest ago — sorted here, off the
+                // main thread, as ten thousand of them take a moment.
+                let list = all
+                    .sorted { History.frecency($0, now: now) > History.frecency($1, now: now) }
+                    .prefix(History.kept)
+                    .map { $0 }
                 guard let data = try? JSONEncoder().encode(list) else { return }
                 try? FileManager.default.createDirectory(
                     at: folder, withIntermediateDirectories: true

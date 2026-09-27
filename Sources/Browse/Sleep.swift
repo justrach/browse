@@ -101,7 +101,7 @@ extension Browser {
     /// Why a tab has to stay awake — nil when nothing keeps it. The clock is
     /// the caller's business; this is everything else.
     func awake(because tab: Tab) -> String? {
-        if tab.id == activeID { return "on screen" }
+        if tab.id == activeID || showing(inSplit: tab) { return "on screen" }
         if tab.pin != nil { return "pinned" }
         if tab.bench { return "a bench tab" }
         if tab.isBlank { return "blank" }

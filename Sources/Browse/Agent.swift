@@ -53,7 +53,8 @@ final class Agent: ObservableObject {
     struct Entry: Identifiable, Equatable, Codable {
         /// `page`: one graff read through the browser's tools, with its
         /// address in `key`, for the user to open.
-        enum Kind: String, Codable { case you, reply, thought, tool, note, page }
+        /// `plan`: graff's to-do list, kept up to date in place (see Steps.plan).
+        enum Kind: String, Codable { case you, reply, thought, tool, note, page, plan }
         var id = UUID()
         let kind: Kind
         var text: String
@@ -68,6 +69,13 @@ final class Agent: ObservableObject {
         var act = ""
         /// The page that went with something you said.
         var page: String?
+        /// A tool call typed as Harness types it: Run, Read, Edit… with its
+        /// one line of detail (see AgentSteps.swift).
+        var step: Step?
+        /// What an edit changed.
+        var diff: StepDiff?
+        /// A plan's lines.
+        var todo: [TodoItem]?
         /// When it began, and when it last changed: a reply grows, a tool
         /// finishes. How long a turn worked is read from these.
         var at = Date()
@@ -271,6 +279,37 @@ final class Agent: ObservableObject {
     let chats = Chats()
     /// The one on screen, once something has been said in it.
     @Published private(set) var chatID: UUID?
+    /// How much of the model's context the conversation fills, as graff's
+    /// `usage_update` says: tokens used, and the window.
+    @Published private(set) var context: (used: Int, window: Int)?
+    /// What graff calls the conversation (`session_info_update`), for its
+    /// title where nobody has named it.
+    @Published private(set) var named: String?
+    /// The slash commands graff offers (`available_commands_update`).
+    private(set) var commands: [String] = []
+
+    /// A message typed while graff was working: it waits its turn, and goes
+    /// once the turn before it ends — Harness's queue (crates/ui/src/
+    /// queue.rs), docked above the composer.
+    struct Queued: Identifiable {
+        let id = UUID()
+        var text: String
+        /// The tab to send along, read when the message goes, not now.
+        var tab: Tab?
+    }
+    @Published private(set) var queue: [Queued] = []
+
+    /// The tab this conversation is about, and the only one it works in:
+    /// every message carries it, graff is told to stay in it, and the
+    /// browser's tools act on it when graff names no other page
+    /// (AgentTools.on). A form to fill in, a page to work through — an
+    /// agent on that tab alone.
+    @Published private(set) var pinned: Tab?
+
+    func pin(_ tab: Tab?) { pinned = tab }
+    /// Stopped by hand: the queue waits for the next thing sent rather than
+    /// going on its own — a stop means stop. Send now clears it.
+    private var queueHeld = false
     /// Why the last turn went wrong, for its card; nothing once one works.
     private var stumble: String?
     /// What was said before, for a graff that couldn't pick the session
@@ -309,7 +348,7 @@ final class Agent: ObservableObject {
         guard !draft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { return false }
         if asking?.isQuestion == true { return true }
         switch phase {
-        case .ready, .asleep: return true
+        case .ready, .asleep, .working: return true
         // One message can wait for graff to be up, not a queue of them.
         case .starting: return held == nil
         default: return false
@@ -380,6 +419,11 @@ final class Agent: ObservableObject {
         keep()
         entries = []
         chatID = nil
+        pinned = nil
+        queue = []
+        queueHeld = false
+        named = nil
+        context = nil
         stumble = nil
         lost = nil
         resuming = nil
@@ -395,6 +439,11 @@ final class Agent: ObservableObject {
         shutDown()
         entries = chat.entries
         chatID = chat.id
+        pinned = nil
+        queue = []
+        queueHeld = false
+        named = nil
+        context = nil
         stumble = nil
         lost = chat.session == nil ? Agent.transcript(chat.entries) : nil
         resuming = chat.session
@@ -412,12 +461,22 @@ final class Agent: ObservableObject {
         chats.keep(Chat(
             id: chatID,
             session: session ?? before?.session,
-            title: Chat.title(for: entries),
+            // A name somebody gave it outlasts what's said after.
+            title: before?.named == true ? before?.title ?? "" : named ?? before?.title ?? Chat.title(for: entries),
             started: before?.started ?? entries.first?.at ?? Date(),
             updated: Date(),
             entries: entries,
-            failed: stumble
+            failed: stumble,
+            named: before?.named,
+            pinned: before?.pinned
         ))
+    }
+
+    /// What the conversation on screen is called: the name somebody gave
+    /// it, or the first thing asked.
+    var title: String {
+        if let chatID, let saved = chats.all.first(where: { $0.id == chatID }), saved.named == true { return saved.title }
+        return named ?? Chat.title(for: entries)
     }
 
     /// One taken off the list; the one on screen goes back to a clean slate.
@@ -722,6 +781,7 @@ final class Agent: ObservableObject {
     /// prompt, with the page as an embedded resource — graff's way of taking
     /// a document along with the words.
     func send(page tab: Tab?) {
+        let tab = pinned ?? tab
         let text = draft.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !text.isEmpty else { return }
         if let asking, asking.isQuestion {
@@ -730,15 +790,25 @@ final class Agent: ObservableObject {
             respond(asking, text: text)
             return
         }
-        let pageTitle = tab.flatMap { tab -> String? in
-            guard !tab.isBlank else { return nil }
-            return tab.title.isEmpty ? (tab.address?.host() ?? "This page") : tab.title
-        }
         guard Agent.wire([["type": "text", "text": text]]) < Agent.longestLine else {
             entries.append(Entry(kind: .note, text: "That's too long to send in one message"))
             return
         }
         draft = ""
+        // Mid-turn, it waits its turn.
+        if phase == .working || prompting {
+            queue.append(Queued(text: text, tab: tab))
+            return
+        }
+        queueHeld = false
+        submit(text, page: tab)
+    }
+
+    private func submit(_ text: String, page tab: Tab?) {
+        let pageTitle = tab.flatMap { tab -> String? in
+            guard !tab.isBlank else { return nil }
+            return tab.title.isEmpty ? (tab.address?.host() ?? "This page") : tab.title
+        }
         lastActive = Date()
         if chatID == nil { chatID = UUID() }
         entries.append(Entry(kind: .you, text: text, page: pageTitle))
@@ -747,7 +817,7 @@ final class Agent: ObservableObject {
         Task {
             var page: (address: String, title: String, text: String, tab: String)?
             if let tab { page = await Agent.read(tab) }
-            let blocks = Agent.blocks(text, page: page)
+            let blocks = Agent.blocks(text, page: page, only: self.pinned != nil && tab === self.pinned)
             switch phase {
             case .ready, .working:
                 prompt(blocks)
@@ -793,6 +863,7 @@ final class Agent: ObservableObject {
                 self.stumble = nil
             case .failure(let failure):
                 self.settle(false)
+                self.queueHeld = !self.queue.isEmpty
                 if Agent.wantsSignIn(failure) {
                     self.phase = .signedOut
                     self.stumble = failure.message
@@ -802,7 +873,45 @@ final class Agent: ObservableObject {
                 }
             }
             self.keep()
+            self.sendQueued()
         }
+    }
+
+    // MARK: - the queue
+
+    /// The next queued message, once a turn is over — unless it ended by
+    /// hand, or badly, or graff is waiting on an answer.
+    private func sendQueued() {
+        guard !queueHeld, !prompting, asking == nil, phase == .ready, !queue.isEmpty else { return }
+        let first = queue.removeFirst()
+        submit(first.text, page: first.tab)
+    }
+
+    /// Harness's Send now: this one goes next, and the turn under way is
+    /// stopped so it can.
+    func sendNow(_ id: Queued.ID) {
+        guard let index = queue.firstIndex(where: { $0.id == id }) else { return }
+        let item = queue.remove(at: index)
+        queue.insert(item, at: 0)
+        queueHeld = false
+        if prompting || phase == .working {
+            if let asking { answer(asking, with: nil) }
+            if let session { notify("session/cancel", ["sessionId": session]) }
+        } else {
+            sendQueued()
+        }
+    }
+
+    /// Back into the composer to change it; its words go ahead of whatever
+    /// is there.
+    func edit(_ id: Queued.ID) {
+        guard let index = queue.firstIndex(where: { $0.id == id }) else { return }
+        let item = queue.remove(at: index)
+        draft = draft.isEmpty ? item.text : item.text + "\n" + draft
+    }
+
+    func unqueue(_ id: Queued.ID) {
+        queue.removeAll { $0.id == id }
     }
 
     /// The turn is over: anything still spinning has finished, or never will.
@@ -816,6 +925,7 @@ final class Agent: ObservableObject {
     /// Esc for graff: the turn ends at its next step. A question it was
     /// waiting on goes unanswered.
     func stop() {
+        if !queue.isEmpty { queueHeld = true }
         if let asking { answer(asking, with: nil) }
         guard let session else { return }
         notify("session/cancel", ["sessionId": session])
@@ -881,21 +991,63 @@ final class Agent: ObservableObject {
             if Agent.plumbing.contains(title) { return }
             let status = update["status"] as? String ?? "pending"
             let act = update["kind"] as? String ?? ""
-            if !key.isEmpty, let index = entries.lastIndex(where: { $0.kind == .tool && $0.key == key }) {
+            let index: Int
+            if !key.isEmpty, let found = entries.lastIndex(where: { $0.kind == .tool && $0.key == key }) {
+                index = found
                 entries[index].text = title
                 entries[index].status = status
                 if !act.isEmpty { entries[index].act = act }
             } else {
                 entries.append(Entry(kind: .tool, text: title, key: key, status: status, act: act))
+                index = entries.count - 1
             }
+            entries[index].step = Steps.typed(update)
+            took(update, into: index)
         case "tool_call_update":
             let key = update["toolCallId"] as? String ?? ""
             guard let index = entries.lastIndex(where: { $0.kind == .tool && $0.key == key }) else { return }
             entries[index].until = Date()
             if let status = update["status"] as? String { entries[index].status = status }
             if let title = update["title"] as? String, !title.isEmpty { entries[index].text = title }
-            let shown = Agent.shown(update["content"])
-            if !shown.isEmpty { entries[index].output = String(shown.prefix(16_000)) }
+            // Only an update that says something about the call's shape
+            // re-types it, as Harness does: a completion that carries only
+            // the result keeps the Run a Run.
+            if Steps.reshapes(update) {
+                var merged = update
+                if merged["kind"] == nil, !entries[index].act.isEmpty { merged["kind"] = entries[index].act }
+                if merged["title"] == nil { merged["title"] = entries[index].text }
+                entries[index].step = Steps.typed(merged)
+            }
+            took(update, into: index)
+        case "plan":
+            // No id of its own on the wire: one plan per turn, refreshed in
+            // place, as Harness keeps it under one id.
+            let items = Steps.plan(update)
+            let turn = entries.lastIndex { $0.kind == .you } ?? -1
+            if let index = entries.lastIndex(where: { $0.kind == .plan }), index > turn {
+                entries[index].todo = items
+                entries[index].until = Date()
+            } else {
+                var plan = Entry(kind: .plan, text: "Todo")
+                plan.todo = items
+                entries.append(plan)
+            }
+        case "usage_update":
+            let used = Agent.number(update["used"])
+            let window = ["max", "limit", "size", "contextWindow", "context_window"]
+                .lazy.compactMap { Agent.number(update[$0]) }.first { $0 > 0 }
+            if used != nil || window != nil { context = (used ?? context?.used ?? 0, window ?? context?.window ?? 0) }
+        case "session_info_update":
+            // graff naming the conversation. A name somebody gave it stays.
+            if let title = update["title"] as? String, !title.trimmingCharacters(in: .whitespaces).isEmpty {
+                named = title.trimmingCharacters(in: .whitespacesAndNewlines)
+            }
+        case "available_commands_update":
+            commands = (update["availableCommands"] as? [[String: Any]] ?? []).compactMap { $0["name"] as? String }
+        case "user_message_chunk", "current_mode_update":
+            // A live user chunk is the prompt echoed back; modes aren't
+            // something the column offers. Harness drops both too.
+            break
         case "gui_ask_user":
             if let asking { answer(asking, with: nil) }
             let input = update["input"] as? [String: Any] ?? [:]
@@ -917,9 +1069,16 @@ final class Agent: ObservableObject {
             // started ends with its answer instead.
             if !prompting { settle(true) }
         default:
-            // Commands, plans, modes, usage: nothing the column shows yet.
             break
         }
+    }
+
+    /// A call's result as it arrives: what it printed, and what an edit
+    /// changed.
+    private func took(_ update: [String: Any], into index: Int) {
+        let shown = Agent.shown(update["content"])
+        if !shown.isEmpty { entries[index].output = String(shown.prefix(16_000)) }
+        if let diff = Steps.diff(update) { entries[index].diff = diff }
     }
 
     /// A reply or a thought arrives a few words at a time; each piece goes
@@ -949,6 +1108,14 @@ final class Agent: ObservableObject {
         take(["jsonrpc": "2.0", "method": "session/update", "params": [
             "update": ["sessionUpdate": "agent_message_chunk", "content": ["type": "text", "text": piece]],
         ]])
+    }
+
+    /// Any `session/update` at all, as graff would send it — the bench's
+    /// `acp`, for drawing a turn's steps, plan and diffs without a model
+    /// having to do them. Test runs only.
+    func rehearse(update: [String: Any]) {
+        guard Store.testing else { return }
+        take(["jsonrpc": "2.0", "method": "session/update", "params": ["update": update]])
     }
 
     /// Back to what it was before: ready, or no graff at all.
@@ -1159,12 +1326,16 @@ final class Agent: ObservableObject {
 
     /// The prompt: the page, cut to whatever room the words leave in one
     /// line, then the words.
-    private static func blocks(_ text: String, page: (address: String, title: String, text: String, tab: String)?) -> [[String: Any]] {
+    private static func blocks(_ text: String, page: (address: String, title: String, text: String, tab: String)?, only: Bool = false) -> [[String: Any]] {
         let words: [String: Any] = ["type": "text", "text": text]
         guard let page else { return [words] }
+        // A conversation pinned to the tab: that tab and nothing else.
+        let lead = only
+            ? "Work only in my browser tab \(page.tab): pass page \"\(page.tab)\" to every browser tool, act on it rather than opening pages of your own, and don't submit a form or go past a step that pays, sends or signs up until I say so. Here it is now:"
+            : "I'm looking at this page in my browser (tab \(page.tab)):"
         func with(_ body: String) -> [[String: Any]] {
             [
-                ["type": "text", "text": "I'm looking at this page in my browser (tab \(page.tab)):"],
+                ["type": "text", "text": lead],
                 ["type": "resource", "resource": [
                     "uri": page.address,
                     "mimeType": "text/plain",

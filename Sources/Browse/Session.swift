@@ -16,6 +16,11 @@ enum Session {
     struct Shape: Codable {
         var tabs: [Entry]
         var active: Int
+        /// Two tabs side by side, as their places in `tabs`, left then
+        /// right, and the left one's share of the stage (Split.swift).
+        /// Absent from sessions written before there was split view.
+        var split: [Int]? = nil
+        var share: Double? = nil
     }
 
     /// The first space's is the session there always was; each other space

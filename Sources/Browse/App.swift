@@ -80,6 +80,14 @@ struct BrowseApp: App {
                     .keyboardShortcut("r", modifiers: [.command, .shift])
                 Button("Float Video") { browser.toggleFloat() }
                     .keyboardShortcut("p", modifiers: [.command, .shift])
+                // Two tabs side by side (Split.swift): this one and the one
+                // before it.
+                Button(browser.shownSplit != nil ? "Leave Split View" : "Split View") { browser.toggleSplit() }
+                    .keyboardShortcut("d")
+                    .disabled(browser.shownSplit == nil && browser.tabs.filter { !$0.isBlank }.count < 2)
+                if browser.shownSplit != nil {
+                    Button("Swap Sides") { browser.swapSplit() }
+                }
                 Divider()
                 Button(browser.consulting && browser.prefs.usesAgent ? "Hide Codegraff" : "Show Codegraff") { browser.toggleAgent() }
                     .keyboardShortcut("a", modifiers: [.command, .shift])
@@ -88,6 +96,13 @@ struct BrowseApp: App {
                     .keyboardShortcut("h", modifiers: [.command, .shift])
                 Button("Hidden on This Site…") { browser.reviewing.toggle() }
                     .keyboardShortcut("u", modifiers: [.command, .shift])
+                Button("Tidy This Page") { browser.tidy() }
+                    .disabled(browser.tidying || browser.active?.isBlank != false)
+                Button("Fill In This Form with Codegraff") {
+                    if let tab = browser.active { browser.talk(about: tab, task: Browser.fillTask) }
+                }
+                .keyboardShortcut("f", modifiers: [.command, .option])
+                .disabled(browser.active?.isBlank != false)
                 Divider()
                 Button("Zoom In") { browser.zoom(by: 1.1) }
                     .keyboardShortcut("+")
@@ -131,7 +146,7 @@ struct BrowseApp: App {
                 Button("Rename Tab") { if let tab = browser.active { browser.beginTabRename(tab) } }
                     .disabled(browser.active == nil)
                 Button("Duplicate Tab") { browser.duplicate() }
-                    .keyboardShortcut("d")
+                    .keyboardShortcut("d", modifiers: [.command, .shift])
                     .disabled(browser.active?.isBlank ?? true)
                 Button("Copy Address") { browser.copyAddress() }
                     .keyboardShortcut("c", modifiers: [.command, .shift])
@@ -338,6 +353,9 @@ struct ContentView: View {
                     .transition(.opacity)
             } else {
                 page
+                    // A tab carried out of the sidebar: the half it would
+                    // open on (Split.swift).
+                    .overlay { SplitDropZone(browser: browser) }
                 if consulting {
                     AgentColumn(browser: browser, agent: browser.agent, prefs: browser.prefs)
                         .transition(.move(edge: .trailing))
@@ -348,27 +366,44 @@ struct ContentView: View {
 
     @ViewBuilder
     private var page: some View {
-        if let tab = browser.active {
-            Page(tab: tab)
-                .overlay {
-                    if browser.prefs.showsLinks { LinkBubble(status: browser.linkStatus) }
-                }
-                .overlay(alignment: .topTrailing) {
-                    if browser.finding {
-                        FindBar(browser: browser)
-                            .transition(.move(edge: .top).combined(with: .opacity))
-                    }
-                }
-                .overlay(alignment: .topLeading) {
-                    if let asked = browser.suggesting, asked.tab == tab.id {
-                        AccountList(browser: browser, asked: asked)
-                            .transition(.opacity)
-                    }
-                }
-                .animation(Motion.quick, value: browser.suggesting)
+        if let pair = browser.shownSplit {
+            // Two tabs side by side (Split.swift).
+            SplitStage(browser: browser, left: pair.left, right: pair.right) { tab in
+                pane(tab, corner: Split.corner)
+            }
+            .transition(.opacity)
+        } else if let tab = browser.active {
+            pane(tab)
         } else {
             Palette.ground
         }
+    }
+
+    /// A tab's page, with what goes over the page in front: the link under
+    /// the pointer, Find, the offer to fill a form, saved sign-ins.
+    private func pane(_ tab: Tab, corner: CGFloat = 0) -> some View {
+        let front = tab.id == browser.activeID
+        return Page(tab: tab, corner: corner)
+            .overlay {
+                if front, browser.prefs.showsLinks { LinkBubble(status: browser.linkStatus) }
+            }
+            .overlay(alignment: .topTrailing) {
+                if front, browser.finding {
+                    FindBar(browser: browser)
+                        .transition(.move(edge: .top).combined(with: .opacity))
+                }
+            }
+            // A form on the page: Codegraff offered to fill it in.
+            .overlay(alignment: .bottomTrailing) {
+                if front { FormPill(browser: browser, tab: tab) }
+            }
+            .overlay(alignment: .topLeading) {
+                if let asked = browser.suggesting, asked.tab == tab.id {
+                    AccountList(browser: browser, asked: asked)
+                        .transition(.opacity)
+                }
+            }
+            .animation(Motion.quick, value: browser.suggesting)
     }
 
     /// What the column and the strip take from the page right now: animated
@@ -1000,6 +1035,9 @@ struct ContentView: View {
         case "c" where shifted:
             browser.copyAddress()
         case "d" where !shifted:
+            // Two tabs side by side, or back to one (Split.swift).
+            browser.toggleSplit()
+        case "d" where shifted:
             browser.duplicate()
         case "n" where shifted:
             browser.newShyTab()

@@ -12,6 +12,7 @@ final class Browser: NSObject, ObservableObject {
     @Published var activeID: Tab.ID? {
         didSet {
             guard oldValue != activeID else { return }
+            activeHue = active?.hue
             guess()
             // Another tab picked, opened or come to the front while the talk
             // fills the stage is a page wanted: the stage goes back to it.
@@ -24,6 +25,20 @@ final class Browser: NSObject, ObservableObject {
             tabs.first { $0.id == old }?.touch()
         }
     }
+
+    /// The colour of the page in front (Tab.hue), which the sidebar takes on.
+    @Published private(set) var activeHue: NSColor?
+
+    /// Two tabs kept side by side (Split.swift). Shown whenever either is
+    /// the tab in front.
+    @Published var split: Split? {
+        didSet { if split != oldValue { rememberSession() } }
+    }
+    /// A tab carried out of the sidebar over the page, where it is in the
+    /// window (SplitDropZone lights the half it's over).
+    @Published var splitDrag: CGPoint?
+    /// Where the stage is in the window, for the drop to know its halves.
+    var stageFrame: CGRect = .zero
 
     /// The tab whose page is currently out in the little window. Nothing
     /// floating means no window: the two are checked against each other rather
@@ -164,6 +179,58 @@ final class Browser: NSObject, ObservableObject {
         agent.send(page: agent.withPage ? page : nil)
     }
 
+    /// Codegraff on one tab alone: a fresh conversation down the side of
+    /// it, pinned to it (Agent.pinned), and — given a task — started on it
+    /// at once. The form pill, the tab's menu and View › Fill In This Form
+    /// all come here.
+    func talk(about tab: Tab, task: String? = nil) {
+        if !prefs.usesAgent { prefs.usesAgent = true }
+        if activeID != tab.id { select(tab) }
+        withAnimation(Motion.glide) {
+            consulting = true
+            agentFull = false
+        }
+        // Already this tab's conversation: carry on in it. Otherwise a fresh
+        // one — graff started afresh only if there's one to leave.
+        if agent.pinned !== tab {
+            if !agent.entries.isEmpty { agent.startOver() }
+            agent.pin(tab)
+        }
+        guard let task else { return }
+        agent.draft = task
+        agent.send(page: tab)
+    }
+
+    /// What a form gets asked: fill it with what's known, ask for the rest
+    /// at once, and never send it.
+    static let fillTask = "Fill in the form on this page. Use what you know about me; ask me for anything you don't know, all in one question. Don't submit it — I'll check it first."
+
+    /// How many fields on a tab's page a person could fill in: text, email,
+    /// numbers, dates, selects, boxes to tick — shown and enabled; never a
+    /// password, a file or a search box. Three or more is a form worth
+    /// offering help with.
+    func fillable(in tab: Tab) async -> Int {
+        guard let web = tab.built, !tab.isBlank else { return 0 }
+        let script = """
+        (function () {
+          var n = 0, skip = ['hidden', 'password', 'submit', 'button', 'image', 'reset', 'file', 'search'];
+          document.querySelectorAll('input, select, textarea').forEach(function (e) {
+            if (skip.indexOf((e.type || '').toLowerCase()) >= 0 || e.disabled || e.readOnly) return;
+            var r = e.getBoundingClientRect();
+            if (r.width < 16 || r.height < 10) return;
+            if (e.checkVisibility && !e.checkVisibility({ checkOpacity: true, checkVisibilityCSS: true })) return;
+            n++;
+          });
+          return n;
+        })()
+        """
+        return await withCheckedContinuation { done in
+            web.evaluateJavaScript(script, in: nil, in: Web.world) { result in
+                done.resume(returning: (try? result.get()) as? Int ?? 0)
+            }
+        }
+    }
+
     // MARK: - bookmarks
 
     let bookmarks = Bookmarks()
@@ -224,7 +291,12 @@ final class Browser: NSObject, ObservableObject {
     /// The address field, raised over a page by ⌘L. A blank tab shows it
     /// without being asked — there is nothing else for that tab to show.
     @Published var editing = false {
-        didSet { if !editing { cancelGoogleSuggestions() } }
+        didSet {
+            guard !editing else { return }
+            cancelGoogleSuggestions()
+            googleSaid = [:]
+            googleOrder = []
+        }
     }
     /// What is in the field. Every change re-reads the history, because the
     /// list under the field and the grey ending inside it are both just
@@ -248,6 +320,12 @@ final class Browser: NSObject, ObservableObject {
     @Published var picked: Int?
     private var googleTask: Task<Void, Never>?
     private var googleGeneration = 0
+    /// Google's answers for what was typed lately, kept for the field while
+    /// it's open: a backspace is answered at once, and the answer to "why do"
+    /// stands in for "why do p" until Google says more. Cleared when the
+    /// field closes; never written anywhere.
+    private var googleSaid: [String: [String]] = [:]
+    private var googleOrder: [String] = []
     private lazy var googleSession: URLSession = {
         let config = URLSessionConfiguration.ephemeral
         config.httpShouldSetCookies = false
@@ -383,6 +461,53 @@ final class Browser: NSObject, ObservableObject {
         redress()
         reviewing = false
         announce("Everything is back")
+    }
+
+    /// True while Jev is looking at the page.
+    @Published private(set) var tidying = false
+
+    /// What the ad blocker let through — the cookie bar, the sign-up
+    /// overlay, the sponsored card — hidden on this site by Jev, as if you
+    /// had pointed at each (see Tidy.swift). Then the list of what's hidden
+    /// here, so what went is in plain sight and one Restore away.
+    /// `tab` and `done` are the bench's: a tab of its own, and every line
+    /// with Jev's odds.
+    func tidy(_ given: Tab? = nil, then done: ((Tidy.Outcome) -> Void)? = nil) {
+        // Hidden things are kept by site, so a page with none can't be tidied.
+        guard let tab = given ?? active, !tab.isBlank, !tidying, let host = curtain.host(of: tab.address) else {
+            done?(.unreadable)
+            return
+        }
+        if veiling, given == nil { toggleHiding() }
+        tidying = true
+        announce("Tidying…")
+        Task {
+            let outcome = await Tidy.run(on: tab.web)
+            tidying = false
+            done?(outcome)
+            switch outcome {
+            case .signedOut:
+                announce("Tidying needs a Codegraff sign-in — Settings › Sync")
+            case .unreadable:
+                announce("This page couldn't be read")
+            case .unavailable(let why):
+                announce("Jev is unavailable (\(why))")
+            case .judged(let judged):
+                let found = judged.filter(\.hides).map(\.candidate)
+                guard !found.isEmpty else {
+                    announce("Nothing to tidy here")
+                    return
+                }
+                for candidate in found {
+                    curtain.hide(candidate.selector, label: candidate.label, note: candidate.note + " · tidied", on: host)
+                }
+                let css = curtain.css(on: host)
+                tab.arm(hiding: css)
+                tab.applyVeils(css)
+                announce(found.count == 1 ? "Tidied one thing away" : "Tidied \(found.count) things away")
+                if given == nil, tab.id == activeID { reviewing = true }
+            }
+        }
     }
 
     /// Both the page in front of you and the one that loads next time.
@@ -528,6 +653,33 @@ final class Browser: NSObject, ObservableObject {
             }
             announce("Password copied")
         }
+    }
+
+    /// Whether another browser's folder can be read, and if macOS keeps it
+    /// shut (Chromium.locked), why, and the way in. From macOS 27 a list
+    /// built into the system — Chrome, Brave, Edge and Firefox among it —
+    /// keeps each one's folder to that browser's own developer: the prompt
+    /// about other apps' data doesn't open it, nor does choosing it in an
+    /// Open panel. Full Disk Access does. True when it can be read now.
+    func unlock(_ source: Chromium.Source) -> Bool {
+        guard Chromium.locked(source) else { return true }
+        let alert = NSAlert()
+        alert.messageText = "macOS keeps \(source.name)'s folder for \(source.name) alone"
+        alert.informativeText = """
+        Since macOS 27, only \(source.name) itself, and apps you give Full Disk Access, can read it. \
+        To bring \(source.name)'s things over, turn on browse under Full Disk Access in System Settings, \
+        quit and reopen browse, then try again.
+
+        Without it: \(source.name)'s own exports come in too. Its bookmarks file under Bookmarks › Safari \
+        or a file…, and its passwords CSV under Passwords.
+        """
+        alert.addButton(withTitle: "Open System Settings")
+        alert.addButton(withTitle: "Not Now")
+        if alert.runModal() == .alertFirstButtonReturn,
+           let settings = URL(string: "x-apple.systempreferences:com.apple.preference.security?Privacy_AllFiles") {
+            NSWorkspace.shared.open(settings)
+        }
+        return false
     }
 
     /// What came back from another browser's store, put in the keychain.
@@ -1111,13 +1263,19 @@ final class Browser: NSObject, ObservableObject {
             }
             return
         }
-        for entry in saved.tabs {
+        // Which tab each saved entry became, for the pair.
+        var made: [Int: Tab] = [:]
+        for (at, entry) in saved.tabs.enumerated() {
             guard let url = URL(string: entry.url) else { continue }
             let tab = Tab()
             prepare(tab)
             tab.restore(url: url, title: entry.title, name: entry.name)
             tab.pin = entry.pin
             tabs.append(tab)
+            made[at] = tab
+        }
+        if let pair = saved.split, pair.count == 2, let left = made[pair[0]], let right = made[pair[1]], left !== right {
+            split = Split(left: left.id, right: right.id, fraction: CGFloat(saved.share ?? 0.5))
         }
         guard !tabs.isEmpty else {
             adopt(Tab())
@@ -1125,8 +1283,10 @@ final class Browser: NSObject, ObservableObject {
         }
         let here = min(max(0, saved.active), tabs.count - 1)
         activeID = tabs[here].id
-        // Only the one you were looking at actually loads.
+        // Only the one you were looking at actually loads — and its other
+        // half, when it's one of a pair on screen.
         tabs[here].wake()
+        wakePair()
     }
 
     /// The few settings that something else has to be told about. The rest are
@@ -1246,23 +1406,35 @@ final class Browser: NSObject, ObservableObject {
     }
 
     func writeSession(now: Bool = false) {
+        var entries: [Session.Entry] = []
+        // Where each tab written landed in the list, for the pair.
+        var written: [Tab.ID: Int] = [:]
+        for tab in tabs {
+            guard !tab.shy, !tab.bench else { continue }
+            // A sleeping tab holds its address in `pending`; asking for
+            // it there too means a pin can never be written out of
+            // existence by whatever its web view happens to be showing.
+            guard let url = tab.pending ?? tab.address,
+                  url.scheme?.hasPrefix("http") == true
+            else { continue }
+            written[tab.id] = entries.count
+            entries.append(Session.Entry(
+                url: url.absoluteString, title: tab.title, pin: tab.pin, name: tab.name
+            ))
+        }
+        // Two tabs side by side (Split.swift), by their places in the list.
+        var pair: [Int]?
+        if let split, let left = written[split.left], let right = written[split.right] {
+            pair = [left, right]
+        }
         Session.write(
             now: now,
             space: spaceID,
             .init(
-                tabs: tabs.compactMap { tab in
-                    guard !tab.shy, !tab.bench else { return nil }
-                    // A sleeping tab holds its address in `pending`; asking for
-                    // it there too means a pin can never be written out of
-                    // existence by whatever its web view happens to be showing.
-                    guard let url = tab.pending ?? tab.address,
-                          url.scheme?.hasPrefix("http") == true
-                    else { return nil }
-                    return Session.Entry(
-                        url: url.absoluteString, title: tab.title, pin: tab.pin, name: tab.name
-                    )
-                },
-                active: tabs.firstIndex { $0.id == activeID } ?? 0
+                tabs: entries,
+                active: tabs.firstIndex { $0.id == activeID } ?? 0,
+                split: pair,
+                share: pair == nil ? nil : Double(split?.fraction ?? 0.5)
             )
         )
     }
@@ -1359,7 +1531,9 @@ final class Browser: NSObject, ObservableObject {
         // Coming back to the tab whose video is out brings it home first, so
         // it is never lifted and landed in the same breath.
         if floating == tab.id { land() }
-        leaving()
+        // From one half of a pair to the other, the page left is still on
+        // screen: nothing of it floats off.
+        if !showing(inSplit: tab) { leaving() }
         activeID = tab.id
         tab.touch()
         // A tab brought back from last time, or waking from ⌘W while pinned,
@@ -1367,6 +1541,8 @@ final class Browser: NSObject, ObservableObject {
         // wake is this the other case, one whose page quietly died while you
         // were elsewhere, which revive() checks for on its own.
         if !tab.wake() { tab.revive() }
+        // Its other half, when it has one, is on screen too.
+        wakePair()
         rememberSession()
         editing = false
         typed = ""
@@ -1376,6 +1552,15 @@ final class Browser: NSObject, ObservableObject {
     /// behind; closing that blank tab closes the window.
     func close(_ tab: Tab) {
         guard let index = tabs.firstIndex(where: { $0.id == tab.id }) else { return }
+
+        // Half a pair gone is no pair: the other half is a tab of its own,
+        // and the one you land on if this one was in front.
+        var partner: Tab?
+        if let pair = split, pair.has(tab.id) {
+            let other = pair.left == tab.id ? pair.right : pair.left
+            partner = tabs.first { $0.id == other }
+            split = nil
+        }
 
         // A tab whose page is out in the little window takes the window with
         // it. Left alone, the window would go on holding a page belonging to a
@@ -1426,7 +1611,7 @@ final class Browser: NSObject, ObservableObject {
             // right — through select(), same as everywhere else you land on
             // a tab, so one that was never built yet actually wakes up
             // instead of sitting there blank until a manual reload.
-            select(tabs[min(index, tabs.count - 1)])
+            select(partner ?? tabs[min(index, tabs.count - 1)])
         }
         rememberSession()
     }
@@ -1440,6 +1625,21 @@ final class Browser: NSObject, ObservableObject {
             close(tab)
         }
         select(keep)
+    }
+
+    /// The trash on the sidebar's line: every tab that isn't pinned goes, and
+    /// a new one takes their place — made first, so closing the others
+    /// doesn't land on a pinned tile and wake its page on the way. ⌘⇧T
+    /// brings them back, one at a time.
+    func clearLoose() {
+        guard tabs.contains(where: { $0.pin == nil && !$0.bench }) else { return }
+        // newTab() may bring an empty tab already open to the front rather
+        // than make one; whichever it lands on stays.
+        newTab()
+        let going = tabs.filter { $0.pin == nil && !$0.bench && $0.id != activeID }
+        for tab in going { close(tab) }
+        guard !going.isEmpty else { return }
+        announce(going.count == 1 ? "Closed one tab — ⌘⇧T brings it back" : "Closed \(going.count) tabs — ⌘⇧T brings them back")
     }
 
     /// A link let go of over the tabs becomes a tab among them.
@@ -1667,7 +1867,7 @@ final class Browser: NSObject, ObservableObject {
         announce("A tab that keeps nothing")
     }
 
-    /// ⌘D. The same page, beside itself.
+    /// ⇧⌘D. The same page, beside itself.
     func duplicate() {
         guard let url = active?.address else { return }
         open(url, foreground: true, from: active)
@@ -1927,6 +2127,15 @@ final class Browser: NSObject, ObservableObject {
                 self?.history.retitle(url, title)
             }
             .store(in: &bag)
+
+        // The page in front's colour, for the sidebar to take on.
+        tab.$hue
+            .dropFirst()
+            .sink { [weak self, weak tab] hue in
+                guard let self, let tab, tab.id == activeID, activeHue != hue else { return }
+                activeHue = hue
+            }
+            .store(in: &bag)
     }
 
     /// Put the cursor back in the field, from wherever asked.
@@ -2010,12 +2219,55 @@ final class Browser: NSObject, ObservableObject {
             // might be a site's name, not worth a process.
             if prefs.usesAgent, typed.trimmingCharacters(in: .whitespaces).contains(" ") { agent.wake() }
         }
+        // Google's rows from a moment ago that still fit, in place until its
+        // answer to this arrives, so the list doesn't shrink and grow again
+        // with every key.
+        if let tab = active, canSuggestGoogle(typed, in: tab.id) {
+            list = merge(google: googleStandIn(for: typed), into: list)
+        }
         offers = list
-        ending = history.completion(for: typed, among: offers.filter { $0.kind != .open && $0.kind != .ask })
+        ending = history.completion(for: typed, among: offers.filter { $0.kind != .open && $0.kind != .ask && $0.kind != .google })
         // A row that was picked stops being the right row the moment the
         // question changes.
         picked = nil
         suggestGoogle(for: typed)
+    }
+
+    /// The best Google has said so far for these words: its answer to them,
+    /// or to fewer letters of them, kept to what still begins with them.
+    private func googleStandIn(for text: String) -> [String] {
+        let words = Searched.plain(text)
+        if let exact = googleSaid[words] { return exact }
+        var shorter = words
+        while !shorter.isEmpty {
+            shorter.removeLast()
+            if let said = googleSaid[shorter] {
+                return said.filter { Searched.plain($0).hasPrefix(words) && Searched.plain($0) != words }
+            }
+        }
+        return []
+    }
+
+    private func remember(google words: [String], for text: String) {
+        let key = Searched.plain(text)
+        googleSaid[key] = words
+        googleOrder.removeAll { $0 == key }
+        googleOrder.append(key)
+        if googleOrder.count > 64 { googleSaid[googleOrder.removeFirst()] = nil }
+    }
+
+    /// Google's rows among the others: after the places and searches from
+    /// before, ahead of the search for exactly what was typed and Codegraff.
+    private func merge(google words: [String], into offers: [Suggestion]) -> [Suggestion] {
+        var list = offers.filter { $0.kind != .google }
+        let existing = Set(list.map { Searched.plain($0.key) })
+        let rows = words
+            .filter { !existing.contains(Searched.plain($0)) }
+            .prefix(GoogleSuggestions.maximumRows)
+            .compactMap { words in searchURL(for: words).map { Suggestion(key: words, title: "", url: $0, kind: .google) } }
+        let before = list.firstIndex { $0.kind == .search || $0.kind == .ask } ?? list.endIndex
+        list.insert(contentsOf: rows, at: before)
+        return list
     }
 
     private func cancelGoogleSuggestions() {
@@ -2025,11 +2277,15 @@ final class Browser: NSObject, ObservableObject {
     }
 
     private func suggestGoogle(for text: String) {
-        guard let tab = active, canSuggestGoogle(text, in: tab.id) else { return }
+        guard let tab = active, canSuggestGoogle(text, in: tab.id),
+              googleSaid[Searched.plain(text)] == nil
+        else { return }
         let generation = googleGeneration
         let tabID = tab.id
         googleTask = Task { [weak self] in
-            try? await Task.sleep(nanoseconds: 250_000_000)
+            // Long enough to let a burst of typing pass, short enough that
+            // the answer lands while the words are still being read.
+            try? await Task.sleep(nanoseconds: 90_000_000)
             guard let self, !Task.isCancelled, generation == self.googleGeneration,
                   self.canSuggestGoogle(text, in: tabID)
             else { return }
@@ -2037,19 +2293,12 @@ final class Browser: NSObject, ObservableObject {
             guard !Task.isCancelled, generation == self.googleGeneration,
                   self.canSuggestGoogle(text, in: tabID)
             else { return }
+            self.remember(google: words, for: text)
             let selected = self.picked.flatMap { self.offers.indices.contains($0) ? self.offers[$0].id : nil }
-            let existing = Set(self.offers.map { Searched.plain($0.key) })
-            let fresh = words.filter { !existing.contains(Searched.plain($0)) }
-                .compactMap { words in
-                    self.searchURL(for: words).map {
-                        Suggestion(key: words, title: "Google suggestion", url: $0, kind: .google)
-                    }
-                }
-            guard !fresh.isEmpty else { return }
-            var list = self.offers
-            let before = list.firstIndex { $0.kind == .search || $0.kind == .ask } ?? list.endIndex
-            list.insert(contentsOf: fresh, at: before)
-            self.offers = list
+            let list = self.merge(google: words, into: self.offers)
+            guard list != self.offers else { return }
+            // Rows that stay where they were stay put; new ones fade in.
+            withAnimation(Motion.quick) { self.offers = list }
             self.picked = selected.flatMap { id in list.firstIndex { $0.id == id } }
         }
     }

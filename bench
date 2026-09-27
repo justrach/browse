@@ -6,7 +6,14 @@
     ./bench go ID URL                  send a bench tab somewhere else
     ./bench wait ID [SECONDS]          until the page has loaded
     ./bench sleep ID                   put a tab to sleep now, or say what keeps it awake
+    ./bench tidy ID                    Tidy This Page: what Jev was asked about, its odds, what went
+    ./bench acp ask TEXT | JSON | done a turn built from ACP updates by hand, to draw it — --test runs only
+    ./bench sources                    what an import can see of each other browser: folder, access, profiles
+    ./bench shield [on|off]            the ad blocker, for pages loaded from now on — --test runs only
     ./bench select ID                  bring a tab to the front — --test runs only
+    ./bench split ID|off               the tab in front and ID side by side, or one page again — --test runs only
+    ./bench drag X1 Y1 X2 Y2 [STEPS]   press, pull and let go through the app, points from the window's top left — --test runs only
+    ./bench carry ID X Y | ID drop     hold a tab over the page as if dragged out of the tabs, then let go — --test runs only
     ./bench resize W H [STEPS]         take the window to W×H in steps, like a drag — --test runs only
     ./bench key ID TEXT                press keys on a tab as real key events — --test runs only
     ./bench press CODE CHARS [MODS…]   press a key on the whole app (cmd shift ctrl opt, repeat) — --test runs only
@@ -45,7 +52,7 @@
                                        switch to the Nth, delete this one,
                                        two fingers DX points sideways over the column (hold: not let go yet),
                                        move this one to Nth
-    ./bench hit X Y [double|middle]    what a press at X Y (points from the window's top left) lands on,
+    ./bench hit X Y [click|post|double|middle]  what a press at X Y (points from the window's top left) lands on,
                                        and whether a drag from there would move the window;
                                        double: test run, a double-click there (start the probe hidden)
     ./bench place ID INDEX             put a tab at another place in the row
@@ -130,7 +137,7 @@ def main(argv):
         if not args: sys.exit("usage: bench wait ID [SECONDS]")
         request["id"] = args[0]
         if len(args) > 1: request["seconds"] = float(args[1])
-    elif verb in ("text", "close", "sleep", "select"):
+    elif verb in ("text", "close", "sleep", "tidy", "select", "split"):
         if len(args) != 1: sys.exit(f"usage: bench {verb} ID")
         request["id"] = args[0]
     elif verb == "eval":
@@ -150,6 +157,16 @@ def main(argv):
         request["id"] = args[0]
         if len(args) > 1: request["path"] = os.path.abspath(args[1])
         if len(args) > 2: request["width"] = float(args[2])
+    elif verb == "acp":
+        if not args: sys.exit("usage: bench acp ask TEXT | JSON | done")
+        if args[0] == "ask": request["ask"] = " ".join(args[1:])
+        elif args[0] == "done": request["done"] = True
+        else: request["update"] = json.loads(args[0])
+    elif verb == "sources":
+        if args: sys.exit("usage: bench sources")
+    elif verb == "shield":
+        if len(args) > 1 or (args and args[0] not in ("on", "off")): sys.exit("usage: bench shield [on|off]")
+        if args: request["on"] = args[0] == "on"
     elif verb == "ui":
         if len(args) != 2: sys.exit("usage: bench ui KEY VALUE")
         key, value = args
@@ -230,8 +247,16 @@ def main(argv):
         elif args and args[0] == "release": request["action"] = "release"
         elif args and args[0] == "move" and len(args) == 2: request["action"], request["index"] = "move", int(args[1])
         elif args: sys.exit("usage: bench space [new NAME | go N | delete | swipe DX | hold DX | release | move N]")
+    elif verb == "carry":
+        if len(args) == 2 and args[1] == "drop": request["id"], request["drop"] = args[0], True
+        elif len(args) == 3: request["id"], request["x"], request["y"] = args[0], float(args[1]), float(args[2])
+        else: sys.exit("usage: bench carry ID X Y | carry ID drop")
+    elif verb == "drag":
+        if len(args) not in (4, 5): sys.exit("usage: bench drag X1 Y1 X2 Y2 [STEPS]")
+        request["x1"], request["y1"], request["x2"], request["y2"] = (float(a) for a in args[:4])
+        if len(args) == 5: request["steps"] = int(args[4])
     elif verb == "hit":
-        if len(args) not in (2, 3) or (len(args) == 3 and args[2] not in ("double", "middle")): sys.exit("usage: bench hit X Y [double|middle]")
+        if len(args) not in (2, 3) or (len(args) == 3 and args[2] not in ("click", "post", "double", "middle")): sys.exit("usage: bench hit X Y [click|post|double|middle]")
         request["x"], request["y"] = float(args[0]), float(args[1])
         if len(args) == 3: request[args[2]] = True
     elif verb == "place":

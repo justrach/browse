@@ -15,6 +15,22 @@ struct Chat: Codable, Identifiable, Equatable {
     var entries: [Agent.Entry]
     /// Why the last turn didn't finish, when it didn't.
     var failed: String?
+    /// The title is one somebody gave it, not the first thing asked, and
+    /// stays through whatever is said next.
+    var named: Bool?
+    /// Kept at the top of every list of chats, and never let go of to make
+    /// room.
+    var pinned: Bool?
+
+    var isPinned: Bool { pinned == true }
+
+    /// Whether the words appear in its title or anywhere in what was said.
+    func mentions(_ words: String) -> Bool {
+        let wanted = words.trimmingCharacters(in: .whitespaces)
+        guard !wanted.isEmpty else { return true }
+        return title.localizedCaseInsensitiveContains(wanted)
+            || entries.contains { $0.text.localizedCaseInsensitiveContains(wanted) }
+    }
 
     /// The words its card shows under the title: the last reply, or what
     /// was asked when nothing has come back.
@@ -55,12 +71,36 @@ final class Chats: ObservableObject {
         }
         all.removeAll { $0.id == chat.id }
         all.insert(chat, at: 0)
-        if all.count > Chats.most { all.removeLast(all.count - Chats.most) }
+        // Past the limit the oldest go — never a pinned one.
+        while all.count > Chats.most, let oldest = all.lastIndex(where: { !$0.isPinned }) {
+            all.remove(at: oldest)
+        }
         save()
     }
 
     func remove(_ id: UUID) {
         all.removeAll { $0.id == id }
+        save()
+    }
+
+    /// Pinned first, then newest first: the order every list of them shows.
+    var ordered: [Chat] {
+        all.filter(\.isPinned) + all.filter { !$0.isPinned }
+    }
+
+    /// A title of its own; an empty one hands the title back to the first
+    /// thing asked.
+    func rename(_ id: UUID, to title: String) {
+        guard let index = all.firstIndex(where: { $0.id == id }) else { return }
+        let words = title.trimmingCharacters(in: .whitespacesAndNewlines)
+        all[index].title = words.isEmpty ? Chat.title(for: all[index].entries) : words
+        all[index].named = words.isEmpty ? nil : true
+        save()
+    }
+
+    func pin(_ id: UUID, _ on: Bool) {
+        guard let index = all.firstIndex(where: { $0.id == id }) else { return }
+        all[index].pinned = on ? true : nil
         save()
     }
 

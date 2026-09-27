@@ -84,4 +84,8 @@ allowed (and is the only allowed trailer). Omit it if the user says not to.
   `releases/latest/download/appcast.json` and swaps the new build in for its
   next launch (`Updater.swift`); one not signed by the same Developer ID
   team is never swapped in. docs/releasing.md has the secrets it needs.
+- Branches: work reaches `main` by pull request. Each X.Y has a
+  `release/vX.Y` branch, cut from `main` by `./release.sh X.Y.0`; its tags are
+  made only there, and a fix reaches it by `git cherry-pick -x` from `main`.
+  Never push to a `release/v…` branch or tag a release without being asked.
 - The Keychain: never dump it or walk every item.

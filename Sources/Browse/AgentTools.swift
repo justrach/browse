@@ -714,6 +714,11 @@ final class AgentTools {
     private func on(_ arguments: [String: Any], _ browser: Browser, _ owner: String, _ caller: Connect.Caller?, _ act: (Target) async -> [String: Any]) async -> [String: Any] {
         let ref = (arguments["page"] as? String ?? "").lowercased()
         let mine = pages.filter { $0.owner == owner }
+        // Codegraff pinned to a tab (Agent.pinned): named by neither, it's
+        // that tab — graff's own, never a connected app's.
+        if ref.isEmpty, caller == nil, let pinned = browser.agent.pinned, browser.tabs.contains(where: { $0 === pinned }) {
+            return await act(TabTarget(tab: pinned))
+        }
         if ref.isEmpty, let latest = mine.last { return await act(latest) }
         if let sheet = mine.first(where: { $0.id == ref }) { return await act(sheet) }
         if let tab = tab(ref, browser) {

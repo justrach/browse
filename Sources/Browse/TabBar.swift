@@ -18,6 +18,8 @@ struct TabBar: View {
     @State private var plussed = false
     /// How wide the doors at the far end are, extension buttons included.
     @State private var doors: CGFloat = 0
+    /// Where the row of tabs starts in the window (see the tabs' Carried).
+    @State private var stripOrigin: CGPoint = .zero
 
     var body: some View {
         // A GeometryReader is only here to measure the width. Its content is
@@ -73,7 +75,18 @@ struct TabBar: View {
                                                 pill: pill,
                                                 close: { browser.close(tab) }
                                             )
-                                            .modifier(Carried(index: index, count: browser.tabs.count, step: step, vertical: false, space: "strip") {
+                                            // Pulled down off the strip onto the page, it
+                                            // opens there beside what's on it (Split.swift).
+                                            .modifier(Carried(
+                                                index: index, count: browser.tabs.count, step: step, vertical: false, space: "strip",
+                                                outside: { point in
+                                                    let at = CGPoint(x: point.x + stripOrigin.x, y: point.y + stripOrigin.y)
+                                                    let out = at.y > Metrics.strip + 24
+                                                    browser.dragOut(tab, at: out ? at : nil)
+                                                    return out
+                                                },
+                                                land: { browser.dropOut(tab) }
+                                            ) {
                                                 browser.move(tab, to: $0)
                                             })
                                             .id(tab.id)
@@ -151,6 +164,15 @@ struct TabBar: View {
                 // their way, because nothing here was ever in it.
                 .padding(.leading, Metrics.lights)
                 .padding(.trailing, 12)
+                // Where the row starts in the window, to turn a place along
+                // it into a place over the page.
+                .background {
+                    GeometryReader { strip in
+                        Color.clear
+                            .onAppear { stripOrigin = strip.frame(in: .global).origin }
+                            .onChange(of: strip.frame(in: .global).origin) { _, new in stripOrigin = new }
+                    }
+                }
                 .coordinateSpace(name: "strip")
             }
             .frame(width: geo.size.width, height: geo.size.height)
@@ -310,23 +332,31 @@ struct AskTab: View {
                     .frame(width: 16, height: 16)
                 if let title {
                     Text(title)
-                        .font(.system(size: 12.5))
+                        .font(.system(size: 13, weight: live ? .medium : .regular))
                     Spacer(minLength: 0)
                 }
             }
-            .foregroundStyle(live ? Palette.ink : (hovering ? Palette.ink.opacity(0.7) : Palette.muted))
+            // As a row in the column it reads like the tabs under it (Side.swift).
+            .foregroundStyle(live || (title != nil && hovering) ? Palette.ink
+                             : title != nil ? Palette.ink.opacity(0.78)
+                             : (hovering ? Palette.ink.opacity(0.7) : Palette.muted))
             .padding(.horizontal, title == nil ? 7 : 10)
             .padding(.vertical, 6)
             .frame(width: title == nil ? width : nil)
             .frame(maxWidth: title == nil ? nil : .infinity, alignment: .leading)
             .background {
-                if live {
+                if live, title != nil {
+                    // The column's raised glass, as its tabs have.
+                    Raised(corner: 9)
+                        .matchedGeometryEffect(id: "live", in: pill)
+                } else if live {
                     RoundedRectangle(cornerRadius: 9, style: .continuous)
                         .fill(Palette.wash)
                         .matchedGeometryEffect(id: "live", in: pill)
                 } else {
                     RoundedRectangle(cornerRadius: 9, style: .continuous)
-                        .fill(hovering ? Palette.hover : (title == nil ? Palette.wash.opacity(0.55) : .clear))
+                        .fill(title != nil ? Palette.ink.opacity(hovering ? 0.05 : 0)
+                              : (hovering ? Palette.hover : Palette.wash.opacity(0.55)))
                 }
             }
             .contentShape(RoundedRectangle(cornerRadius: 9, style: .continuous))
@@ -645,11 +675,18 @@ struct Carried: ViewModifier {
     /// The row's coordinate space, not the tab's: a tab that has just moved
     /// keeps its bearings (see the sidebar's grid).
     let space: String
+    /// Told where the tab is, in the row's space, as it's carried; true when
+    /// that's out of the row altogether — onto the page, to open it there
+    /// (Split.swift) — and it's to keep its place meanwhile.
+    var outside: ((CGPoint) -> Bool)? = nil
+    /// Let go of while outside.
+    var land: (() -> Void)? = nil
     let move: (Int) -> Void
 
     @State private var held = false
     @State private var from = 0
     @State private var travel: CGFloat = 0
+    @State private var out = false
 
     func body(content: Content) -> some View {
         // What it has travelled, less the ground its new place has already
@@ -672,6 +709,8 @@ struct Carried: ViewModifier {
                             held = true
                             from = index
                         }
+                        out = outside?(value.location) ?? false
+                        guard !out else { return }
                         travel = vertical ? value.translation.height : value.translation.width
                         let target = min(max(0, from + Int((travel / step).rounded())), count - 1)
                         if target != index {
@@ -679,6 +718,8 @@ struct Carried: ViewModifier {
                         }
                     }
                     .onEnded { _ in
+                        if out { land?() }
+                        out = false
                         withAnimation(Motion.settle) {
                             held = false
                             travel = 0
@@ -836,6 +877,24 @@ struct TabMenu: View {
         }
         .disabled(tab.isBlank)
         Button(tab.muted ? "Unmute Tab" : "Mute Tab") { tab.toggleMute() }
+        Divider()
+        // Side by side with the tab in front (Split.swift).
+        if browser.split?.has(tab.id) == true {
+            Button("Swap Sides") { browser.swapSplit() }
+            Button("Leave Split View") { browser.unsplit() }
+        } else if tab.id != browser.activeID {
+            Button("Open in Split View") { browser.split(with: tab) }
+                .disabled(tab.isBlank && browser.active?.isBlank != false)
+        } else {
+            Button("Split View") { browser.toggleSplit() }
+                .disabled(browser.tabs.filter { !$0.isBlank }.count < 2)
+        }
+        Divider()
+        // Codegraff on this tab alone (Browser.talk).
+        Button("Ask Codegraff About This Tab") { browser.talk(about: tab) }
+            .disabled(tab.isBlank)
+        Button("Fill In the Form with Codegraff") { browser.talk(about: tab, task: Browser.fillTask) }
+            .disabled(tab.isBlank)
         Divider()
         Button("Close Tab", action: close)
         Button("Close Other Tabs") { browser.closeOthers(but: tab) }

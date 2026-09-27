@@ -1,0 +1,892 @@
+{
+  "generated": "2026-09-27 11:21",
+  "sites": [
+    {
+      "site": "https://www.theguardian.com/international",
+      "requests": [
+        84,
+        73
+      ],
+      "adtech": [
+        0,
+        0
+      ],
+      "third_party_hosts": [
+        4,
+        3
+      ],
+      "load_ms": [
+        442,
+        248
+      ],
+      "text": [
+        17801,
+        17801
+      ],
+      "predicted_blocked": 10,
+      "predicted_and_gone": 10,
+      "left_on_screen": {
+        "ad_frames": [],
+        "ad_boxes": [],
+        "overlays": []
+      },
+      "broken_images": [
+        [],
+        []
+      ],
+      "shots": [
+        "/tmp/shield-check/theguardian.com-off.png",
+        "/tmp/shield-check/theguardian.com-on.png"
+      ],
+      "jev": {
+        "hidden": [],
+        "kept": []
+      },
+      "jev_shot": "/tmp/shield-check/theguardian.com-jev.png"
+    },
+    {
+      "site": "https://www.independent.co.uk",
+      "requests": [
+        201,
+        96
+      ],
+      "adtech": [
+        41,
+        0
+      ],
+      "third_party_hosts": [
+        72,
+        8
+      ],
+      "load_ms": [
+        4108,
+        1664
+      ],
+      "text": [
+        10932,
+        10932
+      ],
+      "predicted_blocked": 96,
+      "predicted_and_gone": 96,
+      "left_on_screen": {
+        "ad_frames": [],
+        "ad_boxes": [],
+        "overlays": []
+      },
+      "broken_images": [
+        [],
+        []
+      ],
+      "shots": [
+        "/tmp/shield-check/independent.co.uk-off.png",
+        "/tmp/shield-check/independent.co.uk-on.png"
+      ],
+      "jev": {
+        "hidden": [],
+        "kept": []
+      },
+      "jev_shot": "/tmp/shield-check/independent.co.uk-jev.png"
+    },
+    {
+      "site": "https://edition.cnn.com",
+      "requests": [
+        416,
+        125
+      ],
+      "adtech": [
+        84,
+        0
+      ],
+      "third_party_hosts": [
+        92,
+        15
+      ],
+      "load_ms": [
+        0,
+        1877
+      ],
+      "text": [
+        7710,
+        7659
+      ],
+      "predicted_blocked": 198,
+      "predicted_and_gone": 198,
+      "left_on_screen": {
+        "ad_frames": [],
+        "ad_boxes": [],
+        "overlays": []
+      },
+      "broken_images": [
+        [],
+        []
+      ],
+      "shots": [
+        "/tmp/shield-check/edition.cnn.com-off.png",
+        "/tmp/shield-check/edition.cnn.com-on.png"
+      ],
+      "jev": {
+        "hidden": [
+          "div, 391\u00d7368 \u00b7 top right, pinned over the page (fixed), named credential_picker_container, no text"
+        ],
+        "kept": [
+          "div, 259\u00d7146 \u00b7 top right, called \u201cvideo player\u201d, named overlay-root dSSVYz, no text"
+        ]
+      },
+      "jev_shot": "/tmp/shield-check/edition.cnn.com-jev.png"
+    },
+    {
+      "site": "https://www.bbc.com/news",
+      "requests": [
+        112,
+        92
+      ],
+      "adtech": [
+        8,
+        1
+      ],
+      "third_party_hosts": [
+        20,
+        9
+      ],
+      "load_ms": [
+        286,
+        143
+      ],
+      "text": [
+        8245,
+        8286
+      ],
+      "predicted_blocked": 20,
+      "predicted_and_gone": 20,
+      "left_on_screen": {
+        "ad_frames": [],
+        "ad_boxes": [
+          "div 1280\u00d7278",
+          "div 1280\u00d7293",
+          "div 1280\u00d7293",
+          "div 1280\u00d7293"
+        ],
+        "overlays": []
+      },
+      "broken_images": [
+        [],
+        []
+      ],
+      "shots": [
+        "/tmp/shield-check/bbc.com-off.png",
+        "/tmp/shield-check/bbc.com-on.png"
+      ],
+      "jev": {
+        "hidden": [],
+        "kept": [
+          "div, 1280\u00d7278 \u00b7 middle centre, named jQxGIx, no text"
+        ]
+      },
+      "jev_shot": "/tmp/shield-check/bbc.com-jev.png"
+    },
+    {
+      "site": "https://www.forbes.com",
+      "requests": [
+        252,
+        91
+      ],
+      "adtech": [
+        92,
+        0
+      ],
+      "third_party_hosts": [
+        81,
+        13
+      ],
+      "load_ms": [
+        5873,
+        1875
+      ],
+      "text": [
+        10265,
+        10255
+      ],
+      "predicted_blocked": 140,
+      "predicted_and_gone": 140,
+      "left_on_screen": {
+        "ad_frames": [],
+        "ad_boxes": [],
+        "overlays": []
+      },
+      "broken_images": [
+        [],
+        []
+      ],
+      "shots": [
+        "/tmp/shield-check/forbes.com-off.png",
+        "/tmp/shield-check/forbes.com-on.png"
+      ],
+      "jev": {
+        "hidden": [],
+        "kept": [
+          "div, 334\u00d7279 \u00b7 bottom right, named for-you-shuffle__articles, holds 6 images, says \u201cTigers, Astros Legend Justin Verlander Sends Blue Jays Message Just Before Final Start TECHNOLOGY A Guide To All Taylor Sheridan Shows From \u2018Landman\u2019 To \u2018Liones\u2026\u201d",
+          "div, 1100\u00d74340 \u00b7 bottom centre, named footer__magazine-promo, holds 3 images, no text",
+          "div, 1100\u00d71741 \u00b7 bottom centre, named footer__bottomright-promo, holds 1 image, says \u201cForbes AfricaForbes AfriqueForbes ArgentinaForbes AustraliaForbes AustriaForbes BelgiumForbes Bosnia and HerzegovinaForbes BrazilForbes BulgariaForbes Central A\u2026\u201d"
+        ]
+      },
+      "jev_shot": "/tmp/shield-check/forbes.com-jev.png"
+    },
+    {
+      "site": "https://www.dailymail.co.uk/home/index.html",
+      "requests": [
+        459,
+        253
+      ],
+      "adtech": [
+        85,
+        0
+      ],
+      "third_party_hosts": [
+        78,
+        13
+      ],
+      "load_ms": [
+        12762,
+        3536
+      ],
+      "text": [
+        68911,
+        78618
+      ],
+      "predicted_blocked": 181,
+      "predicted_and_gone": 181,
+      "left_on_screen": {
+        "ad_frames": [],
+        "ad_boxes": [
+          "span 970\u00d711"
+        ],
+        "overlays": []
+      },
+      "broken_images": [
+        [],
+        []
+      ],
+      "shots": [
+        "/tmp/shield-check/dailymail.co.uk-off.png",
+        "/tmp/shield-check/dailymail.co.uk-on.png"
+      ],
+      "jev": {
+        "hidden": [
+          "div, 391\u00d7368 \u00b7 top right, pinned over the page (fixed), named credential_picker_container, no text"
+        ],
+        "kept": [
+          "div, 964\u00d733124 \u00b7 bottom centre, named top page_banner_overrides page page-banner, holds a video, says \u201cUK Home Last updated: 02:54 BST, 27 September 2026 UK Edition Select Edition UK US AU IE You're viewing the UK edition You can switch to the US, AU or IE homepa\u2026\u201d"
+        ]
+      },
+      "jev_shot": "/tmp/shield-check/dailymail.co.uk-jev.png"
+    },
+    {
+      "site": "https://www.theverge.com",
+      "requests": [
+        332,
+        204
+      ],
+      "adtech": [
+        59,
+        0
+      ],
+      "third_party_hosts": [
+        77,
+        11
+      ],
+      "load_ms": [
+        0,
+        823
+      ],
+      "text": [
+        22231,
+        22234
+      ],
+      "predicted_blocked": 124,
+      "predicted_and_gone": 124,
+      "left_on_screen": {
+        "ad_frames": [],
+        "ad_boxes": [],
+        "overlays": []
+      },
+      "broken_images": [
+        [],
+        []
+      ],
+      "shots": [
+        "/tmp/shield-check/theverge.com-off.png",
+        "/tmp/shield-check/theverge.com-on.png"
+      ],
+      "jev": {
+        "hidden": [],
+        "kept": []
+      },
+      "jev_shot": "/tmp/shield-check/theverge.com-jev.png"
+    },
+    {
+      "site": "https://www.techradar.com",
+      "requests": [
+        335,
+        187
+      ],
+      "adtech": [
+        17,
+        0
+      ],
+      "third_party_hosts": [
+        60,
+        18
+      ],
+      "load_ms": [
+        5978,
+        595
+      ],
+      "text": [
+        14984,
+        14984
+      ],
+      "predicted_blocked": 65,
+      "predicted_and_gone": 65,
+      "left_on_screen": {
+        "ad_frames": [],
+        "ad_boxes": [
+          "div 980\u00d7250",
+          "img 690\u00d7388",
+          "div#ads-lightbox2 1152\u00d735",
+          "img 790\u00d7444",
+          "img 790\u00d7444",
+          "div#ads-lightbox3 1152\u00d735",
+          "img 790\u00d7444",
+          "img 536\u00d7302",
+          "img 536\u00d7302",
+          "img 536\u00d7302",
+          "img 790\u00d7444"
+        ],
+        "overlays": []
+      },
+      "broken_images": [
+        [],
+        []
+      ],
+      "shots": [
+        "/tmp/shield-check/techradar.com-off.png",
+        "/tmp/shield-check/techradar.com-on.png"
+      ],
+      "jev": {
+        "hidden": [],
+        "kept": []
+      },
+      "jev_shot": "/tmp/shield-check/techradar.com-jev.png"
+    },
+    {
+      "site": "https://weather.com",
+      "requests": [
+        270,
+        114
+      ],
+      "adtech": [
+        93,
+        0
+      ],
+      "third_party_hosts": [
+        72,
+        6
+      ],
+      "load_ms": [
+        315,
+        430
+      ],
+      "text": [
+        2696,
+        1992
+      ],
+      "predicted_blocked": 141,
+      "predicted_and_gone": 141,
+      "left_on_screen": {
+        "ad_frames": [],
+        "ad_boxes": [],
+        "overlays": []
+      },
+      "broken_images": [
+        [],
+        []
+      ],
+      "shots": [
+        "/tmp/shield-check/weather.com-off.png",
+        "/tmp/shield-check/weather.com-on.png"
+      ],
+      "jev": {
+        "hidden": [
+          "div, 391\u00d7368 \u00b7 top right, pinned over the page (fixed), named credential_picker_container, no text"
+        ],
+        "kept": []
+      },
+      "jev_shot": "/tmp/shield-check/weather.com-jev.png"
+    },
+    {
+      "site": "https://www.allrecipes.com",
+      "requests": [
+        258,
+        75
+      ],
+      "adtech": [
+        94,
+        0
+      ],
+      "third_party_hosts": [
+        59,
+        4
+      ],
+      "load_ms": [
+        133,
+        585
+      ],
+      "text": [
+        5837,
+        5831
+      ],
+      "predicted_blocked": 148,
+      "predicted_and_gone": 148,
+      "left_on_screen": {
+        "ad_frames": [],
+        "ad_boxes": [],
+        "overlays": []
+      },
+      "broken_images": [
+        [],
+        []
+      ],
+      "shots": [
+        "/tmp/shield-check/allrecipes.com-off.png",
+        "/tmp/shield-check/allrecipes.com-on.png"
+      ],
+      "jev": {
+        "hidden": [],
+        "kept": [
+          "div, 365\u00d748 \u00b7 bottom left, named loc newsletter-link-wrapper mntl-footer__newsletter, says \u201cNEWSLETTERS\u201d"
+        ]
+      },
+      "jev_shot": "/tmp/shield-check/allrecipes.com-jev.png"
+    },
+    {
+      "site": "https://harrypotter.fandom.com/wiki/Hermione_Granger",
+      "requests": [
+        418,
+        249
+      ],
+      "adtech": [
+        84,
+        0
+      ],
+      "third_party_hosts": [
+        75,
+        23
+      ],
+      "load_ms": [
+        7075,
+        985
+      ],
+      "text": [
+        270163,
+        270190
+      ],
+      "predicted_blocked": 293,
+      "predicted_and_gone": 293,
+      "left_on_screen": {
+        "ad_frames": [],
+        "ad_boxes": [
+          "div 1214\u00d7293",
+          "div 614\u00d743",
+          "div 614\u00d743",
+          "div 614\u00d743",
+          "div 614\u00d743",
+          "div 614\u00d743",
+          "div 614\u00d743",
+          "div 614\u00d743",
+          "div 614\u00d743",
+          "div 614\u00d743",
+          "div 614\u00d743",
+          "div 614\u00d743",
+          "div 614\u00d743",
+          "div 614\u00d743",
+          "div 614\u00d743",
+          "div 614\u00d743",
+          "div 614\u00d743",
+          "div 614\u00d743",
+          "div 614\u00d743",
+          "div 614\u00d743",
+          "div 614\u00d743",
+          "div 300\u00d7637",
+          "div 336\u00d783",
+          "div 336\u00d767",
+          "div 1064\u00d765"
+        ],
+        "overlays": [
+          "div 89%"
+        ]
+      },
+      "broken_images": [
+        [],
+        []
+      ],
+      "shots": [
+        "/tmp/shield-check/harrypotter.fandom.com-off.png",
+        "/tmp/shield-check/harrypotter.fandom.com-on.png"
+      ],
+      "jev": {
+        "hidden": [
+          "div, 420\u00d799 \u00b7 bottom left, pinned over the page (fixed), named notifications-placeholder, says \u201cHARRY POTTER WIKI Welcome to the Harry Potter Wiki. Log in and join the community.\u201d",
+          "div, 1214\u00d7800 \u00b7 middle centre, pinned over the page (fixed), named cover fullScreen, no text"
+        ],
+        "kept": []
+      },
+      "jev_shot": "/tmp/shield-check/harrypotter.fandom.com-jev.png"
+    },
+    {
+      "site": "https://www.reddit.com/r/macapps",
+      "requests": [
+        229,
+        192
+      ],
+      "adtech": [
+        1,
+        0
+      ],
+      "third_party_hosts": [
+        17,
+        12
+      ],
+      "load_ms": [
+        1484,
+        1524
+      ],
+      "text": [
+        33315,
+        51655
+      ],
+      "predicted_blocked": 12,
+      "predicted_and_gone": 12,
+      "left_on_screen": {
+        "ad_frames": [],
+        "ad_boxes": [
+          "div 528\u00d740",
+          "div 545\u00d748",
+          "div 528\u00d740",
+          "div 545\u00d748",
+          "div 528\u00d740",
+          "div 528\u00d740",
+          "div 545\u00d748",
+          "div 528\u00d740",
+          "div 545\u00d748",
+          "div 528\u00d740",
+          "div 545\u00d748",
+          "div 528\u00d740",
+          "div 545\u00d748"
+        ],
+        "overlays": []
+      },
+      "broken_images": [
+        [],
+        []
+      ],
+      "shots": [
+        "/tmp/shield-check/reddit.com-off.png",
+        "/tmp/shield-check/reddit.com-on.png"
+      ],
+      "jev": {
+        "hidden": [
+          "shreddit-ad-post, 577\u00d7797 \u00b7 bottom centre, named t3_1w6ve1s promotedlink block relative, holds 3 images, says \u201cAdvertisement: Stop settling for a CRM that makes you do all the work. Experience more productivity with built-in AI in your CRM. Salesforce comes with Agentfor\u2026\u201d",
+          "div, 315\u00d7744 \u00b7 middle left, pinned over the page (fixed), named left-sidebar-container left-sidebar theme-rpl isolate, holds 1 image, says \u201cJoin the most real place on the internet Continue With Google \uf8ff Sign in with Apple Continue with Phone Number Continue with Email By continuing, you agree to ou\u2026\u201d",
+          "div, 391\u00d7368 \u00b7 top right, pinned over the page (fixed), named credential_picker_container, no text"
+        ],
+        "kept": [
+          "a, 79\u00d740 \u00b7 top right, named signup-button px-sm button-medium button-secondary, says \u201cSign Up\u201d",
+          "div, 917\u00d7128 \u00b7 top centre, named subreddit-banner-img community-banner relative bg-center, no text",
+          "div, 316\u00d7743 \u00b7 bottom right, pinned over the page (sticky), named right-sidebar-container right-sidebar min-w-0 hidden, holds 7 images, says \u201cCreated Jun 3, 2010 Public 171K5.1K COMMUNITY BOOKMARKS Discord Server R/MACAPPS RULES 1 Read This Before Posting 2 Official Distribution Channels Only 3 Limite\u2026\u201d"
+        ]
+      },
+      "jev_shot": "/tmp/shield-check/reddit.com-jev.png"
+    },
+    {
+      "site": "https://stackoverflow.com/questions/231767",
+      "requests": [
+        196,
+        125
+      ],
+      "adtech": [
+        42,
+        0
+      ],
+      "third_party_hosts": [
+        41,
+        6
+      ],
+      "load_ms": [
+        5461,
+        1895
+      ],
+      "text": [
+        89110,
+        89173
+      ],
+      "predicted_blocked": 63,
+      "predicted_and_gone": 63,
+      "left_on_screen": {
+        "ad_frames": [],
+        "ad_boxes": [
+          "div 298\u00d7155"
+        ],
+        "overlays": []
+      },
+      "broken_images": [
+        [],
+        []
+      ],
+      "shots": [
+        "/tmp/shield-check/stackoverflow.com-off.png",
+        "/tmp/shield-check/stackoverflow.com-on.png"
+      ],
+      "jev": {
+        "hidden": [],
+        "kept": [
+          "a, 68\u00d733 \u00b7 top right, named s-topbar--item s-topbar--item__unset ml4 s-btn, says \u201cSign up\u201d"
+        ]
+      },
+      "jev_shot": "/tmp/shield-check/stackoverflow.com-jev.png"
+    },
+    {
+      "site": "https://www.youtube.com",
+      "requests": [
+        32,
+        27
+      ],
+      "adtech": [
+        2,
+        0
+      ],
+      "third_party_hosts": [
+        6,
+        3
+      ],
+      "load_ms": [
+        443,
+        483
+      ],
+      "text": [
+        32,
+        32
+      ],
+      "predicted_blocked": 5,
+      "predicted_and_gone": 5,
+      "left_on_screen": {
+        "ad_frames": [],
+        "ad_boxes": [],
+        "overlays": []
+      },
+      "broken_images": [
+        [],
+        []
+      ],
+      "shots": [
+        "/tmp/shield-check/youtube.com-off.png",
+        "/tmp/shield-check/youtube.com-on.png"
+      ],
+      "jev": {
+        "hidden": [],
+        "kept": []
+      },
+      "jev_shot": "/tmp/shield-check/youtube.com-jev.png"
+    },
+    {
+      "site": "https://www.google.com",
+      "requests": [
+        32,
+        22
+      ],
+      "adtech": [
+        0,
+        0
+      ],
+      "third_party_hosts": [
+        4,
+        3
+      ],
+      "load_ms": [
+        818,
+        281
+      ],
+      "text": [
+        217,
+        217
+      ],
+      "predicted_blocked": 9,
+      "predicted_and_gone": 9,
+      "left_on_screen": {
+        "ad_frames": [],
+        "ad_boxes": [],
+        "overlays": []
+      },
+      "broken_images": [
+        [],
+        []
+      ],
+      "shots": [
+        "/tmp/shield-check/google.com-off.png",
+        "/tmp/shield-check/google.com-on.png"
+      ],
+      "jev": {
+        "hidden": [],
+        "kept": []
+      },
+      "jev_shot": "/tmp/shield-check/google.com-jev.png"
+    },
+    {
+      "site": "https://en.wikipedia.org/wiki/Web_browser",
+      "requests": [
+        31,
+        30
+      ],
+      "adtech": [
+        0,
+        0
+      ],
+      "third_party_hosts": [
+        2,
+        2
+      ],
+      "load_ms": [
+        3152,
+        3261
+      ],
+      "text": [
+        20411,
+        20411
+      ],
+      "predicted_blocked": 1,
+      "predicted_and_gone": 1,
+      "left_on_screen": {
+        "ad_frames": [],
+        "ad_boxes": [],
+        "overlays": []
+      },
+      "broken_images": [
+        [],
+        []
+      ],
+      "shots": [
+        "/tmp/shield-check/en.wikipedia.org-off.png",
+        "/tmp/shield-check/en.wikipedia.org-on.png"
+      ],
+      "jev": {
+        "hidden": [],
+        "kept": []
+      },
+      "jev_shot": "/tmp/shield-check/en.wikipedia.org-jev.png"
+    },
+    {
+      "site": "https://github.com/justrach/codegraff",
+      "requests": [
+        162,
+        158
+      ],
+      "adtech": [
+        0,
+        0
+      ],
+      "third_party_hosts": [
+        5,
+        3
+      ],
+      "load_ms": [
+        2104,
+        700
+      ],
+      "text": [
+        9243,
+        9243
+      ],
+      "predicted_blocked": 3,
+      "predicted_and_gone": 3,
+      "left_on_screen": {
+        "ad_frames": [],
+        "ad_boxes": [],
+        "overlays": []
+      },
+      "broken_images": [
+        [],
+        []
+      ],
+      "shots": [
+        "/tmp/shield-check/github.com-off.png",
+        "/tmp/shield-check/github.com-on.png"
+      ],
+      "jev": {
+        "hidden": [],
+        "kept": []
+      },
+      "jev_shot": "/tmp/shield-check/github.com-jev.png"
+    },
+    {
+      "site": "https://www.apple.com",
+      "requests": [
+        48,
+        32
+      ],
+      "adtech": [
+        0,
+        0
+      ],
+      "third_party_hosts": [
+        1,
+        0
+      ],
+      "load_ms": [
+        325,
+        235
+      ],
+      "text": [
+        6348,
+        6348
+      ],
+      "predicted_blocked": 7,
+      "predicted_and_gone": 7,
+      "left_on_screen": {
+        "ad_frames": [],
+        "ad_boxes": [],
+        "overlays": []
+      },
+      "broken_images": [
+        [],
+        []
+      ],
+      "shots": [
+        "/tmp/shield-check/apple.com-off.png",
+        "/tmp/shield-check/apple.com-on.png"
+      ],
+      "jev": {
+        "hidden": [],
+        "kept": [
+          "aside, 1280\u00d770 \u00b7 top centre, called \u201cChoose country or region\u201d, pinned over the page (fixed), named ac-localeswitcher, says \u201cChoose another country or region to see content specific to your location and shop online. Singapore Continue\u201d",
+          "section, 1280\u00d71764 \u00b7 bottom centre, named section section-promo, holds a video, says \u201cApple Watch Ultra 4 A battery you can\u2019t outrun. Learn more Buy Mac mini Now with M6 and M5 Pro. Learn more Buy MacBook Air Now supercharged by M5. Learn more Bu\u2026\u201d"
+        ]
+      },
+      "jev_shot": "/tmp/shield-check/apple.com-jev.png"
+    }
+  ],
+  "totals": {
+    "requests_off": 3867,
+    "adtech_off": 702,
+    "requests_on": 2145,
+    "adtech_on": 1,
+    "predicted_blocked": 1516,
+    "predicted_and_gone": 1516
+  },
+  "disagreements": {
+    "missed": {
+      "||independent.co.uk/iframe/native-cookiesync-frames.html": [
+        "https://static.independent.co.uk/iframe/native-cookiesync-frames.html"
+      ]
+    },
+    "over_blocked": {}
+  }
+}

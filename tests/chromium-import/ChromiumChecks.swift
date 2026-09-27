@@ -93,5 +93,28 @@ struct ChromiumChecks {
         precondition(named["strict"]!.sameSitePolicy == .sameSiteStrict && named["strict"]!.domain == "github.com", "host-only, strict")
         precondition(named["session"]!.expiresDate == nil && named["session"]!.value == "for now", "session cookie")
         print("PASS: v10 + version-24 hash prefix decrypted, expired and partitioned left behind, flags and SameSite kept, session cookies")
+
+        // History, from a browser that's still open: its visits are in the
+        // write-ahead log, not yet folded into the file. The connection
+        // stays open until the read, so they stay there.
+        FileManager.default.createFile(atPath: profile.appendingPathComponent("Login Data").path, contents: Data())
+        var history: OpaquePointer?
+        precondition(sqlite3_open(profile.appendingPathComponent("History").path, &history) == SQLITE_OK)
+        sqlite3_exec(history, "PRAGMA journal_mode=WAL; PRAGMA wal_autocheckpoint=0;", nil, nil, nil)
+        sqlite3_exec(history, """
+        CREATE TABLE urls(id INTEGER PRIMARY KEY, url TEXT, title TEXT, visit_count INTEGER, last_visit_time INTEGER, hidden INTEGER);
+        INSERT INTO urls(url, title, visit_count, last_visit_time, hidden) VALUES
+          ('https://github.com/', 'GitHub', 40, \(chrome(Date().addingTimeInterval(-3600))), 0),
+          ('https://news.ycombinator.com/', 'Hacker News', 12, \(chrome(Date().addingTimeInterval(-60))), 0),
+          ('chrome://settings/', 'Settings', 5, \(chrome(Date())), 0),
+          ('https://ads.example/pixel', '', 3, \(chrome(Date())), 1),
+          ('https://never.example/', 'Never', 0, \(chrome(Date())), 0);
+        """, nil, nil, nil)
+        precondition(FileManager.default.fileExists(atPath: profile.appendingPathComponent("History-wal").path), "visits still in the WAL")
+        let places = Chromium.places(beside: [profile.appendingPathComponent("Login Data")], limit: 10)
+        sqlite3_close(history)
+        precondition(places.map(\.url.absoluteString) == ["https://news.ycombinator.com/", "https://github.com/"], "places: \(places.map(\.url))")
+        precondition(places[1].count == 40 && places[1].title == "GitHub", "counts and titles kept")
+        print("PASS: history read with its WAL, newest first, counts kept, hidden, unvisited and non-web left behind")
     }
 }

@@ -57,6 +57,28 @@ enum Chromium {
         known.filter { !$0.files.isEmpty }
     }
 
+    /// macOS has shut the browser's folder to other apps. From macOS 27,
+    /// Chrome's, Brave's and Edge's (and Firefox's) are kept to their own
+    /// developer by a list built into the system, marked com.apple.macl on
+    /// the folder; only Full Disk Access lets another app in (see
+    /// Browser.unlock).
+    static func locked(_ source: Source) -> Bool {
+        do {
+            _ = try FileManager.default.contentsOfDirectory(atPath: source.root.path)
+            return false
+        } catch {
+            return FileManager.default.fileExists(atPath: source.root.path)
+        }
+    }
+
+    /// The browsers whose folder is on this Mac, found without looking
+    /// inside it. macOS guards what's inside another app's folder and asks
+    /// before letting anyone read it; this is for lists drawn before anyone
+    /// has asked for anything, so the question comes when they pick one.
+    static func present() -> [Source] {
+        known.filter { FileManager.default.fileExists(atPath: $0.root.path) }
+    }
+
     enum Trouble: Error {
         case noPassphrase
         case unreadable
@@ -333,9 +355,15 @@ enum Chromium {
 
     /// The other browser's history — what it takes to finish an address on
     /// the first day. Same file rules as the passwords: a copy, read once.
-    static func places(in source: Source, limit: Int = 3000) -> [Place] {
+    static func places(in source: Source, limit: Int = 10_000) -> [Place] {
+        places(beside: source.files, limit: limit)
+    }
+
+    /// Each profile's History, beside the Login Data files that mark out its
+    /// profiles.
+    static func places(beside files: [URL], limit: Int) -> [Place] {
         var out: [Place] = []
-        for file in source.files {
+        for file in files {
             let history = file.deletingLastPathComponent().appendingPathComponent("History")
             guard FileManager.default.fileExists(atPath: history.path) else { continue }
             out += (try? placeRows(in: history, limit: limit)) ?? []
@@ -344,10 +372,19 @@ enum Chromium {
     }
 
     private static func placeRows(in file: URL, limit: Int) throws -> [Place] {
-        let temp = FileManager.default.temporaryDirectory
-            .appendingPathComponent("office-import-\(UUID().uuidString).db")
-        try FileManager.default.copyItem(at: file, to: temp)
-        defer { try? FileManager.default.removeItem(at: temp) }
+        // With its journal beside it, as the cookies are: a browser that's
+        // open hasn't folded its last visits into the file yet.
+        let folder = FileManager.default.temporaryDirectory
+            .appendingPathComponent("office-import-\(UUID().uuidString)", isDirectory: true)
+        try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: folder) }
+        for suffix in ["", "-wal", "-journal"] {
+            let from = URL(fileURLWithPath: file.path + suffix)
+            if FileManager.default.fileExists(atPath: from.path) {
+                try FileManager.default.copyItem(at: from, to: folder.appendingPathComponent("History" + suffix))
+            }
+        }
+        let temp = folder.appendingPathComponent("History")
 
         var db: OpaquePointer?
         guard sqlite3_open_v2(temp.path, &db, SQLITE_OPEN_READONLY, nil) == SQLITE_OK, let db else {

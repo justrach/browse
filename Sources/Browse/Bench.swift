@@ -324,6 +324,53 @@ final class Bench {
             guard let tab = find(request, in: browser) else { answer(missing(request)); return }
             browser.sleep(tab) { said in answer(["said": said, "asleep": tab.asleep]) }
 
+        case "sources":
+            // What an import can see of each other browser from here: its
+            // folder, whether macOS lets this app list it (and why not), and
+            // the profiles in it — the question behind an import that brings
+            // nothing. Names and counts only; nothing is read out of them.
+            answer(["sources": Chromium.known.map { source -> [String: Any] in
+                let root = source.root
+                var row: [String: Any] = ["name": source.name, "present": FileManager.default.fileExists(atPath: root.path)]
+                do {
+                    let inside = try FileManager.default.contentsOfDirectory(atPath: root.path)
+                    row["entries"] = inside.count
+                    row["profiles"] = inside.filter { $0 == "Default" || $0.hasPrefix("Profile ") }.sorted()
+                    row["loginData"] = source.files.count
+                    row["history"] = source.files.filter {
+                        FileManager.default.fileExists(atPath: $0.deletingLastPathComponent().appendingPathComponent("History").path)
+                    }.count
+                } catch {
+                    row["error"] = (error as NSError).localizedDescription + " (" + String((error as NSError).code) + ")"
+                }
+                return row
+            }])
+
+        case "shield":
+            // The ad blocker on or off, as Settings › General does it, for the
+            // next page each tab loads. A test run's only: it's a setting.
+            guard Store.testing else { answer(["error": "shield only works on a --test run"]); return }
+            if let on = request["on"] as? Bool { browser.prefs.shielded = on }
+            answer(["on": browser.prefs.shielded, "lists": Shield.shared.lists.count, "trouble": Shield.shared.trouble ?? ""])
+
+        case "tidy":
+            // Tidy This Page on a tab of the bench's: every line the page
+            // offered Jev, its odds, and whether it went (see Tidy.swift).
+            guard let tab = find(request, in: browser) else { answer(missing(request)); return }
+            house(tab)
+            browser.tidy(tab) { outcome in
+                switch outcome {
+                case .judged(let judged):
+                    answer(["lines": judged.map { item -> [String: Any] in
+                        ["about": item.candidate.about, "selector": item.candidate.selector,
+                         "odds": item.odds, "hidden": item.hides]
+                    }])
+                case .signedOut: answer(["error": "not signed in to Codegraff"])
+                case .unreadable: answer(["error": "the page couldn't be read (blank, no site, or already tidying)"])
+                case .unavailable(let why): answer(["error": "Jev is unavailable: \(why)"])
+                }
+            }
+
         case "select":
             // Picking a tab takes the window over, which the bench never does
             // to someone using it: only on a SEARCH_PROBE run.
@@ -334,6 +381,22 @@ final class Bench {
             guard let tab = find(request, in: browser) else { answer(missing(request)); return }
             browser.select(tab)
             answer(describe(tab))
+
+        case "split":
+            // The tab in front and this one side by side (Split.swift); `split
+            // off` goes back to one page. Takes the window over, as select does.
+            guard Store.testing else {
+                answer(["error": "split only works on a --test run — it would take your window over"])
+                return
+            }
+            if request["id"] as? String == "off" {
+                browser.unsplit()
+                answer(["ok": true])
+                return
+            }
+            guard let tab = find(request, in: browser) else { answer(missing(request)); return }
+            browser.split(with: tab)
+            answer(["ok": browser.shownSplit != nil, "fraction": browser.split?.fraction ?? 0])
 
         case "text":
             guard let tab = find(request, in: browser) else { answer(missing(request)); return }
@@ -438,6 +501,10 @@ final class Bench {
             var out: [String: Any] = [
                 "settings": browser.tuning,
                 "welcome": browser.welcoming,
+                // Two tabs side by side (Split.swift): kept, and on screen.
+                "split": browser.split.map { ["left": $0.left.uuidString, "right": $0.right.uuidString,
+                                              "fraction": $0.fraction, "shown": browser.shownSplit != nil] as [String: Any] } ?? [:],
+                "talkOnStage": browser.talkOnStage,
                 "passwords": browser.managing,
                 "history": browser.recalling,
                 "downloads": browser.hoarding,
@@ -602,6 +669,64 @@ final class Bench {
             }
             step(1)
 
+        case "carry":
+            // A tab held over a point of the window as if carried out of the
+            // tabs (Split.swift), or let go of there — the drop without the
+            // hand, for a window that can't be brought forward to drag in.
+            guard Store.testing else { answer(["error": "carry only works on a --test run"]); return }
+            guard let tab = find(request, in: browser) else { answer(missing(request)); return }
+            if request["drop"] as? Bool == true {
+                browser.dropOut(tab)
+                DispatchQueue.main.asyncAfter(deadline: .now() + 0.4) {
+                    answer(["shown": browser.shownSplit != nil, "left": browser.shownSplit?.left.title ?? "",
+                            "right": browser.shownSplit?.right.title ?? "", "active": browser.active?.title ?? ""])
+                }
+            } else if let x = request["x"] as? Double, let y = request["y"] as? Double {
+                browser.dragOut(tab, at: CGPoint(x: x, y: y))
+                answer(["side": browser.splitSide(at: CGPoint(x: x, y: y)) == .left ? "left" : "right",
+                        "stage": [browser.stageFrame.minX, browser.stageFrame.minY, browser.stageFrame.width, browser.stageFrame.height]])
+            } else {
+                answer(["error": "carry ID X Y, or carry ID drop"])
+            }
+
+        case "drag":
+            // A press, a pull and a let-go through the app's own queue, a
+            // frame apart, as a hand would: the split's gap, a tab carried
+            // out onto the page. Points from the window's top left.
+            guard Store.testing else { answer(["error": "drag only works on a --test run"]); return }
+            guard let window = Links.window,
+                  let x1 = request["x1"] as? Double, let y1 = request["y1"] as? Double,
+                  let x2 = request["x2"] as? Double, let y2 = request["y2"] as? Double
+            else { answer(["error": "drag needs x1 y1 x2 y2"]); return }
+            let steps = max(2, request["steps"] as? Int ?? 20)
+            let height = Double(window.frame.height)
+            // A window in the back takes a press as the click that brings it
+            // forward, and no drag follows: forward first, as a hand would.
+            NSApp.activate()
+            window.makeKeyAndOrderFront(nil)
+            func post(_ type: NSEvent.EventType, _ x: Double, _ y: Double) {
+                guard let event = NSEvent.mouseEvent(
+                    with: type, location: NSPoint(x: x, y: height - y), modifierFlags: [],
+                    timestamp: ProcessInfo.processInfo.systemUptime, windowNumber: window.windowNumber,
+                    context: nil, eventNumber: 0, clickCount: 1, pressure: type == .leftMouseUp ? 0 : 1
+                ) else { return }
+                NSApp.postEvent(event, atStart: false)
+            }
+            post(.leftMouseDown, x1, y1)
+            for i in 1...steps {
+                let t = Double(i) / Double(steps)
+                DispatchQueue.main.asyncAfter(deadline: .now() + 0.016 * Double(i)) {
+                    post(.leftMouseDragged, x1 + (x2 - x1) * t, y1 + (y2 - y1) * t)
+                }
+            }
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.016 * Double(steps + 2)) {
+                post(.leftMouseUp, x2, y2)
+                DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) {
+                    answer(["split": browser.split.map { ["fraction": $0.fraction, "shown": browser.shownSplit != nil] as [String: Any] } ?? [:],
+                            "active": browser.active?.title ?? ""])
+                }
+            }
+
         case "hit":
             // What a press at a point of the window lands on, and whether
             // AppKit would carry the window off on a drag from there — the
@@ -635,6 +760,43 @@ final class Bench {
                 }
                 DispatchQueue.main.asyncAfter(deadline: .now() + 0.4) {
                     answer(["tabsBefore": before, "tabsAfter": browser.tabs.count])
+                }
+                return
+            }
+            if request["post"] as? Bool == true {
+                // A press and release put in the app's own queue, so they go
+                // the way a real click does — past the app's event monitors
+                // (a split's PaneClick), through the window, to the view.
+                guard Store.testing else { answer(["error": "hit … post only works on a --test run"]); return }
+                for type in [NSEvent.EventType.leftMouseDown, .leftMouseUp] {
+                    guard let event = NSEvent.mouseEvent(
+                        with: type, location: point, modifierFlags: [], timestamp: ProcessInfo.processInfo.systemUptime,
+                        windowNumber: window.windowNumber, context: nil, eventNumber: 0, clickCount: 1,
+                        pressure: type == .leftMouseUp ? 0 : 1
+                    ) else { continue }
+                    NSApp.postEvent(event, atStart: false)
+                }
+                DispatchQueue.main.asyncAfter(deadline: .now() + 0.6) {
+                    answer(["view": hit.map { String("\(type(of: $0))".prefix(60)) } ?? "", "active": browser.active?.title ?? ""])
+                }
+                return
+            }
+            if request["click"] as? Bool == true {
+                // One press and release there, handed to the view under it the
+                // way the double-click below is — for a button that a second
+                // click would undo. Test runs only.
+                guard Store.testing else { answer(["error": "hit … click only works on a --test run"]); return }
+                for type in [NSEvent.EventType.leftMouseDown, .leftMouseUp] {
+                    guard let event = NSEvent.mouseEvent(
+                        with: type, location: point, modifierFlags: [], timestamp: ProcessInfo.processInfo.systemUptime,
+                        windowNumber: window.windowNumber, context: nil, eventNumber: 0, clickCount: 1,
+                        pressure: type == .leftMouseUp ? 0 : 1
+                    ) else { continue }
+                    if type == .leftMouseDown { hit?.mouseDown(with: event) } else { hit?.mouseUp(with: event) }
+                }
+                DispatchQueue.main.asyncAfter(deadline: .now() + 0.6) {
+                    answer(["view": hit.map { String("\(type(of: $0))".prefix(60)) } ?? "",
+                            "talkOnStage": browser.talkOnStage, "active": browser.active?.title ?? ""])
                 }
                 return
             }
@@ -740,6 +902,25 @@ final class Bench {
                             "viewWasBuilt": built, "listStillOpen": browser.bookmarksOpen, "sameTab": browser.active?.id == tab.id])
                 }
             }
+
+        case "acp":
+            // A turn built from ACP updates by hand: `ask` starts one, each
+            // update goes in through the door graff's do, `done` ends it.
+            // For drawing steps, plans and diffs a model won't do on cue.
+            guard Store.testing else { answer(["error": "acp only works on a --test run — it would write into your chats"]); return }
+            if !browser.consulting {
+                browser.prefs.usesAgent = true
+                browser.consulting = true
+            }
+            if let asking = request["ask"] as? String {
+                browser.agent.rehearse(asking: asking)
+            } else if request["done"] as? Bool == true {
+                browser.agent.rehearse(piece: "")
+                browser.agent.rehearsed()
+            } else if let update = request["update"] as? [String: Any] {
+                browser.agent.rehearse(update: update)
+            }
+            answer(["entries": browser.agent.entries.count])
 
         case "stream":
             // A long answer arriving in the column a piece at a time, through
@@ -1405,7 +1586,7 @@ final class Bench {
 
         default:
             answer(["error": "unknown command “\(verb)”", "commands": [
-                "tabs", "open", "go", "close", "wait", "sleep", "select", "text", "eval", "click", "type", "submit", "shot", "probe", "key", "resize", "hit", "film", "window", "pages", "picture", "place", "field", "bookmark", "menu", "keyeq", "pull", "space", "strip", "column", "fold", "consent", "site", "little", "ui",
+                "tabs", "open", "go", "close", "wait", "sleep", "tidy", "shield", "sources", "acp", "select", "text", "eval", "click", "type", "submit", "shot", "probe", "key", "resize", "hit", "film", "window", "pages", "picture", "place", "field", "bookmark", "menu", "keyeq", "pull", "space", "strip", "column", "fold", "consent", "site", "little", "ui",
             ]])
         }
     }
