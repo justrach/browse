@@ -500,8 +500,10 @@ struct BookmarksPanel: View {
                 Text("Bring in from")
                     .font(.system(size: 12))
                     .foregroundStyle(Palette.muted)
-                ForEach(Chromium.installed()) { source in
-                    Pill(source.name) { browser.takeBookmarks(from: source) }
+                ForEach(Chromium.present()) { source in
+                    Pill(source.name) {
+                        if browser.unlock(source) { browser.takeBookmarks(from: source) }
+                    }
                 }
                 Pill("Safari or a file…") { browser.importExport() }
                 Spacer()

@@ -69,9 +69,13 @@ Sign in with your Codegraff account to use the agent. It is the same account use
 
 ## What leaves your Mac
 
-- Questions you send to Codegraff, and page text when you ask about a page, go to the model provider your Codegraff account uses. When Jev handles a step, the page's visible words and controls go to Jev through Codegraff. Password fields are excluded.
+[![Where your things go: read once from another browser into browse on the same Mac, and only with sync on, sealed before it leaves. The sync key goes from Mac to Mac as a code you type.](docs/images/data-flow.svg)](docs/your-data.md)
+
+Bringing things over from another browser is a copy between two folders on your Mac; nothing is uploaded. [Where your things go](docs/your-data.md) has the details.
+
+- Questions you send to Codegraff, and page text when you ask about a page, go to the model provider your Codegraff account uses. When Jev handles a step, the page's visible words and controls go to Jev through Codegraff. Password fields are excluded. When you tidy a page, a short description of each box that might be clutter (its kind, size, names and visible text) goes to Jev the same way; only the page you tidy.
 - If you turn on Google search suggestions, eligible text typed in the address field is sent to Google for autocomplete. This is off by default and disabled in private tabs.
-- If you turn on sync, encrypted bookmarks, history, and themes go to Codegraff's server.
+- If you turn on sync, encrypted bookmarks, history, and themes go to Codegraff's server, and passwords too if you switch them on separately. The key stays with your Macs.
 - Anonymous device and memory statistics are optional and off by default in Settings › Privacy. You can see the [aggregate statistics](https://search-codegraff-stats.rachpradhan.workers.dev).
 - The daily update check asks GitHub for the latest release. An update is installed for the next launch only after browse checks that it is newer and signed by the same developer.
 

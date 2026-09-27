@@ -1,0 +1,99 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1120 470" width="1120" height="470" role="img" aria-labelledby="t d">
+  <title id="t">Where your things go in browse</title>
+  <desc id="d">Passwords, bookmarks, history and sign-ins are read once from another browser's folder on your Mac into browse on the same Mac. Only if you switch sync on, each is sealed before it goes to Codegraff's sync server, which keeps boxes it cannot open, and your other Macs open them. The sync key goes from Mac to Mac as a code you type, never through the server.</desc>
+  <style>
+    .bg { fill: #fffdf8 }
+    .card { fill: #ffffff; stroke: #e6e0d6; stroke-width: 1.2 }
+    .home { fill: #ffffff; stroke: #d45a43; stroke-width: 1.6 }
+    .quiet { fill: #fbf8f2; stroke: #e6e0d6; stroke-width: 1.2; stroke-dasharray: 5 5 }
+    .ink { fill: #1f1d1a }
+    .muted { fill: #7a746b }
+    .accent { fill: #d45a43 }
+    .line { stroke: #b9b1a4; stroke-width: 1.6; fill: none }
+    .sealed { stroke: #d45a43; stroke-width: 1.6; fill: none; stroke-dasharray: 5 6 }
+    .key { stroke: #c9962f; stroke-width: 1.6; fill: none; stroke-dasharray: 2 6; stroke-linecap: round }
+    .keyink { fill: #a87a1c }
+    .dot { fill: #1f1d1a }
+    .sdot { fill: #d45a43 }
+    .kdot { fill: #c9962f }
+    text { font-family: -apple-system, BlinkMacSystemFont, "SF Pro Text", "Helvetica Neue", Helvetica, Arial, sans-serif }
+    .h { font-size: 20px; font-weight: 600 }
+    .title { font-size: 16px; font-weight: 600 }
+    .sub { font-size: 12.5px }
+    .item { font-size: 12.5px }
+    .label { font-size: 11.5px; font-weight: 500 }
+    .note { font-size: 12.5px }
+    @media (prefers-color-scheme: dark) {
+      .bg { fill: #141311 }
+      .card, .home { fill: #1c1a17 }
+      .card { stroke: #34302a }
+      .quiet { fill: #191714; stroke: #34302a }
+      .ink, .dot { fill: #f1ede5 }
+      .muted { fill: #9d968b }
+      .line { stroke: #5a544b }
+      .keyink { fill: #d9ad4f }
+    }
+  </style>
+
+  <rect class="bg" width="1120" height="470" rx="18"/>
+  <text class="h ink" x="28" y="44">Where your things go</text>
+  <text class="sub muted" x="28" y="66">Bringing things over, and sync if you switch it on</text>
+
+  <!-- 1. the other browser -->
+  <rect class="card" x="20" y="92" width="200" height="164" rx="14"/>
+  <text class="title ink" x="38" y="124">Chrome, Arc, Dia…</text>
+  <text class="sub muted" x="38" y="144">their folders on this Mac</text>
+  <text class="item ink" x="38" y="180">Passwords</text>
+  <text class="item ink" x="38" y="200">Bookmarks</text>
+  <text class="item ink" x="38" y="220">History</text>
+  <text class="item ink" x="38" y="240">Sign-ins</text>
+
+  <!-- 2. browse, on the same Mac -->
+  <rect class="home" x="310" y="92" width="240" height="164" rx="14"/>
+  <text class="title ink" x="328" y="124">browse</text>
+  <text class="sub muted" x="328" y="144">on the same Mac</text>
+  <text class="item ink" x="328" y="180">Passwords → your keychain</text>
+  <text class="item ink" x="328" y="200">Bookmarks, history → its folder</text>
+  <text class="item ink" x="328" y="220">Sign-ins → each space's store</text>
+  <text class="item muted" x="328" y="240">The other browser is untouched</text>
+
+  <!-- 3. Codegraff's sync server -->
+  <rect class="quiet" x="640" y="92" width="200" height="164" rx="14"/>
+  <text class="title ink" x="658" y="124">Codegraff sync</text>
+  <text class="sub muted" x="658" y="144">only if you switch it on</text>
+  <text class="item ink" x="658" y="180">Sealed boxes (AES-GCM)</text>
+  <text class="item ink" x="658" y="200">Names are keyed hashes</text>
+  <text class="item ink" x="658" y="220">No key, so it can't</text>
+  <text class="item ink" x="658" y="240">open them</text>
+
+  <!-- 4. your other Macs -->
+  <rect class="card" x="930" y="92" width="170" height="164" rx="14"/>
+  <text class="title ink" x="948" y="124">Your other Macs</text>
+  <text class="sub muted" x="948" y="144">signed in, with the key</text>
+  <text class="item ink" x="948" y="180">Open the boxes</text>
+  <text class="item ink" x="948" y="200">and merge them in</text>
+
+  <!-- 1 → 2: a copy on this Mac -->
+  <path id="p1" class="line" d="M220 174 H310"/>
+  <text class="label muted" x="265" y="162" text-anchor="middle">read once</text>
+  <circle class="dot" r="4.5"><animateMotion dur="2.4s" repeatCount="indefinite"><mpath href="#p1"/></animateMotion></circle>
+
+  <!-- 2 → 3: sealed on the way out -->
+  <path id="p2" class="sealed" d="M550 174 H640"/>
+  <text class="label accent" x="595" y="162" text-anchor="middle">sealed first</text>
+  <circle class="sdot" r="4.5"><animateMotion dur="2.4s" begin="0.8s" repeatCount="indefinite"><mpath href="#p2"/></animateMotion></circle>
+
+  <!-- 3 → 4: still sealed -->
+  <path id="p3" class="sealed" d="M840 174 H930"/>
+  <text class="label accent" x="885" y="162" text-anchor="middle">sealed</text>
+  <circle class="sdot" r="4.5"><animateMotion dur="2.4s" begin="1.6s" repeatCount="indefinite"><mpath href="#p3"/></animateMotion></circle>
+
+  <!-- the sync key: Mac to Mac, around the server -->
+  <path id="pk" class="key" d="M430 256 C430 352, 1015 352, 1015 256"/>
+  <circle class="kdot" r="4"><animateMotion dur="3.6s" repeatCount="indefinite"><mpath href="#pk"/></animateMotion></circle>
+  <text class="label keyink" x="722" y="346" text-anchor="middle">The sync key: made on your first Mac, kept in its keychain, typed on the next as a sync code.</text>
+  <text class="label keyink" x="722" y="364" text-anchor="middle">It never goes to the server.</text>
+
+  <text class="note muted" x="28" y="414">Bringing things over is a copy between two folders on your Mac. Nothing is uploaded, and the other browser isn't changed.</text>
+  <text class="note muted" x="28" y="436">With sync off, none of it leaves your Mac. Passwords sync only behind their own switch.</text>
+</svg>

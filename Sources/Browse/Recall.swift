@@ -48,6 +48,22 @@ struct HistoryPanel: View {
     /// the history or the search changes, not each time the panel is drawn.
     @State private var lines: [Listed] = []
     @State private var clearing = false
+    @State private var bringing = false
+
+    /// Another browser's history into this one, then the list again.
+    private func bring(from source: Chromium.Source) {
+        guard browser.unlock(source) else { return }
+        bringing = true
+        browser.takePlaces(from: source) { count in
+            bringing = false
+            // Nothing at all is most often macOS keeping the other browser's
+            // folder shut, not an empty history.
+            browser.announce(count == 0
+                ? "Nothing came from \(source.name) — if macOS asked about other apps' data, allow it and try again"
+                : "\(count) places from \(source.name)")
+            refresh()
+        }
+    }
 
     var body: some View {
         Plate("History", width: 600, close: { browser.recalling = false }) {
@@ -108,11 +124,32 @@ struct HistoryPanel: View {
             if clearing {
                 sweeps
             } else {
-                HStack {
+                HStack(spacing: 8) {
                     Text(traces.count == 1 ? "1 page" : "\(traces.count) pages")
                         .font(.system(size: 12))
                         .foregroundStyle(Palette.muted)
                     Spacer()
+                    // Another browser's history — every profile of it, merged
+                    // into this one. A menu, not a pill each: a Mac can have
+                    // half a dozen of them.
+                    if bringing {
+                        Text("Bringing it in…")
+                            .font(.system(size: 12))
+                            .foregroundStyle(Palette.muted)
+                    } else {
+                        Menu {
+                            ForEach(Chromium.present()) { source in
+                                Button(source.name) { bring(from: source) }
+                            }
+                            Divider()
+                            Button("Safari or a File…") { browser.importExport { _ in refresh() } }
+                        } label: {
+                            Text("Bring In History")
+                                .font(.system(size: 11.5))
+                        }
+                        .menuStyle(.borderlessButton)
+                        .fixedSize()
+                    }
                     Pill("Clear…") { withAnimation(Motion.settle) { clearing = true } }
                 }
             }

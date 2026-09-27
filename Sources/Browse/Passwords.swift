@@ -56,9 +56,11 @@ struct PasswordsPanel: View {
                     Text("Bring in from")
                         .font(.system(size: 12))
                         .foregroundStyle(Palette.muted)
-                    // Only the browsers actually on this Mac.
-                    ForEach(Chromium.installed()) { source in
+                    // Only the browsers actually on this Mac — by their folder,
+                    // since macOS may keep what's inside shut until asked.
+                    ForEach(Chromium.present()) { source in
                         Pill(source.name) {
+                            guard browser.unlock(source) else { return }
                             importing = source.name
                             // Off the main thread: four hundred passwords is a
                             // moment of arithmetic, and the panel stays alive.

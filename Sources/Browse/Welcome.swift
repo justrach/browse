@@ -1,8 +1,9 @@
 import SwiftUI
 
-/// The first time. Five short pages over the window, in the app's own
+/// The first time. Six short pages over the window, in the app's own
 /// language: what this is, signing in to Codegraff, what to bring over, how
-/// to hold it, and whether links from other apps should come here. Nothing is asked twice, and every
+/// to hold it, what Codegraff does on a page, and whether links from other
+/// apps should come here. Nothing is asked twice, and every
 /// page can be skipped.
 struct WelcomePanel: View {
     @ObservedObject var browser: Browser
@@ -24,6 +25,8 @@ struct WelcomePanel: View {
     @State private var wantsSignIns = true
     @State private var bringing = false
     @State private var brought: String?
+    /// Brought in, not merely tried: a folder macOS kept shut is tried again.
+    @State private var done = false
     /// What came in from an export file: Safari's zip, or bookmarks.
     @State private var fromFile: String?
 
@@ -32,7 +35,7 @@ struct WelcomePanel: View {
     @State private var asked = false
     @State private var remindShortcuts = false
 
-    private let pages = 5
+    private let pages = 6
 
     var body: some View {
         ZStack {
@@ -46,6 +49,7 @@ struct WelcomePanel: View {
                     case 1: account
                     case 2: bring
                     case 3: hold
+                    case 4: codegraff
                     default: links
                     }
                 }
@@ -94,7 +98,13 @@ struct WelcomePanel: View {
         VStack(alignment: .leading, spacing: 22) {
             heading("Bring things over.", "Passwords go into your keychain, bookmarks into the menu, and history means the address field already knows where you go. Nothing in the other browser changes.")
 
-            let sources = Chromium.installed()
+            // Found by their folders, not by looking inside them: macOS asks
+            // before letting another app read in there, and the question
+            // belongs to "Bring them in", not to this page appearing.
+            let sources = Chromium.present()
+            if !sources.isEmpty {
+                DataFlow(from: (source ?? sources[0]).name)
+            }
             if sources.isEmpty {
                 Text("No Chrome, Arc, Brave or other Chromium browser on this Mac.")
                     .font(.system(size: 13))
@@ -104,7 +114,7 @@ struct WelcomePanel: View {
                     if sources.count > 1 {
                         Segmented(
                             options: sources.map { ($0, $0.name) },
-                            selection: Binding(get: { source ?? sources[0] }, set: { source = $0 })
+                            selection: Binding(get: { source ?? sources[0] }, set: { source = $0; done = false; brought = nil })
                         )
                     } else {
                         Text("From \(sources[0].name)")
@@ -113,19 +123,16 @@ struct WelcomePanel: View {
                     }
                     Choice("Passwords", "macOS will ask once for that browser's keychain key", on: $wantsPasswords)
                     Choice("Bookmarks", "Folders and all, behind the bookmark button", on: $wantsBookmarks)
-                    Choice("History", "The last few thousand places, for finishing addresses", on: $wantsHistory)
-                    Choice(
-                        "Sign-ins",
-                        Chromium.profiles(in: source ?? sources[0]).count > 1
-                            ? "Each profile becomes a space, signed in where it was"
-                            : "Stay signed in to the sites you use there",
-                        on: $wantsSignIns
-                    )
+                    Choice("History", "Up to ten thousand places, the ones you go to most first", on: $wantsHistory)
+                    Choice("Sign-ins", "Stay signed in where you were; each profile becomes a space", on: $wantsSignIns)
+                    Text("On macOS 27, Chrome, Brave and Edge keep their folders to themselves: browse needs Full Disk Access to bring them in, and says how when you try.")
+                        .font(.system(size: 11.5))
+                        .foregroundStyle(Palette.faint)
                 }
 
                 HStack(spacing: 12) {
                     Big(bringing ? "Bringing…" : "Bring them in", filled: true) { bringAll() }
-                        .disabled(bringing || brought != nil || !(wantsPasswords || wantsHistory || wantsBookmarks || wantsSignIns))
+                        .disabled(bringing || done || !(wantsPasswords || wantsHistory || wantsBookmarks || wantsSignIns))
                     if bringing { Ring(size: 10) }
                     if let brought {
                         Text(brought)
@@ -174,6 +181,72 @@ struct WelcomePanel: View {
                     .font(.system(size: 13))
                     .foregroundStyle(Palette.muted)
                 Segmented(options: Glyph.allCases.map { ($0, $0.title) }, selection: $prefs.glyph)
+            }
+        }
+    }
+
+    /// Codegraff at work on the page you're on, shown once so it's known:
+    /// the form pill as it looks on a page, and a line each for the rest.
+    private var codegraff: some View {
+        VStack(alignment: .leading, spacing: 22) {
+            heading("Codegraff, on the page you're on.", "Beside the page when you want it, out of the way when you don't. On a page it doesn't submit, pay or send anything unless you ask it to.")
+            // The pill as a page with a form shows it, drawn, not pressable.
+            HStack(spacing: 10) {
+                HStack(spacing: 7) {
+                    Image(systemName: "sparkle")
+                        .font(.system(size: 11, weight: .semibold))
+                    Text("Fill in with Codegraff")
+                        .font(.system(size: 12.5, weight: .medium))
+                }
+                .foregroundStyle(Palette.onAccent)
+                .padding(.horizontal, 13)
+                .frame(height: 32)
+                .background(Capsule().fill(Palette.accent))
+                .shadow(color: .black.opacity(0.15), radius: 8, y: 2)
+                Text("appears on a page with a form")
+                    .font(.system(size: 12.5))
+                    .foregroundStyle(Palette.muted)
+            }
+            VStack(alignment: .leading, spacing: 16) {
+                Feature(icon: "sparkle", title: "Fills in forms",
+                        line: "One click and it fills what it knows, asks for the rest in one question, and leaves submitting to you. ⌥⌘F does the same for the page in front.")
+                Feature(icon: "pin", title: "One tab, one agent",
+                        line: "Right-click a tab › Ask Codegraff About This Tab: a chat pinned to it, working there and nowhere else.")
+                Feature(icon: "text.line.first.and.arrowtriangle.forward", title: "Keep typing while it works",
+                        line: "What you send meanwhile waits in a queue above the box and goes in turn; any of it can go now instead.")
+                Feature(icon: "wand.and.stars", title: "Tidy a page",
+                        line: "View › Tidy This Page takes off the cookie bars and pop-ups the ad blocker let through.")
+            }
+            if CodegraffAccount.key() == nil {
+                Text("These need a Codegraff sign-in, a page back.")
+                    .font(.system(size: 12))
+                    .foregroundStyle(Palette.faint)
+            }
+        }
+    }
+
+    private struct Feature: View {
+        let icon: String
+        let title: String
+        let line: String
+
+        var body: some View {
+            HStack(alignment: .top, spacing: 12) {
+                Image(systemName: icon)
+                    .font(.system(size: 12, weight: .medium))
+                    .foregroundStyle(Palette.ink)
+                    .frame(width: 28, height: 28)
+                    .background(Palette.ink.opacity(0.05), in: RoundedRectangle(cornerRadius: 7, style: .continuous))
+                VStack(alignment: .leading, spacing: 2) {
+                    Text(title)
+                        .font(.system(size: 13.5, weight: .medium))
+                        .foregroundStyle(Palette.ink)
+                    Text(line)
+                        .font(.system(size: 12.5))
+                        .foregroundStyle(Palette.muted)
+                        .lineSpacing(1.5)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
             }
         }
     }
@@ -257,7 +330,11 @@ struct WelcomePanel: View {
     // MARK: - doing
 
     private func bringAll() {
-        guard let source = source ?? Chromium.installed().first else { return }
+        guard let source = source ?? Chromium.present().first else { return }
+        guard browser.unlock(source) else {
+            brought = "\(source.name)'s folder needs Full Disk Access for browse. Once it's on, reopen browse and bring them in."
+            return
+        }
         bringing = true
         var lines: [String] = []
         let group = DispatchGroup()
@@ -305,6 +382,7 @@ struct WelcomePanel: View {
         }
         group.notify(queue: .main) {
             bringing = false
+            done = true
             brought = lines.joined(separator: " · ")
             browser.relist()
         }
