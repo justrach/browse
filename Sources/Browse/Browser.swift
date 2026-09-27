@@ -1237,7 +1237,7 @@ final class Browser: NSObject, ObservableObject {
         // the one that happened to ask for it.
         Favicons.shared.arrived = { [weak self] host, image in
             guard let self else { return }
-            for tab in tabs where tab.address?.host()?.lowercased() == host {
+            for tab in tabs + parkedTabs where tab.address?.host()?.lowercased() == host {
                 tab.icon = image
             }
         }
@@ -1494,18 +1494,19 @@ final class Browser: NSObject, ObservableObject {
         var entries: [Session.Entry] = []
         // Where each tab written landed in the list, for the pair.
         var written: [Tab.ID: Int] = [:]
+        var active = 0
         for tab in tabs {
-            guard !tab.shy, !tab.bench else { continue }
-            // A sleeping tab holds its address in `pending`; asking for
-            // it there too means a pin can never be written out of
-            // existence by whatever its web view happens to be showing.
-            guard let url = tab.pending ?? tab.address,
-                  url.scheme?.hasPrefix("http") == true
-            else { continue }
+            guard kept(tab), let url = tab.pending ?? tab.address else { continue }
+            if tab.id == activeID { active = entries.count }
             written[tab.id] = entries.count
             entries.append(Session.Entry(
                 url: url.absoluteString, title: tab.title, pin: tab.pin, name: tab.name
             ))
+        }
+        // The tab you were on isn't kept — a private or blank one: the one
+        // kept just before it comes back in front, not the first of the row.
+        if let at = tabs.firstIndex(where: { $0.id == activeID }), !kept(tabs[at]) {
+            active = max(0, tabs[..<at].filter(kept).count - 1)
         }
         // Two tabs side by side (Split.swift), by their places in the list.
         var pair: [Int]?
@@ -1517,11 +1518,19 @@ final class Browser: NSObject, ObservableObject {
             space: spaceID,
             .init(
                 tabs: entries,
-                active: tabs.firstIndex { $0.id == activeID } ?? 0,
+                active: active,
                 split: pair,
                 share: pair == nil ? nil : Double(split?.fraction ?? 0.5)
             )
         )
+    }
+
+    /// Whether a tab goes into the session: not a private one or the
+    /// bench's, and only with a web address. A sleeping tab holds its
+    /// address in `pending`; asking for it there too means a pin can never
+    /// be written out of existence by whatever its web view is showing.
+    private func kept(_ tab: Tab) -> Bool {
+        !tab.shy && !tab.bench && (tab.pending ?? tab.address)?.scheme?.hasPrefix("http") == true
     }
 
     private func rememberSession() {
@@ -3036,7 +3045,7 @@ extension Browser: WKNavigationDelegate, WKUIDelegate {
         // A page with nothing to lay out never has a first frame. Done is
         // done, and it is shown.
         (webView as? PageView)?.showFirstFrame()
-        guard let tab = tab(for: webView), let url = tab.address else { return }
+        guard let tab = anyTab(for: webView), let url = tab.address else { return }
         tab.uncover()
         tellStore(tab)
         // A page that arrived after a password went out: did the sign-in take?
@@ -3103,6 +3112,13 @@ extension Browser: WKNavigationDelegate, WKUIDelegate {
 
     func tab(for webView: WKWebView) -> Tab? {
         tabs.first { $0.built === webView }
+    }
+
+    /// The tab a page belongs to, in the space on screen or another: a page
+    /// still loading when you went to another space finishes there, and
+    /// still goes into History with its icon.
+    func anyTab(for webView: WKWebView) -> Tab? {
+        tab(for: webView) ?? parkedTabs.first { $0.built === webView }
     }
 }
 
