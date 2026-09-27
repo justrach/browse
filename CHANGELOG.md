@@ -11,6 +11,28 @@ in [ROADMAP.md](ROADMAP.md).
 
 ## Unreleased
 
+### Added
+
+- View › Tidy This Page, or Tidy in the list of what's hidden on a site: Jev takes off what the ad blocker let through — cookie bars, sign-up and newsletter pop-ups, sponsored cards, ad slots — and keeps them off on that site. Only boxes that look like clutter are offered to it, never the article, the navigation or a sign-in form, and only what it's sure of goes. What went is listed right after, marked tidied, each one a Restore away. Needs a Codegraff sign-in; only the page you tidy is looked at.
+- The sidebar, redone after Arc: pinned tabs are taller tiles led by the site's icon, the tab you're on sits raised on Liquid Glass (macOS 26 and later; the theme's wash before), and the column is glass too — the desktop through it, under your theme. A line under the tiles has + for a new tab and a trash can that closes every tab that isn't pinned (⌘⇧T brings them back), and a link button beside back and forward copies the page's address.
+- Chats with Codegraff are kept in the sidebar too: the latest four under Ask Codegraff, pinned ones first, each a click from being picked up again. Right-click any chat — there or on the Ask page — to rename it, pin it to the top, or delete it; a name you give it stays. The Ask page can search every chat, titles and all that was said.
+- Bring In History, at the foot of the History panel: Chrome's history — or Arc's, Dia's, Brave's, Edge's, Vivaldi's, every profile of it — comes into browse's any time, not only on the welcome screens, and Safari's from its export. Visits the other browser hasn't written to its file yet, as while it's open, come too. From macOS 27, Chrome, Brave and Edge keep their folders to themselves, and only Full Disk Access lets another app read them: choosing one of those now says so, with a button to that page in System Settings, instead of bringing in nothing without a word.
+- The welcome's Bring page draws where things go — read once from the other browser's folder into browse on the same Mac, and only with sync on, sealed before it leaves — and says up front which browsers macOS keeps locked and what browse needs to read them. Every Chromium browser on the Mac is listed, where only the ones macOS had already let browse into were before. The same picture is in the README and in docs/your-data.md.
+
+- Codegraff on one tab alone. On a page with a form, a small "Fill in with Codegraff" pill appears in the corner; one click opens Codegraff beside the tab, pinned to it, and it fills the form with what it knows, asks for the rest in one question, and leaves the submitting to you. The tab's menu has Ask Codegraff About This Tab and Fill In the Form with Codegraff, and View › Fill In This Form (⌥⌘F) does it for the tab in front. While a chat is pinned, a chip says which tab, every message goes with it, and Codegraff's tools act there unless told otherwise; the chip's cross lets it go. The pill's cross hides it on that site.
+- The welcome has a page on Codegraff at work on a page: the form pill as it looks, and a line each on filling forms, one agent to a tab, the queue and Tidy. The first time the pill shows on a page, a line over it says what it does.
+- A queue for Codegraff, as Harness has: type while it works and Return puts the message in line, shown above the box; each goes in turn once the one before it is answered. A queued message can go now (the turn under way stops for it), go back into the box to be changed, or be taken out. Stopping a turn by hand holds the queue until you send again.
+
+### Changed
+
+- Codegraff's work reads as it does in Harness. A turn's steps fold to one line that says what was done ("Ran 2 commands · edited 1 file · 1 failed"), and open to a card each, named the same way Harness names them: Run and its command, Read or Edit and the file, Search, Fetch, Browse for the browser's own tools. A card opens to what the step printed, or to its diff, line by line in red and green. graff's plan is a Todo card ("2/3 done") that keeps up as it goes, graff's name for a conversation becomes its title unless you've named it, and each turn is stamped as Harness stamps it.
+- Google suggestions keep up with you: the ones that still fit stay in the list while Google answers the next letter, rather than the list emptying and filling on every key; they're asked for sooner; the words you haven't typed yet are in bold; and what Google has said is kept while the field is open, so going back a letter is instant. Still off until you switch them on in Settings › General.
+- History keeps 10,000 places instead of 2,000, so another browser's history comes over nearly whole; the ones kept are those you go to most, and trimming them now happens off the main thread.
+
+### Fixed
+
+- Google's logo and doodles show again. An EasyPrivacy rule meant for Google's logging address, google.com/log?…, was also blocking google.com/logos/…: turning the lists into WebKit's rules lost where a rule ends, so every rule matched anything that merely began like it. Rules end where they should now — which also stops a blocked host like ads.com taking ads.community.org with it — and the lists are today's.
+
 ## 1.0.4 — 27 September 2026
 
 ### Added

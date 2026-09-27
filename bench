@@ -6,6 +6,10 @@
     ./bench go ID URL                  send a bench tab somewhere else
     ./bench wait ID [SECONDS]          until the page has loaded
     ./bench sleep ID                   put a tab to sleep now, or say what keeps it awake
+    ./bench tidy ID                    Tidy This Page: what Jev was asked about, its odds, what went
+    ./bench acp ask TEXT | JSON | done a turn built from ACP updates by hand, to draw it — --test runs only
+    ./bench sources                    what an import can see of each other browser: folder, access, profiles
+    ./bench shield [on|off]            the ad blocker, for pages loaded from now on — --test runs only
     ./bench select ID                  bring a tab to the front — --test runs only
     ./bench resize W H [STEPS]         take the window to W×H in steps, like a drag — --test runs only
     ./bench key ID TEXT                press keys on a tab as real key events — --test runs only
@@ -130,7 +134,7 @@ def main(argv):
         if not args: sys.exit("usage: bench wait ID [SECONDS]")
         request["id"] = args[0]
         if len(args) > 1: request["seconds"] = float(args[1])
-    elif verb in ("text", "close", "sleep", "select"):
+    elif verb in ("text", "close", "sleep", "tidy", "select"):
         if len(args) != 1: sys.exit(f"usage: bench {verb} ID")
         request["id"] = args[0]
     elif verb == "eval":
@@ -150,6 +154,16 @@ def main(argv):
         request["id"] = args[0]
         if len(args) > 1: request["path"] = os.path.abspath(args[1])
         if len(args) > 2: request["width"] = float(args[2])
+    elif verb == "acp":
+        if not args: sys.exit("usage: bench acp ask TEXT | JSON | done")
+        if args[0] == "ask": request["ask"] = " ".join(args[1:])
+        elif args[0] == "done": request["done"] = True
+        else: request["update"] = json.loads(args[0])
+    elif verb == "sources":
+        if args: sys.exit("usage: bench sources")
+    elif verb == "shield":
+        if len(args) > 1 or (args and args[0] not in ("on", "off")): sys.exit("usage: bench shield [on|off]")
+        if args: request["on"] = args[0] == "on"
     elif verb == "ui":
         if len(args) != 2: sys.exit("usage: bench ui KEY VALUE")
         key, value = args
@@ -231,7 +245,7 @@ def main(argv):
         elif args and args[0] == "move" and len(args) == 2: request["action"], request["index"] = "move", int(args[1])
         elif args: sys.exit("usage: bench space [new NAME | go N | delete | swipe DX | hold DX | release | move N]")
     elif verb == "hit":
-        if len(args) not in (2, 3) or (len(args) == 3 and args[2] not in ("double", "middle")): sys.exit("usage: bench hit X Y [double|middle]")
+        if len(args) not in (2, 3) or (len(args) == 3 and args[2] not in ("click", "double", "middle")): sys.exit("usage: bench hit X Y [click|double|middle]")
         request["x"], request["y"] = float(args[0]), float(args[1])
         if len(args) == 3: request[args[2]] = True
     elif verb == "place":

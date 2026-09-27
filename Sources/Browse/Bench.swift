@@ -324,6 +324,53 @@ final class Bench {
             guard let tab = find(request, in: browser) else { answer(missing(request)); return }
             browser.sleep(tab) { said in answer(["said": said, "asleep": tab.asleep]) }
 
+        case "sources":
+            // What an import can see of each other browser from here: its
+            // folder, whether macOS lets this app list it (and why not), and
+            // the profiles in it — the question behind an import that brings
+            // nothing. Names and counts only; nothing is read out of them.
+            answer(["sources": Chromium.known.map { source -> [String: Any] in
+                let root = source.root
+                var row: [String: Any] = ["name": source.name, "present": FileManager.default.fileExists(atPath: root.path)]
+                do {
+                    let inside = try FileManager.default.contentsOfDirectory(atPath: root.path)
+                    row["entries"] = inside.count
+                    row["profiles"] = inside.filter { $0 == "Default" || $0.hasPrefix("Profile ") }.sorted()
+                    row["loginData"] = source.files.count
+                    row["history"] = source.files.filter {
+                        FileManager.default.fileExists(atPath: $0.deletingLastPathComponent().appendingPathComponent("History").path)
+                    }.count
+                } catch {
+                    row["error"] = (error as NSError).localizedDescription + " (" + String((error as NSError).code) + ")"
+                }
+                return row
+            }])
+
+        case "shield":
+            // The ad blocker on or off, as Settings › General does it, for the
+            // next page each tab loads. A test run's only: it's a setting.
+            guard Store.testing else { answer(["error": "shield only works on a --test run"]); return }
+            if let on = request["on"] as? Bool { browser.prefs.shielded = on }
+            answer(["on": browser.prefs.shielded, "lists": Shield.shared.lists.count, "trouble": Shield.shared.trouble ?? ""])
+
+        case "tidy":
+            // Tidy This Page on a tab of the bench's: every line the page
+            // offered Jev, its odds, and whether it went (see Tidy.swift).
+            guard let tab = find(request, in: browser) else { answer(missing(request)); return }
+            house(tab)
+            browser.tidy(tab) { outcome in
+                switch outcome {
+                case .judged(let judged):
+                    answer(["lines": judged.map { item -> [String: Any] in
+                        ["about": item.candidate.about, "selector": item.candidate.selector,
+                         "odds": item.odds, "hidden": item.hides]
+                    }])
+                case .signedOut: answer(["error": "not signed in to Codegraff"])
+                case .unreadable: answer(["error": "the page couldn't be read (blank, no site, or already tidying)"])
+                case .unavailable(let why): answer(["error": "Jev is unavailable: \(why)"])
+                }
+            }
+
         case "select":
             // Picking a tab takes the window over, which the bench never does
             // to someone using it: only on a SEARCH_PROBE run.
@@ -638,6 +685,25 @@ final class Bench {
                 }
                 return
             }
+            if request["click"] as? Bool == true {
+                // One press and release there, handed to the view under it the
+                // way the double-click below is — for a button that a second
+                // click would undo. Test runs only.
+                guard Store.testing else { answer(["error": "hit … click only works on a --test run"]); return }
+                for type in [NSEvent.EventType.leftMouseDown, .leftMouseUp] {
+                    guard let event = NSEvent.mouseEvent(
+                        with: type, location: point, modifierFlags: [], timestamp: ProcessInfo.processInfo.systemUptime,
+                        windowNumber: window.windowNumber, context: nil, eventNumber: 0, clickCount: 1,
+                        pressure: type == .leftMouseUp ? 0 : 1
+                    ) else { continue }
+                    if type == .leftMouseDown { hit?.mouseDown(with: event) } else { hit?.mouseUp(with: event) }
+                }
+                DispatchQueue.main.asyncAfter(deadline: .now() + 0.6) {
+                    answer(["view": hit.map { String("\(type(of: $0))".prefix(60)) } ?? "",
+                            "talkOnStage": browser.talkOnStage, "active": browser.active?.title ?? ""])
+                }
+                return
+            }
             if request["double"] as? Bool == true {
                 // A double-click there, handed to the view under it — through
                 // the window it would never arrive, the probe being in the
@@ -740,6 +806,25 @@ final class Bench {
                             "viewWasBuilt": built, "listStillOpen": browser.bookmarksOpen, "sameTab": browser.active?.id == tab.id])
                 }
             }
+
+        case "acp":
+            // A turn built from ACP updates by hand: `ask` starts one, each
+            // update goes in through the door graff's do, `done` ends it.
+            // For drawing steps, plans and diffs a model won't do on cue.
+            guard Store.testing else { answer(["error": "acp only works on a --test run — it would write into your chats"]); return }
+            if !browser.consulting {
+                browser.prefs.usesAgent = true
+                browser.consulting = true
+            }
+            if let asking = request["ask"] as? String {
+                browser.agent.rehearse(asking: asking)
+            } else if request["done"] as? Bool == true {
+                browser.agent.rehearse(piece: "")
+                browser.agent.rehearsed()
+            } else if let update = request["update"] as? [String: Any] {
+                browser.agent.rehearse(update: update)
+            }
+            answer(["entries": browser.agent.entries.count])
 
         case "stream":
             // A long answer arriving in the column a piece at a time, through
@@ -1405,7 +1490,7 @@ final class Bench {
 
         default:
             answer(["error": "unknown command “\(verb)”", "commands": [
-                "tabs", "open", "go", "close", "wait", "sleep", "select", "text", "eval", "click", "type", "submit", "shot", "probe", "key", "resize", "hit", "film", "window", "pages", "picture", "place", "field", "bookmark", "menu", "keyeq", "pull", "space", "strip", "column", "fold", "consent", "site", "little", "ui",
+                "tabs", "open", "go", "close", "wait", "sleep", "tidy", "shield", "sources", "acp", "select", "text", "eval", "click", "type", "submit", "shot", "probe", "key", "resize", "hit", "film", "window", "pages", "picture", "place", "field", "bookmark", "menu", "keyeq", "pull", "space", "strip", "column", "fold", "consent", "site", "little", "ui",
             ]])
         }
     }

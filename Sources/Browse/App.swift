@@ -88,6 +88,13 @@ struct BrowseApp: App {
                     .keyboardShortcut("h", modifiers: [.command, .shift])
                 Button("Hidden on This Site…") { browser.reviewing.toggle() }
                     .keyboardShortcut("u", modifiers: [.command, .shift])
+                Button("Tidy This Page") { browser.tidy() }
+                    .disabled(browser.tidying || browser.active?.isBlank != false)
+                Button("Fill In This Form with Codegraff") {
+                    if let tab = browser.active { browser.talk(about: tab, task: Browser.fillTask) }
+                }
+                .keyboardShortcut("f", modifiers: [.command, .option])
+                .disabled(browser.active?.isBlank != false)
                 Divider()
                 Button("Zoom In") { browser.zoom(by: 1.1) }
                     .keyboardShortcut("+")
@@ -358,6 +365,10 @@ struct ContentView: View {
                         FindBar(browser: browser)
                             .transition(.move(edge: .top).combined(with: .opacity))
                     }
+                }
+                // A form on the page: Codegraff offered to fill it in.
+                .overlay(alignment: .bottomTrailing) {
+                    FormPill(browser: browser, tab: tab)
                 }
                 .overlay(alignment: .topLeading) {
                     if let asked = browser.suggesting, asked.tab == tab.id {

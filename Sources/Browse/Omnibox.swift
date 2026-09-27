@@ -105,9 +105,12 @@ struct Omnibox: View {
     private var list: some View {
         VStack(spacing: 0) {
             ForEach(Array(browser.offers.enumerated()), id: \.element.id) { index, offer in
-                Row(offer: offer, picked: browser.picked == index)
+                Row(offer: offer, typed: browser.typed, picked: browser.picked == index)
                     .contentShape(Rectangle())
                     .onTapGesture { browser.take(offer) }
+                    // Google's answer arrives a beat after the keys: its rows
+                    // fade in where they belong rather than appearing at once.
+                    .transition(.opacity)
             }
         }
         .padding(6)
@@ -122,9 +125,25 @@ struct Omnibox: View {
 
     private struct Row: View {
         let offer: Suggestion
+        /// What's in the field, for what a suggestion adds to it.
+        let typed: String
         /// Where the arrow keys have walked to. The pointer gets its own,
         /// quieter mark, and changes nothing but the look of the row.
         let picked: Bool
+
+        /// A suggested search reads as what it adds: the words already typed
+        /// plain, the rest in bold, as a search engine shows it.
+        private var words: Text {
+            let start = typed.trimmingCharacters(in: .whitespaces)
+            let key = offer.key
+            guard offer.kind == .google || offer.kind == .searched,
+                  !start.isEmpty, key.count > start.count,
+                  key.lowercased().hasPrefix(start.lowercased())
+            else { return Text(key) }
+            let split = key.index(key.startIndex, offsetBy: start.count)
+            return Text(key[..<split]).foregroundStyle(Palette.ink.opacity(0.72))
+                + Text(key[split...]).fontWeight(.semibold)
+        }
 
         @State private var hovering = false
 
@@ -157,7 +176,7 @@ struct Omnibox: View {
                 default:
                     EmptyView()
                 }
-                Text(offer.key)
+                words
                     .font(.system(size: 13))
                     .foregroundStyle(Palette.ink)
                     .lineLimit(1)

@@ -102,7 +102,7 @@ struct AgentColumn: View {
                 // The talk as a page: a new one first, then what this one is
                 // about, as a chat's own page has it.
                 Door(icon: "square.and.pencil", help: "New chat") { agent.startOver() }
-                Text(Chat.title(for: agent.entries))
+                Text(agent.title)
                     .font(.system(size: 13.5, weight: .medium))
                     .foregroundStyle(Palette.ink)
                     .lineLimit(1)
@@ -269,8 +269,15 @@ struct AgentColumn: View {
     private var foot: some View {
         VStack(alignment: .leading, spacing: 8) {
             // On the stage the page is out of sight, so it doesn't go along.
-            if !full, let tab = browser.active, !tab.isBlank, agent.asking?.isQuestion != true {
+            if let pinned = agent.pinned {
+                pinnedChip(pinned)
+            } else if !full, let tab = browser.active, !tab.isBlank, agent.asking?.isQuestion != true {
                 pageChip(tab)
+            }
+            // What was typed while it worked, in the order it will go.
+            if !agent.queue.isEmpty {
+                QueuePanel(agent: agent, full: full)
+                    .transition(.move(edge: .bottom).combined(with: .opacity))
             }
             // One box: the words, and under them in the same box what
             // they go to — the model, how hard it thinks — and the button.
@@ -294,7 +301,12 @@ struct AgentColumn: View {
                     choices
                     Spacer(minLength: 0)
                     if agent.phase == .working, agent.asking?.isQuestion != true {
-                        round(icon: "stop.fill", help: "Stop", live: true) { agent.stop() }
+                        round(icon: "stop.fill", help: "Stop", live: agent.draft.isEmpty) { agent.stop() }
+                        // Something typed: it joins the queue.
+                        if !agent.draft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                            round(icon: "arrow.up", help: "Queue   ↩", live: true) { send() }
+                                .transition(.scale.combined(with: .opacity))
+                        }
                     } else {
                         round(icon: "arrow.up", help: "Send   ↩", live: agent.canSend) { send() }
                             .disabled(!agent.canSend)
@@ -314,6 +326,7 @@ struct AgentColumn: View {
             .animation(Motion.quick, value: typing)
             .onTapGesture { typing = true }
         }
+        .animation(Motion.settle, value: agent.queue.map(\.id))
         .padding(.horizontal, full ? 12 : 8)
         .padding(.top, 4)
         .padding(.bottom, 12)
@@ -321,7 +334,34 @@ struct AgentColumn: View {
 
     private var prompt: String {
         if agent.asking?.isQuestion == true { return "Answer Codegraff" }
-        return agent.phase == .working ? "Codegraff is working…" : "Ask Codegraff"
+        return agent.phase == .working ? "Codegraff is working. Type to queue a message" : "Ask Codegraff"
+    }
+
+    /// The tab this conversation is pinned to: every message goes with it,
+    /// and Codegraff works in it alone. The cross lets it go.
+    private func pinnedChip(_ tab: Tab) -> some View {
+        HStack(spacing: 6) {
+            Image(systemName: "pin.fill")
+                .font(.system(size: 9, weight: .medium))
+            Text(tab.title.isEmpty ? (tab.address?.host() ?? "This tab") : tab.title)
+                .lineLimit(1)
+            Button { agent.pin(nil) } label: {
+                Image(systemName: "xmark")
+                    .font(.system(size: 8, weight: .semibold))
+                    .frame(width: 14, height: 14)
+                    .contentShape(Rectangle())
+            }
+            .buttonStyle(.plain)
+            .help("Unpin: Codegraff goes back to the page in front")
+        }
+        .font(.system(size: 11.5))
+        .foregroundStyle(Palette.ink)
+        .padding(.leading, 9)
+        .padding(.trailing, 5)
+        .padding(.vertical, 4)
+        .background(Capsule().fill(Palette.accent.opacity(0.1)))
+        .overlay(Capsule().strokeBorder(Palette.accent.opacity(0.35), lineWidth: 1))
+        .help("Codegraff works in this tab alone")
     }
 
     /// The page that goes with the next message; a click leaves it behind.
@@ -758,7 +798,7 @@ private struct TurnView: View {
 
     /// Every step, in order, down a hairline.
     private var steps: some View {
-        VStack(alignment: .leading, spacing: 4) {
+        VStack(alignment: .leading, spacing: 6) {
             ForEach(Agent.grouped(turn.work), id: \.first?.id) { run in
                 if run.first?.kind == .page {
                     PagesCard(pages: run, open: visit)
@@ -784,8 +824,13 @@ private struct TurnView: View {
             icon = "globe"
             words = (run.count == 1 ? "Read a page" : "Read \(run.count) pages") + (hosts.isEmpty ? "" : " · " + Array(Set(hosts)).sorted().prefix(3).joined(separator: ", "))
         } else if let entry = last?.first, entry.kind == .tool {
-            icon = EntryRow.icon(entry)
-            words = EntryRow.said(entry)
+            let step = entry.step ?? Steps.fallback(entry)
+            icon = step.symbol
+            words = step.shown.isEmpty ? step.label : step.label + "  " + step.shown
+        } else if let entry = last?.first, entry.kind == .plan {
+            let items = entry.todo ?? []
+            icon = "checklist"
+            words = "Todo  \(items.filter(\.done).count)/\(items.count) done"
         } else {
             icon = "sparkle"
             words = "Thinking"
@@ -809,6 +854,13 @@ private struct TurnView: View {
     private var fold: some View {
         Button { if !turn.work.isEmpty { unfolded.toggle() } } label: {
             HStack(spacing: 6) {
+                // The disclosure first, in its small box, as Harness puts it.
+                if !turn.work.isEmpty, !live {
+                    Image(systemName: unfolded ? "chevron.down" : "chevron.right")
+                        .font(.system(size: 7.5, weight: .semibold))
+                        .frame(width: 16, height: 16)
+                        .background(Palette.ink.opacity(0.05), in: RoundedRectangle(cornerRadius: 4, style: .continuous))
+                }
                 if live {
                     Ring(size: 9)
                     TimelineView(.periodic(from: .now, by: 1)) { context in
@@ -816,9 +868,21 @@ private struct TurnView: View {
                             .monospacedDigit()
                     }
                 } else {
-                    Text(turn.started.flatMap { start in turn.ended.map { "Worked for " + Self.span(from: start, to: $0) } } ?? "Worked")
+                    // What it did, as Harness says it — "Ran 2 commands ·
+                    // read 3 pages" — and how long, quieter.
+                    let summary = Steps.summary(turn.work)
+                    let took = turn.started.flatMap { start in turn.ended.map { Self.span(from: start, to: $0) } }
+                    if summary.isEmpty {
+                        Text(took.map { "Worked for " + $0 } ?? "Worked")
+                    } else {
+                        // One line, as Harness keeps it; the rest is a click away.
+                        Text(summary)
+                            .lineLimit(1)
+                            .truncationMode(.tail)
+                        if let took { Text(took).foregroundStyle(Palette.faint).monospacedDigit().fixedSize() }
+                    }
                 }
-                if !turn.work.isEmpty {
+                if !turn.work.isEmpty, live {
                     Image(systemName: unfolded ? "chevron.down" : "chevron.right")
                         .font(.system(size: 8.5, weight: .semibold))
                 }
@@ -848,7 +912,9 @@ private struct TurnView: View {
             }
             .buttonStyle(.plain)
             .help("Copy")
-            Text(reply.until.formatted(date: .omitted, time: .shortened))
+            // As Harness stamps a turn: "Aug 8, 5:31 AM".
+            Text(reply.until.formatted(.dateTime.month(.abbreviated).day()) + ", "
+                + reply.until.formatted(date: .omitted, time: .shortened))
                 .font(.system(size: 11.5))
         }
         .foregroundStyle(Palette.muted)
@@ -873,25 +939,6 @@ private struct EntryRow: View {
         self.entry = entry
         self.full = full
         self.visit = visit
-    }
-
-    private var said: String { EntryRow.said(entry) }
-    private var icon: String { EntryRow.icon(entry) }
-
-    /// A tool's name as graff gives it, said the way a person would.
-    static func said(_ entry: Agent.Entry) -> String {
-        // mcp__search__ in chats from before the app was browse.
-        guard let prefix = ["mcp__browse__", "mcp__search__"].first(where: entry.text.hasPrefix) else { return entry.text }
-        let tool = String(entry.text.dropFirst(prefix.count))
-        return [
-            "search": "Searching the web", "read_pages": "Reading pages", "open": "Opening a page",
-            "read": "Reading the page", "links": "Looking at the links", "go": "Going to a page",
-            "back": "Going back", "forward": "Going forward", "reload": "Reloading",
-            "click": "Clicking", "type": "Typing", "submit": "Submitting a form",
-            "form_fields": "Reading the form", "fill": "Filling in the form",
-            "run_js": "Running a script on the page", "screenshot": "Looking at the page",
-            "tabs": "Looking at your tabs", "show": "Showing you a page", "close": "Closing a page",
-        ][tool] ?? tool
     }
 
     var body: some View {
@@ -933,46 +980,10 @@ private struct EntryRow: View {
             }
             .buttonStyle(.plain)
         case .tool:
-            VStack(alignment: .leading, spacing: 6) {
-                Button { open.toggle() } label: {
-                    HStack(spacing: 7) {
-                        Image(systemName: icon)
-                            .font(.system(size: 10, weight: .medium))
-                            .foregroundStyle(Palette.muted)
-                            .frame(width: 14)
-                        Text(said)
-                            .font(.system(size: 12))
-                            .foregroundStyle(Palette.ink)
-                            .lineLimit(open ? nil : 1)
-                            .multilineTextAlignment(.leading)
-                        Spacer(minLength: 0)
-                        if let url = URL(string: entry.text), url.scheme?.hasPrefix("http") == true {
-                            Button { visit(url) } label: {
-                                Image(systemName: "arrow.up.right.square")
-                                    .font(.system(size: 10, weight: .medium))
-                                    .foregroundStyle(Palette.muted)
-                            }
-                            .buttonStyle(.plain)
-                            .help("Open in a tab")
-                        }
-                        mark
-                    }
-                    .contentShape(Rectangle())
-                }
-                .buttonStyle(.plain)
-                if open, !entry.output.isEmpty {
-                    ScrollView {
-                        Text(entry.output)
-                            .font(.system(size: 11, design: .monospaced))
-                            .foregroundStyle(Palette.muted)
-                            .textSelection(.enabled)
-                            .frame(maxWidth: .infinity, alignment: .leading)
-                    }
-                    .frame(maxHeight: 180)
-                }
-            }
-            // A step among steps, down the fold's hairline: no box of its own.
-            .padding(.vertical, 3)
+            // A card of its own, as Harness draws a step (AgentCards.swift).
+            StepCard(entry: entry, visit: visit)
+        case .plan:
+            TodoCard(items: entry.todo ?? [])
         case .note:
             Text(entry.text)
                 .font(.system(size: 11.5))
@@ -981,34 +992,6 @@ private struct EntryRow: View {
         case .page:
             // Drawn with the others on a card (see PagesCard).
             EmptyView()
-        }
-    }
-
-    /// What it did, at a glance: searched, fetched, read, changed, ran — or
-    /// worked in the browser, through Search's own tools.
-    static func icon(_ entry: Agent.Entry) -> String {
-        let title = entry.text.lowercased()
-        if title.contains("browse__") || title.contains("search__") || title.hasPrefix("browse.") || title.hasPrefix("search.") || title.hasPrefix("search:") { return "safari" }
-        switch entry.act {
-        case "search": return "magnifyingglass"
-        case "fetch": return "globe"
-        case "read": return "doc.text"
-        case "edit", "delete", "move": return "pencil"
-        case "execute": return "terminal"
-        case "think": return "brain"
-        default: return "wrench.and.screwdriver"
-        }
-    }
-
-    @ViewBuilder
-    private var mark: some View {
-        switch entry.status {
-        case "completed":
-            Image(systemName: "checkmark").font(.system(size: 9, weight: .bold)).foregroundStyle(Palette.muted)
-        case "failed":
-            Image(systemName: "exclamationmark").font(.system(size: 9, weight: .bold)).foregroundStyle(.red.opacity(0.8))
-        default:
-            Ring(size: 9)
         }
     }
 }
