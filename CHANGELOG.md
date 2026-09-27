@@ -11,6 +11,8 @@ in [ROADMAP.md](ROADMAP.md).
 
 ## Unreleased
 
+## 1.1.2 — 27 September 2026
+
 ### Fixed
 
 - Settings: the highlight in the list of pages follows the pointer — one row at a time, gliding to the next — instead of staying on a row the pointer had already left.
