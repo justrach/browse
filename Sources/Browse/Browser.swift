@@ -545,7 +545,7 @@ final class Browser: NSObject, ObservableObject {
 
     struct Suggesting: Equatable {
         let tab: Tab.ID
-        let spot: CGRect
+        var spot: CGRect
         let logins: [Login]
         /// The page the list was made for: its site, and whether it came in
         /// the clear. A click fills only a page that still is that one.
@@ -564,6 +564,10 @@ final class Browser: NSObject, ObservableObject {
     /// instant: clicking a row can take the caret out of the page first, and
     /// a list that vanished on the way down would never be clicked.
     private var lowering: DispatchWorkItem?
+    /// The page whose accounts were last looked up for the box the caret is
+    /// in. The box reports where it is on every frame of a scroll so the
+    /// list can follow it; the keychain is asked once per box, not per frame.
+    private var looked: (tab: Tab.ID, host: String, clear: Bool)?
 
     func keepOffer() {
         guard let offer = offering else { return }
@@ -1237,8 +1241,12 @@ final class Browser: NSObject, ObservableObject {
         // the one that happened to ask for it.
         Favicons.shared.arrived = { [weak self] host, image in
             guard let self else { return }
-            for tab in tabs where tab.address?.host()?.lowercased() == host {
-                tab.icon = image
+            let lower = host.lowercased()
+            for tab in tabs + parkedTabs {
+                guard let tabHost = tab.address?.host()?.lowercased() else { continue }
+                if tabHost == lower || tabHost == "www." + lower || lower == "www." + tabHost {
+                    tab.icon = image
+                }
             }
         }
         // The little window's own three buttons.
@@ -1494,18 +1502,19 @@ final class Browser: NSObject, ObservableObject {
         var entries: [Session.Entry] = []
         // Where each tab written landed in the list, for the pair.
         var written: [Tab.ID: Int] = [:]
+        var active = 0
         for tab in tabs {
-            guard !tab.shy, !tab.bench else { continue }
-            // A sleeping tab holds its address in `pending`; asking for
-            // it there too means a pin can never be written out of
-            // existence by whatever its web view happens to be showing.
-            guard let url = tab.pending ?? tab.address,
-                  url.scheme?.hasPrefix("http") == true
-            else { continue }
+            guard kept(tab), let url = tab.pending ?? tab.address else { continue }
+            if tab.id == activeID { active = entries.count }
             written[tab.id] = entries.count
             entries.append(Session.Entry(
                 url: url.absoluteString, title: tab.title, pin: tab.pin, name: tab.name
             ))
+        }
+        // The tab you were on isn't kept — a private or blank one: the one
+        // kept just before it comes back in front, not the first of the row.
+        if let at = tabs.firstIndex(where: { $0.id == activeID }), !kept(tabs[at]) {
+            active = max(0, tabs[..<at].filter(kept).count - 1)
         }
         // Two tabs side by side (Split.swift), by their places in the list.
         var pair: [Int]?
@@ -1517,11 +1526,19 @@ final class Browser: NSObject, ObservableObject {
             space: spaceID,
             .init(
                 tabs: entries,
-                active: tabs.firstIndex { $0.id == activeID } ?? 0,
+                active: active,
                 split: pair,
                 share: pair == nil ? nil : Double(split?.fraction ?? 0.5)
             )
         )
+    }
+
+    /// Whether a tab goes into the session: not a private one or the
+    /// bench's, and only with a web address. A sleeping tab holds its
+    /// address in `pending`; asking for it there too means a pin can never
+    /// be written out of existence by whatever its web view is showing.
+    private func kept(_ tab: Tab) -> Bool {
+        !tab.shy && !tab.bench && (tab.pending ?? tab.address)?.scheme?.hasPrefix("http") == true
     }
 
     private func rememberSession() {
@@ -1612,6 +1629,8 @@ final class Browser: NSObject, ObservableObject {
         // The tab already in front, picked while the talk has the stage: its
         // page comes back.
         if talkOnStage, tab.id == activeID { leaveStage() }
+        // Back on a tab with the caret still in a box, the list may come again.
+        looked = nil
         guard tab.id != activeID else { return }
         // Coming back to the tab whose video is out brings it home first, so
         // it is never lifted and landed in the same breath.
@@ -2159,6 +2178,7 @@ final class Browser: NSObject, ObservableObject {
         tab.onField = { [weak self] tab, spot in
             guard let self else { return }
             guard let spot else {
+                if looked?.tab == tab.id { looked = nil }
                 if pickedInto == tab.id { pickedInto = nil }
                 guard suggesting?.tab == tab.id else { return }
                 lowering?.cancel()
@@ -2179,6 +2199,19 @@ final class Browser: NSObject, ObservableObject {
             // offered only what was kept from plain http too, never an
             // account kept from the https site of the same name.
             let inTheClear = tab.pageAddress?.scheme?.lowercased() == "http"
+            // The same box, moved by a scroll: the list up follows it, keeping
+            // its accounts and the moment it came up (a click is refused for
+            // its first half second, which every frame used to start again);
+            // a box with no accounts stays without, and the keychain isn't
+            // asked again until the caret leaves.
+            if let looked, looked.tab == tab.id, looked.host == host, looked.clear == inTheClear {
+                if var up = suggesting, up.tab == tab.id, up.spot != spot {
+                    up.spot = spot
+                    suggesting = up
+                }
+                return
+            }
+            looked = (tab.id, host, inTheClear)
             let known = Array(Vault.logins(matching: host).filter { !inTheClear || $0.clear }.prefix(5))
             suggesting = known.isEmpty ? nil : Suggesting(tab: tab.id, spot: spot, logins: known, host: host, clear: inTheClear)
         }
@@ -3036,7 +3069,7 @@ extension Browser: WKNavigationDelegate, WKUIDelegate {
         // A page with nothing to lay out never has a first frame. Done is
         // done, and it is shown.
         (webView as? PageView)?.showFirstFrame()
-        guard let tab = tab(for: webView), let url = tab.address else { return }
+        guard let tab = anyTab(for: webView), let url = tab.address else { return }
         tab.uncover()
         tellStore(tab)
         // A page that arrived after a password went out: did the sign-in take?
@@ -3103,6 +3136,13 @@ extension Browser: WKNavigationDelegate, WKUIDelegate {
 
     func tab(for webView: WKWebView) -> Tab? {
         tabs.first { $0.built === webView }
+    }
+
+    /// The tab a page belongs to, in the space on screen or another: a page
+    /// still loading when you went to another space finishes there, and
+    /// still goes into History with its icon.
+    func anyTab(for webView: WKWebView) -> Tab? {
+        tab(for: webView) ?? parkedTabs.first { $0.built === webView }
     }
 }
 

@@ -150,6 +150,30 @@ enum Muter {
     }
 }
 
+/// How far down its page a tab is. Its own object, watched by the fill in
+/// the tab's pill alone: as part of the tab, every percent scrolled re-ran
+/// everything that watches the tab — the page's stage, the buttons, the
+/// row — two to four milliseconds of the window's time each, while WebKit
+/// needed that thread to put the scrolled page on screen.
+@MainActor
+final class Reading: ObservableObject {
+    @Published var value: Double = 0
+}
+
+/// The fill itself: the grey that grows from the left of the tab you are on
+/// as you read down its page, in a width it is given.
+struct ReadingFill: View {
+    @ObservedObject var meter: Reading
+    let width: CGFloat
+
+    var body: some View {
+        Rectangle()
+            .fill(Palette.ink.opacity(0.055))
+            .frame(width: width * meter.value)
+            .animation(.easeOut(duration: 0.15), value: meter.value)
+    }
+}
+
 @MainActor
 final class Tab: ObservableObject, Identifiable {
     let id = UUID()
@@ -229,8 +253,13 @@ final class Tab: ObservableObject, Identifiable {
     /// connection. Shown in place of the page rather than in a dialog.
     @Published var failure: String?
     /// How far down the page you are, nought to one. The tab's own pill fills
-    /// with it.
-    @Published var reading: Double = 0
+    /// with it. Kept apart from the rest of the tab (see Reading): it changes
+    /// all the way down a page, and only the fill has any use for it.
+    let meter = Reading()
+    var reading: Double {
+        get { meter.value }
+        set { if meter.value != newValue { meter.value = newValue } }
+    }
 
     /// True while the page has been stripped back to its article.
     @Published private(set) var reader = false
@@ -279,7 +308,10 @@ final class Tab: ObservableObject, Identifiable {
     }
 
     private func adoptIcon() {
-        guard let host = address?.host()?.lowercased() else { return }
+        guard let host = address?.host()?.lowercased() else {
+            icon = nil
+            return
+        }
         icon = Favicons.shared.cached(host)
     }
 
@@ -542,7 +574,9 @@ final class Tab: ObservableObject, Identifiable {
                         if fresh == self.heldOver { return }
                         self.held = nil
                     }
-                    let moved = fresh.host() != self.address?.host()
+                    let freshHost = fresh.host()?.lowercased()
+                    let currentHost = self.address?.host()?.lowercased()
+                    let moved = freshHost != currentHost
                     self.address = fresh
                     // Within the same origin — history.pushState, a fragment —
                     // the page on screen is the one at the new address.
@@ -1233,8 +1267,21 @@ final class MiddleRelay: NSObject, WKScriptMessageHandler {
     (function () {
       if (window.__officeMiddle) return;
       window.__officeMiddle = true;
-      document.addEventListener('auxclick', function (e) {
-        if (e.button !== 1 || !e.isTrusted || e.defaultPrevented) return;
+      // Heard on the way down, before the page's own handlers, since some
+      // stop the event there — YouTube's links did, and a middle-click on
+      // them opened nothing, only some of the time. Whether the page wanted
+      // the click for itself is asked once they have all run: a page that
+      // prevented it keeps it, as in Chrome.
+      // The link is found now: once the event is over its path is empty.
+      window.addEventListener('auxclick', function (e) {
+        if (e.button !== 1 || !e.isTrusted) return;
+        var href = link(e);
+        if (!href) return;
+        setTimeout(function () {
+          if (!e.defaultPrevented) window.webkit.messageHandlers.officeMiddle.postMessage({ href: href });
+        }, 0);
+      }, true);
+      function link(e) {
         // The path, not the parents: a link inside an open shadow root is
         // on it too. An <area> of an image map is a link, and so is an SVG
         // <a>, whose href is an object that holds the address as written.
@@ -1248,10 +1295,10 @@ final class MiddleRelay: NSObject, WKScriptMessageHandler {
             try { href = href.baseVal ? new URL(href.baseVal, el.baseURI).href : ''; } catch (_) { href = ''; }
           }
           if (!href) continue;
-          window.webkit.messageHandlers.officeMiddle.postMessage({ href: href });
-          return;
+          return href;
         }
-      });
+        return '';
+      }
     })();
     """
 

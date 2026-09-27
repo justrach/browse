@@ -489,6 +489,35 @@ final class Bench {
                 }
             }
 
+        case "middle":
+            // The middle button pressed and let go at X Y of a tab's page (its
+            // own points from the top left), handed to its view as AppKit
+            // would: the page sees trusted mousedown, mouseup and auxclick.
+            // Only on a SEARCH_PROBE run.
+            guard Store.testing else { answer(["error": "middle only works on a --test run"]); return }
+            guard let tab = find(request, in: browser), let x = request["x"] as? Double, let y = request["y"] as? Double
+            else { answer(missing(request)); return }
+            house(tab)
+            let web = tab.web
+            let before = browser.tabs.count
+            let inView = NSPoint(x: x, y: web.isFlipped ? y : web.bounds.height - y)
+            let point = web.convert(inView, to: nil)
+            for type in [NSEvent.EventType.otherMouseDown, .otherMouseUp] {
+                guard let event = NSEvent.mouseEvent(
+                    with: type, location: point, modifierFlags: [], timestamp: ProcessInfo.processInfo.systemUptime,
+                    windowNumber: web.window?.windowNumber ?? 0, context: nil, eventNumber: 0, clickCount: 1,
+                    pressure: type == .otherMouseDown ? 1 : 0
+                ) else { continue }
+                // A made event is button 0; the middle is 2, set on its CG form.
+                guard let cg = event.cgEvent else { continue }
+                cg.setIntegerValueField(.mouseEventButtonNumber, value: 2)
+                let middle = NSEvent(cgEvent: cg) ?? event
+                if type == .otherMouseDown { web.otherMouseDown(with: middle) } else { web.otherMouseUp(with: middle) }
+            }
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.8) {
+                answer(["tabsBefore": before, "tabsAfter": browser.tabs.count])
+            }
+
         case "shot":
             guard let tab = find(request, in: browser) else { answer(missing(request)); return }
             house(tab)
@@ -1083,6 +1112,33 @@ final class Bench {
                 }
             }
 
+        case "fill":
+            // What the window spends on the page scrolling: the page's report
+            // of where it is, STEPS times, 8 ms apart, each timed until the
+            // run loop rests again — SwiftUI's update and Core Animation's
+            // commit included. For the reading fill and what watches the tab.
+            guard Store.testing else { answer(["error": "fill only works on a --test run"]); return }
+            guard let tab = browser.active else { answer(["error": "no tab"]); return }
+            let steps = request["steps"] as? Int ?? 200
+            var times: [Double] = []
+            @MainActor func step(_ n: Int) {
+                guard n < steps else {
+                    let sorted = times.sorted()
+                    answer(["steps": steps, "median": sorted[sorted.count / 2], "p90": sorted[sorted.count * 9 / 10],
+                            "total": times.reduce(0, +), "reading": tab.reading])
+                    return
+                }
+                let start = CACurrentMediaTime()
+                // Down and back, half a percent at a time.
+                let at = Double(n % 200 < 100 ? n % 100 : 100 - n % 100) / 100
+                tab.scrolled(to: at * 4000, of: 4000)
+                Bench.whenResting(since: start) { ms in
+                    times.append(ms)
+                    DispatchQueue.main.asyncAfter(deadline: .now() + 0.008) { step(n + 1) }
+                }
+            }
+            step(0)
+
         case "peek":
             // A link's page in the peek panel over the tab in front, as a
             // shift-click on it would open it (see Peek.swift); "close" puts
@@ -1629,7 +1685,7 @@ final class Bench {
 
         default:
             answer(["error": "unknown command “\(verb)”", "commands": [
-                "tabs", "open", "go", "close", "wait", "sleep", "tidy", "shield", "sources", "acp", "select", "text", "eval", "click", "type", "submit", "shot", "probe", "key", "resize", "hit", "film", "window", "pages", "picture", "place", "field", "bookmark", "import", "menu", "keyeq", "pull", "space", "strip", "column", "fold", "consent", "site", "little", "ui",
+                "tabs", "open", "go", "close", "wait", "sleep", "tidy", "shield", "sources", "acp", "select", "text", "eval", "click", "type", "submit", "shot", "probe", "key", "resize", "hit", "film", "window", "pages", "picture", "place", "field", "bookmark", "import", "menu", "keyeq", "fill", "middle", "pull", "space", "strip", "column", "fold", "consent", "site", "little", "ui",
             ]])
         }
     }
@@ -1772,6 +1828,8 @@ final class Bench {
             "noisy": tab.noisy,
             "muted": tab.muted,
             "extensions": { if #available(macOS 15.4, *) { return tab.carriesExtensions } else { return false } }(),
+            // The page's WebKit process, for measuring what it holds.
+            "process": tab.built.flatMap { $0.value(forKey: "_webProcessIdentifier") as? Int } ?? 0,
         ]
     }
 
