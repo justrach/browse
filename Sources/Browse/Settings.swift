@@ -246,7 +246,7 @@ struct SettingsPanel: View {
             Rule()
             Line("Page zoom", "Where every site starts. ⌘+ and ⌘− are still remembered for each site.") {
                 // The number itself takes it back to 100%.
-                Steps(stops: Preferences.zooms, value: $prefs.pageZoom, home: 1) { "\(Int(($0 * 100).rounded()))%" }
+                StepPill(stops: Preferences.zooms, value: $prefs.pageZoom, home: 1) { "\(Int(($0 * 100).rounded()))%" }
             }
             Rule()
             Line("Correct spelling as you type", "macOS's autocorrect inside pages — the one that capitalises for you") {
@@ -660,7 +660,7 @@ struct Switch: View {
 
 /// A value moved one stop at a time: − and + either side of it, in the same
 /// outlined capsule as a pill. Pressing the value itself takes it home.
-struct Steps: View {
+struct StepPill: View {
     let stops: [Double]
     @Binding var value: Double
     let home: Double
