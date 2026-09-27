@@ -60,15 +60,16 @@ struct PasswordsPanel: View {
                     // since macOS may keep what's inside shut until asked.
                     ForEach(Chromium.present()) { source in
                         Pill(source.name) {
-                            guard browser.unlock(source) else { return }
-                            importing = source.name
-                            // Off the main thread: four hundred passwords is a
-                            // moment of arithmetic, and the panel stays alive.
-                            DispatchQueue.global(qos: .userInitiated).async {
-                                let outcome = Result { try Chromium.read(source) }
-                                DispatchQueue.main.async {
-                                    importing = nil
-                                    browser.took(outcome, from: source)
+                            browser.unlock(source) {
+                                importing = source.name
+                                // Off the main thread: four hundred passwords is a
+                                // moment of arithmetic, and the panel stays alive.
+                                DispatchQueue.global(qos: .userInitiated).async {
+                                    let outcome = Result { try Chromium.read(source) }
+                                    DispatchQueue.main.async {
+                                        importing = nil
+                                        browser.took(outcome, from: source)
+                                    }
                                 }
                             }
                         }

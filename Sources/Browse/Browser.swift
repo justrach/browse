@@ -260,9 +260,13 @@ final class Browser: NSObject, ObservableObject {
     @discardableResult
     func takeBookmarks(from source: Chromium.Source) -> Int {
         let found = Chromium.bookmarks(in: source)
-        bookmarks.take(found, from: source.name)
-        let count = Bookmarks.count(found)
-        announce(count == 0 ? "No bookmarks in \(source.name)" : "\(count) bookmarks from \(source.name)")
+        let (count, already) = bookmarks.take(found, from: source.name)
+        announce(
+            Bookmarks.count(found) == 0 ? "No bookmarks in \(source.name)"
+                : count == 0 ? "The bookmarks from \(source.name) were all here already"
+                : already == 0 ? "\(count) bookmarks from \(source.name)"
+                : "\(count) new bookmarks from \(source.name), \(already) already here"
+        )
         let urls = Bookmarks.urls(found)
         DispatchQueue.global(qos: .utility).async {
             let icons = Chromium.icons(in: source, for: urls)
@@ -677,27 +681,49 @@ final class Browser: NSObject, ObservableObject {
     /// built into the system — Chrome, Brave, Edge and Firefox among it —
     /// keeps each one's folder to that browser's own developer: the prompt
     /// about other apps' data doesn't open it, nor does choosing it in an
-    /// Open panel. Full Disk Access does. True when it can be read now.
-    func unlock(_ source: Chromium.Source) -> Bool {
-        guard Chromium.locked(source) else { return true }
+    /// Open panel. Full Disk Access does — the way Brave and Edge ask for it
+    /// too — and it counts from the moment it's switched on, so the import
+    /// waits for it: `go` runs now if the folder can be read, or else by
+    /// itself once it can, while they're in System Settings. True when it
+    /// ran now.
+    @discardableResult
+    func unlock(_ source: Chromium.Source, then go: @escaping () -> Void) -> Bool {
+        guard Chromium.locked(source) else { go(); return true }
         let alert = NSAlert()
         alert.messageText = "macOS keeps \(source.name)'s folder for \(source.name) alone"
         alert.informativeText = """
         Since macOS 27, only \(source.name) itself, and apps you give Full Disk Access, can read it. \
-        To bring \(source.name)'s things over, turn on browse under Full Disk Access in System Settings, \
-        quit and reopen browse, then try again.
+        Turn on browse under Full Disk Access in System Settings and the import carries on by itself. \
+        If it doesn't, quit and reopen browse and try again.
 
         Without it: \(source.name)'s own exports come in too. Its bookmarks file under Bookmarks › Safari \
         or a file…, and its passwords CSV under Passwords.
         """
         alert.addButton(withTitle: "Open System Settings")
         alert.addButton(withTitle: "Not Now")
-        if alert.runModal() == .alertFirstButtonReturn,
-           let settings = URL(string: "x-apple.systempreferences:com.apple.preference.security?Privacy_AllFiles") {
-            NSWorkspace.shared.open(settings)
+        guard alert.runModal() == .alertFirstButtonReturn,
+              let settings = URL(string: "x-apple.systempreferences:com.apple.preference.security?Privacy_AllFiles")
+        else { return false }
+        NSWorkspace.shared.open(settings)
+        // Looked at once a second for five minutes: long enough to find the
+        // switch, and one waiting import at a time.
+        unlockWatch?.cancel()
+        unlockWatch = Task { [weak self] in
+            for _ in 0..<300 {
+                try? await Task.sleep(for: .seconds(1))
+                guard !Task.isCancelled, let self else { return }
+                if !Chromium.locked(source) {
+                    self.unlockWatch = nil
+                    self.announce("Full Disk Access is on — bringing \(source.name)'s things over")
+                    go()
+                    return
+                }
+            }
         }
         return false
     }
+
+    private var unlockWatch: Task<Void, Never>?
 
     /// What came back from another browser's store, put in the keychain.
     func took(_ outcome: Result<Chromium.Found, Error>, from source: Chromium.Source) {

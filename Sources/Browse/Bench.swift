@@ -338,10 +338,11 @@ final class Bench {
                     let inside = try FileManager.default.contentsOfDirectory(atPath: root.path)
                     row["entries"] = inside.count
                     row["profiles"] = inside.filter { $0 == "Default" || $0.hasPrefix("Profile ") }.sorted()
-                    row["loginData"] = source.files.count
-                    row["history"] = source.files.filter {
-                        FileManager.default.fileExists(atPath: $0.deletingLastPathComponent().appendingPathComponent("History").path)
-                    }.count
+                    // Per file Chromium keeps, how many profiles have it.
+                    let folders = source.folders
+                    row["files"] = Dictionary(uniqueKeysWithValues: Chromium.marks.map { mark in
+                        (mark, folders.filter { FileManager.default.fileExists(atPath: $0.appendingPathComponent(mark).path) }.count)
+                    })
                 } catch {
                     row["error"] = (error as NSError).localizedDescription + " (" + String((error as NSError).code) + ")"
                 }
@@ -990,6 +991,38 @@ final class Bench {
                 next(0)
             }
 
+        case "import":
+            // Another browser's passwords, bookmarks and history, brought in
+            // through the same calls the Welcome and the panels make. Only on
+            // a test run, which reads made-up profiles from its own folder's
+            // Import/ (see Chromium.base), never a real browser.
+            guard Store.testing else { answer(["error": "import only works on a --test run"]); return }
+            let found = Chromium.installed()
+            guard let source = found.first(where: { $0.name == request["from"] as? String }) else {
+                answer(["found": found.map(\.name)])
+                return
+            }
+            let what = request["what"] as? [String] ?? []
+            var out: [String: Any] = ["found": found.map(\.name), "profiles": source.folders.map(\.lastPathComponent)]
+            if what.contains("bookmarks") {
+                let (added, already) = browser.bookmarks.take(Chromium.bookmarks(in: source), from: source.name)
+                out["bookmarks"] = ["added": added, "already": already, "total": browser.bookmarks.count,
+                                    "top": browser.bookmarks.roots.map(\.title)]
+            }
+            if what.contains("history") {
+                let places = Chromium.places(in: source)
+                for place in places { browser.history.take(place.url, title: place.title, count: place.count, last: place.last) }
+                browser.history.settle()
+                out["places"] = places.count
+            }
+            if what.contains("passwords") {
+                let outcome = Result { try Chromium.read(source) }
+                if case .success(let read) = outcome { out["read"] = read.logins.count }
+                browser.took(outcome, from: source)
+                out["saved"] = browser.saved.count
+            }
+            answer(out)
+
         case "menu":
             // The Bookmarks menu as it is about to open: the menu bar
             // told it is being tracked, SwiftUI's own update run on it, its
@@ -1596,7 +1629,7 @@ final class Bench {
 
         default:
             answer(["error": "unknown command “\(verb)”", "commands": [
-                "tabs", "open", "go", "close", "wait", "sleep", "tidy", "shield", "sources", "acp", "select", "text", "eval", "click", "type", "submit", "shot", "probe", "key", "resize", "hit", "film", "window", "pages", "picture", "place", "field", "bookmark", "menu", "keyeq", "pull", "space", "strip", "column", "fold", "consent", "site", "little", "ui",
+                "tabs", "open", "go", "close", "wait", "sleep", "tidy", "shield", "sources", "acp", "select", "text", "eval", "click", "type", "submit", "shot", "probe", "key", "resize", "hit", "film", "window", "pages", "picture", "place", "field", "bookmark", "import", "menu", "keyeq", "pull", "space", "strip", "column", "fold", "consent", "site", "little", "ui",
             ]])
         }
     }

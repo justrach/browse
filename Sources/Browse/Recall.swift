@@ -52,16 +52,17 @@ struct HistoryPanel: View {
 
     /// Another browser's history into this one, then the list again.
     private func bring(from source: Chromium.Source) {
-        guard browser.unlock(source) else { return }
-        bringing = true
-        browser.takePlaces(from: source) { count in
-            bringing = false
-            // Nothing at all is most often macOS keeping the other browser's
-            // folder shut, not an empty history.
-            browser.announce(count == 0
-                ? "Nothing came from \(source.name) — if macOS asked about other apps' data, allow it and try again"
-                : "\(count) places from \(source.name)")
-            refresh()
+        browser.unlock(source) {
+            bringing = true
+            browser.takePlaces(from: source) { count in
+                bringing = false
+                // Nothing at all is most often macOS keeping the other browser's
+                // folder shut, not an empty history.
+                browser.announce(count == 0
+                    ? "Nothing came from \(source.name) — if macOS asked about other apps' data, allow it and try again"
+                    : "\(count) places from \(source.name)")
+                refresh()
+            }
         }
     }
 

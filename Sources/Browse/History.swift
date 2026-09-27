@@ -60,6 +60,15 @@ private struct Visit: Codable {
         counts = mine
         count = mine.values.reduce(0, +)
     }
+
+    /// Brought in from another browser: at least `by` visits here, never
+    /// added to what an earlier import already counted.
+    mutating func atLeast(_ by: Int) {
+        var mine = counts ?? [Sync.device: count]
+        mine[Sync.device] = max(mine[Sync.device] ?? 0, by)
+        counts = mine
+        count = mine.values.reduce(0, +)
+    }
 }
 
 @MainActor
@@ -141,7 +150,9 @@ final class History: ObservableObject {
         let key = History.key(for: url)
         guard !key.isEmpty else { return }
         if var seen = visits[key] {
-            seen.bump(count)
+            // The larger of the two, not their sum: the same browser brought
+            // in again must not count every visit twice.
+            seen.atLeast(count)
             if last > seen.last { seen.last = last }
             if seen.title.isEmpty { seen.title = title }
             visits[key] = seen
