@@ -29,6 +29,10 @@ final class Browser: NSObject, ObservableObject {
     /// The colour of the page in front (Tab.hue), which the sidebar takes on.
     @Published private(set) var activeHue: NSColor?
 
+    /// Two tabs kept side by side (Split.swift). Shown whenever either is
+    /// the tab in front.
+    @Published var split: Split?
+
     /// The tab whose page is currently out in the little window. Nothing
     /// floating means no window: the two are checked against each other rather
     /// than trusted to stay in step.
@@ -1500,7 +1504,9 @@ final class Browser: NSObject, ObservableObject {
         // Coming back to the tab whose video is out brings it home first, so
         // it is never lifted and landed in the same breath.
         if floating == tab.id { land() }
-        leaving()
+        // From one half of a pair to the other, the page left is still on
+        // screen: nothing of it floats off.
+        if !showing(inSplit: tab) { leaving() }
         activeID = tab.id
         tab.touch()
         // A tab brought back from last time, or waking from ⌘W while pinned,
@@ -1508,6 +1514,8 @@ final class Browser: NSObject, ObservableObject {
         // wake is this the other case, one whose page quietly died while you
         // were elsewhere, which revive() checks for on its own.
         if !tab.wake() { tab.revive() }
+        // Its other half, when it has one, is on screen too.
+        wakePair()
         rememberSession()
         editing = false
         typed = ""
@@ -1517,6 +1525,9 @@ final class Browser: NSObject, ObservableObject {
     /// behind; closing that blank tab closes the window.
     func close(_ tab: Tab) {
         guard let index = tabs.firstIndex(where: { $0.id == tab.id }) else { return }
+
+        // Half a pair gone is no pair: the other half is a tab of its own.
+        if split?.has(tab.id) == true { split = nil }
 
         // A tab whose page is out in the little window takes the window with
         // it. Left alone, the window would go on holding a page belonging to a

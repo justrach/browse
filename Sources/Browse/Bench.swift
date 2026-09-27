@@ -382,6 +382,22 @@ final class Bench {
             browser.select(tab)
             answer(describe(tab))
 
+        case "split":
+            // The tab in front and this one side by side (Split.swift); `split
+            // off` goes back to one page. Takes the window over, as select does.
+            guard Store.testing else {
+                answer(["error": "split only works on a --test run — it would take your window over"])
+                return
+            }
+            if request["id"] as? String == "off" {
+                browser.unsplit()
+                answer(["ok": true])
+                return
+            }
+            guard let tab = find(request, in: browser) else { answer(missing(request)); return }
+            browser.split(with: tab)
+            answer(["ok": browser.shownSplit != nil, "fraction": browser.split?.fraction ?? 0])
+
         case "text":
             guard let tab = find(request, in: browser) else { answer(missing(request)); return }
             house(tab)
@@ -682,6 +698,24 @@ final class Bench {
                 }
                 DispatchQueue.main.asyncAfter(deadline: .now() + 0.4) {
                     answer(["tabsBefore": before, "tabsAfter": browser.tabs.count])
+                }
+                return
+            }
+            if request["post"] as? Bool == true {
+                // A press and release put in the app's own queue, so they go
+                // the way a real click does — past the app's event monitors
+                // (a split's PaneClick), through the window, to the view.
+                guard Store.testing else { answer(["error": "hit … post only works on a --test run"]); return }
+                for type in [NSEvent.EventType.leftMouseDown, .leftMouseUp] {
+                    guard let event = NSEvent.mouseEvent(
+                        with: type, location: point, modifierFlags: [], timestamp: ProcessInfo.processInfo.systemUptime,
+                        windowNumber: window.windowNumber, context: nil, eventNumber: 0, clickCount: 1,
+                        pressure: type == .leftMouseUp ? 0 : 1
+                    ) else { continue }
+                    NSApp.postEvent(event, atStart: false)
+                }
+                DispatchQueue.main.asyncAfter(deadline: .now() + 0.6) {
+                    answer(["view": hit.map { String("\(type(of: $0))".prefix(60)) } ?? "", "active": browser.active?.title ?? ""])
                 }
                 return
             }

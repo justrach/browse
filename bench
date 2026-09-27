@@ -11,6 +11,7 @@
     ./bench sources                    what an import can see of each other browser: folder, access, profiles
     ./bench shield [on|off]            the ad blocker, for pages loaded from now on — --test runs only
     ./bench select ID                  bring a tab to the front — --test runs only
+    ./bench split ID|off               the tab in front and ID side by side, or one page again — --test runs only
     ./bench resize W H [STEPS]         take the window to W×H in steps, like a drag — --test runs only
     ./bench key ID TEXT                press keys on a tab as real key events — --test runs only
     ./bench press CODE CHARS [MODS…]   press a key on the whole app (cmd shift ctrl opt, repeat) — --test runs only
@@ -49,7 +50,7 @@
                                        switch to the Nth, delete this one,
                                        two fingers DX points sideways over the column (hold: not let go yet),
                                        move this one to Nth
-    ./bench hit X Y [double|middle]    what a press at X Y (points from the window's top left) lands on,
+    ./bench hit X Y [click|post|double|middle]  what a press at X Y (points from the window's top left) lands on,
                                        and whether a drag from there would move the window;
                                        double: test run, a double-click there (start the probe hidden)
     ./bench place ID INDEX             put a tab at another place in the row
@@ -134,7 +135,7 @@ def main(argv):
         if not args: sys.exit("usage: bench wait ID [SECONDS]")
         request["id"] = args[0]
         if len(args) > 1: request["seconds"] = float(args[1])
-    elif verb in ("text", "close", "sleep", "tidy", "select"):
+    elif verb in ("text", "close", "sleep", "tidy", "select", "split"):
         if len(args) != 1: sys.exit(f"usage: bench {verb} ID")
         request["id"] = args[0]
     elif verb == "eval":
@@ -245,7 +246,7 @@ def main(argv):
         elif args and args[0] == "move" and len(args) == 2: request["action"], request["index"] = "move", int(args[1])
         elif args: sys.exit("usage: bench space [new NAME | go N | delete | swipe DX | hold DX | release | move N]")
     elif verb == "hit":
-        if len(args) not in (2, 3) or (len(args) == 3 and args[2] not in ("click", "double", "middle")): sys.exit("usage: bench hit X Y [click|double|middle]")
+        if len(args) not in (2, 3) or (len(args) == 3 and args[2] not in ("click", "post", "double", "middle")): sys.exit("usage: bench hit X Y [click|post|double|middle]")
         request["x"], request["y"] = float(args[0]), float(args[1])
         if len(args) == 3: request[args[2]] = True
     elif verb == "place":

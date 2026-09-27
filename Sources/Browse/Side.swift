@@ -647,6 +647,12 @@ private struct SideRow: View {
                         .font(.system(size: 9))
                         .foregroundStyle(colour.opacity(0.7))
                 }
+                if browser.split?.has(tab.id) == true {
+                    // One of a pair side by side (Split.swift).
+                    Image(systemName: "rectangle.split.2x1")
+                        .font(.system(size: 9.5))
+                        .foregroundStyle(colour.opacity(0.7))
+                }
                 if tab.shy {
                     Image(systemName: "eye.slash")
                         .font(.system(size: 9))
@@ -753,16 +759,27 @@ private struct SideRow: View {
                 }
             }
             .matchedGeometryEffect(id: "live", in: pill)
+        } else if paired {
+            // On screen beside the tab in front: raised less, but raised.
+            RoundedRectangle(cornerRadius: 9, style: .continuous)
+                .fill(Palette.ink.opacity(hovering ? 0.09 : 0.065))
+                .overlay(
+                    RoundedRectangle(cornerRadius: 9, style: .continuous)
+                        .strokeBorder(Palette.ink.opacity(0.06), lineWidth: 0.75)
+                )
         } else if hovering {
             RoundedRectangle(cornerRadius: 9, style: .continuous)
                 .fill(Palette.ink.opacity(0.05))
         }
     }
 
+    /// The other half of the pair on screen.
+    private var paired: Bool { !live && browser.showing(inSplit: tab) }
+
     /// Every title in ink, as a list you read rather than a list of
     /// what's switched off; the one you're on is only a shade stronger.
     private var colour: Color {
-        if live || hovering { return Palette.ink }
+        if live || hovering || paired { return Palette.ink }
         return Palette.ink.opacity(0.78)
     }
 }

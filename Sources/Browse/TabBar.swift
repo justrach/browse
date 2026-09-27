@@ -845,6 +845,18 @@ struct TabMenu: View {
         .disabled(tab.isBlank)
         Button(tab.muted ? "Unmute Tab" : "Mute Tab") { tab.toggleMute() }
         Divider()
+        // Side by side with the tab in front (Split.swift).
+        if browser.split?.has(tab.id) == true {
+            Button("Swap Sides") { browser.swapSplit() }
+            Button("Leave Split View") { browser.unsplit() }
+        } else if tab.id != browser.activeID {
+            Button("Open in Split View") { browser.split(with: tab) }
+                .disabled(tab.isBlank && browser.active?.isBlank != false)
+        } else {
+            Button("Split View") { browser.toggleSplit() }
+                .disabled(browser.tabs.filter { !$0.isBlank }.count < 2)
+        }
+        Divider()
         // Codegraff on this tab alone (Browser.talk).
         Button("Ask Codegraff About This Tab") { browser.talk(about: tab) }
             .disabled(tab.isBlank)

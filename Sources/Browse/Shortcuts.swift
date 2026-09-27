@@ -34,6 +34,7 @@ enum Shortcuts {
         Shortcut(keys: "⇧⌘]", what: "Next tab"),
         Shortcut(keys: "⌘S", what: "Hide or show tabs, if the page lets it"),
         Shortcut(keys: "⇧⌘S", what: "Move tabs to side or top"),
+        Shortcut(keys: "⌃⌘S", what: "Split view with the last tab, or back to one"),
         Shortcut(keys: "⇧⌘B", what: "Bookmark this page"),
     ]
 }
