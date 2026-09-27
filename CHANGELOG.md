@@ -11,6 +11,8 @@ in [ROADMAP.md](ROADMAP.md).
 
 ## Unreleased
 
+## 1.1.0 — 27 September 2026
+
 ### Added
 
 - Split View: two tabs side by side, each page on a card of its own under a strip that names it, in a frame of the same glass and colour as the sidebar. ⌘D pairs the tab in front with the one before it, and goes back to one page; or pull a tab out of the sidebar or the tab bar onto the page — the half it's over lights up — and it opens on that side, or in place of what was there. Click a page to put it in front: the address field, Codegraff and the sidebar's colour follow it. Pull the gap between them to share the room, settling on a third, a half or two thirds; double-click it to even it out. Each page's strip has Swap Sides, Just This One and Close This Side, and pulled across, swaps them. The pair stays a pair, held in one frame in the sidebar — pick either tab and both come back — and is still there the next time browse opens. Closing one half lands you on the other. Duplicate Tab moves to ⇧⌘D.
