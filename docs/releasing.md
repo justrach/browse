@@ -1,9 +1,10 @@
 # Releasing browse
 
-A release is a tag. `./release.sh 1.0.2 "What's new, in a paragraph."` raises
-`VERSION`, puts the paragraph at the top of `NOTES.md`, turns CHANGELOG's
-Unreleased into the version's section, commits, tags `v1.0.2`, and pushes.
-The tag starts `.github/workflows/release.yml`, which:
+A release is a tag, made on a release branch. `./release.sh 1.1.0 "What's new,
+in a paragraph."` raises `VERSION`, puts the paragraph at the top of
+`NOTES.md`, turns CHANGELOG's Unreleased into the version's section, commits,
+tags `v1.1.0`, and pushes. The tag starts `.github/workflows/release.yml`,
+which:
 
 1. builds the app on a macOS runner,
 2. when all signing secrets are present, signs it with the Developer ID and
@@ -18,8 +19,39 @@ Every installed copy reads `releases/latest/download/appcast.json` once a day
 by the same team, and swaps it in for the next launch. So publishing is also
 the update.
 
-Every push and pull request runs `.github/workflows/build.yml`: the app
-builds, and the stats Worker's tests pass. Nothing there is signed.
+Every push to `main` or a release branch, and every pull request, runs
+`.github/workflows/build.yml`: the app builds, and the stats Worker's tests
+pass. Nothing there is signed.
+
+## Branches
+
+| Branch | What goes there |
+|---|---|
+| `main` | Everything, by pull request. What the next X.Y will be. |
+| `release/vX.Y` | One per X.Y, cut from `main` for X.Y.0. Its tags, `vX.Y.0`, `vX.Y.1`…, are made here and nowhere else. |
+
+- **A new X.Y** — on an up-to-date `main`, `./release.sh 1.1.0 "…"`. It cuts
+  `release/v1.1` from `main`, releases from it, and merges the version's
+  commit back into `main`.
+- **A fix to a line that's out** — merge the fix into `main` first, then
+  carry it over and release from the line's branch:
+
+  ```sh
+  git switch release/v1.1 && git pull --ff-only
+  git cherry-pick -x <the fix's commit>
+  git push
+  ./release.sh 1.1.1 "…"
+  ```
+
+  The version's commit is merged back into `main` here too; when `main`'s
+  CHANGELOG has moved on and the merge doesn't go cleanly, the script says so
+  and leaves it to be finished by hand.
+- A fix published for an older line (1.0.5 once 1.1 is out) is not marked
+  the latest release, so installed copies keep reading the newest line's
+  appcast.
+
+`release/v1.0` holds 1.0.0 to 1.0.4, which were tagged on `main` before
+release branches.
 
 ## The secrets, once
 

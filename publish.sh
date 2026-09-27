@@ -62,7 +62,14 @@ if [ "$1" = "github" ]; then
     && { echo "v$VERSION is already released — raise VERSION first" >&2; exit 1; }
   # The first paragraph of NOTES.md is what's new, the same line Settings shows.
   NOTES="$(awk 'NF { printf "%s%s", (n++ ? " " : ""), $0; next } n { exit }' NOTES.md)"
-  gh release create "v$VERSION" -R "$REPO" --target main \
+  # Latest only when it's the newest version out: a fix to an older line
+  # (release/v1.0 once 1.1 is out) mustn't become what every copy reads.
+  NEWEST="$(gh release view -R "$REPO" --json tagName -q .tagName 2>/dev/null || true)"
+  LATEST=true
+  if [ -n "$NEWEST" ] && [ "$(printf '%s\n%s\n' "${NEWEST#v}" "$VERSION" | sort -V | tail -1)" != "$VERSION" ]; then
+    LATEST=false
+  fi
+  gh release create "v$VERSION" -R "$REPO" --verify-tag --latest="$LATEST" \
     --title "browse $VERSION" --notes "$NOTES" \
     "${FILES[@]/#/build/}"
   exit 0
