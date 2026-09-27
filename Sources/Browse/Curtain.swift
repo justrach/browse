@@ -372,6 +372,94 @@ enum Veiling {
         unpeek: function (css) {
           sheet('office-veil').textContent = css;
           sheet('office-peek').textContent = '';
+        },
+        // What might be clutter, for Tidy.swift to ask Jev about: frames,
+        // boxes pinned over the page, boxes the size of an ad, and boxes
+        // named for ads, promos, cookies, newsletters and the like. Each
+        // once — the outermost that can be named for good — and never the
+        // page's own article, its navigation, or anything holding a
+        // password field.
+        survey: function (limit) {
+          var clutter = /^(ad|ads|adv|advert|advertisement|adslot|adunit|adbox|dfp|gpt|sponsor|sponsored|promo|promoted|promotion|banner|cookie|cookies|consent|gdpr|ccpa|newsletter|subscribe|subscription|signup|modal|popup|overlay|paywall|interstitial|outbrain|taboola|teaser)$/i;
+          var sizes = [[728, 90], [970, 90], [970, 250], [300, 250], [336, 280], [300, 600],
+                       [160, 600], [120, 600], [320, 50], [320, 100], [468, 60], [250, 250]];
+          var skip = { SCRIPT: 1, STYLE: 1, LINK: 1, META: 1, NOSCRIPT: 1, TEMPLATE: 1, BR: 1 };
+          var kept = 'main, article, nav, header, [role="main"], [role="navigation"], [role="banner"]';
+          // Names only an ad wears: a rule on one of these may take every
+          // box that wears it, as one ad slot of many on a front page.
+          var adOnly = /^(ad|ads|advert|advertisement|adslot|adunit|dfp|gpt|sponsored|promoted|outbrain|taboola)$/i;
+          // A rule that will still mean this box tomorrow, or none. A path
+          // by position won't: on a front page the third box down is
+          // something else by morning.
+          function lasting(el, kind) {
+            // A tag of the site's own making, like shreddit-ad-post.
+            if (kind.indexOf('-') > 0 && kind.split('-').some(function (w) { return adOnly.test(w); })) return kind;
+            var classes = typeof el.className === 'string' ? el.className.trim().split(/\\s+/) : [];
+            var ad = classes.filter(function (c) {
+              return steady(c) && c.split(/[_-]+/).some(function (w) { return adOnly.test(w); });
+            })[0];
+            if (ad) return kind + '.' + CSS.escape(ad);
+            var sel = selectorFor(el);
+            return / > |:nth-of-type/.test(sel) ? null : sel;
+          }
+          function adSized(w, h) {
+            return sizes.some(function (s) { return Math.abs(w - s[0]) <= 4 && Math.abs(h - s[1]) <= 4; });
+          }
+          function shown(el) {
+            if (el.checkVisibility) return el.checkVisibility({ checkOpacity: true, checkVisibilityCSS: true });
+            var s = getComputedStyle(el);
+            return s.display !== 'none' && s.visibility !== 'hidden' && s.opacity !== '0';
+          }
+          var chosen = [], out = [], rules = {};
+          var all = document.body ? document.body.getElementsByTagName('*') : [];
+          for (var i = 0; i < all.length && i < 8000 && out.length < limit; i++) {
+            var el = all[i];
+            if (skip[el.tagName] || el === frame) continue;
+            if (chosen.some(function (c) { return c.contains(el); })) continue;
+            var r = el.getBoundingClientRect();
+            if (r.width < 40 || r.height < 20 || r.width * r.height < 2000) continue;
+            var kind = el.tagName.toLowerCase();
+            var names = (kind + ' ' + (el.id || '') + ' ' + (typeof el.className === 'string' ? el.className : ''))
+              .split(/[\\s_-]+/).filter(function (w) { return clutter.test(w); });
+            var position = getComputedStyle(el).position;
+            var pinned = position === 'fixed' || position === 'sticky';
+            if (!(kind === 'iframe' || kind === 'aside' || pinned || names.length || adSized(r.width, r.height))) continue;
+            // Off to the side, or pinned outside the window: a drawer or a
+            // menu waiting to slide in, which nobody is looking at.
+            if (r.left >= innerWidth || r.right <= 0) continue;
+            if (pinned && (r.top >= innerHeight || r.bottom <= 0)) continue;
+            if (!shown(el) || el.matches(kept)) continue;
+            if (el.querySelector(kept + ', input[type="password"]')) continue;
+            // One that can't be named for good is passed over, but what's
+            // inside it may still be offered.
+            var rule = lasting(el, kind);
+            if (!rule) continue;
+            chosen.push(el);
+            if (rules[rule]) continue;
+            rules[rule] = true;
+            var about = kind + ', ' + shape(el);
+            var called = el.getAttribute('aria-label') || el.getAttribute('title') || el.getAttribute('role');
+            if (called && called.trim()) about += ', called “' + clip(called.trim(), 60) + '”';
+            if (pinned) about += ', pinned over the page (' + position + ')';
+            var classes = [el.id].concat(typeof el.className === 'string' ? el.className.trim().split(/\\s+/) : [])
+              .filter(function (c) { return c && steady(c); }).slice(0, 4);
+            if (classes.length) about += ', named ' + classes.join(' ');
+            if (kind === 'iframe') {
+              try { about += ', from ' + new URL(el.src).host; } catch (e) {}
+            }
+            // A box with no words may still be a photo or a player.
+            var pictures = el.querySelectorAll('img, picture').length;
+            if (kind === 'video' || el.querySelector('video')) about += ', holds a video';
+            else if (pictures) about += ', holds ' + pictures + (pictures === 1 ? ' image' : ' images');
+            var text = (el.innerText || '').trim().replace(/\\s+/g, ' ');
+            about += text ? ', says “' + clip(text, 160) + '”' : ', no text';
+            // In the list of what's hidden, a bare "div" says nothing; its
+            // name says more.
+            var label = name(el);
+            if (label === kind && classes.length) label = classes[0];
+            out.push({ selector: rule, label: label, note: shape(el), about: about });
+          }
+          return out;
         }
       };
     })();

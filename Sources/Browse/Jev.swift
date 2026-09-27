@@ -167,7 +167,7 @@ enum Jev {
 
     // MARK: - asking Jev
 
-    private struct Refusal: Error {
+    struct Refusal: Error {
         let why: String
         let pause: TimeInterval
     }
@@ -261,7 +261,8 @@ enum Jev {
         return Decision(operation: operation, control: space.others[operation], value: nil)
     }
 
-    private static func post(_ url: URL, _ body: [String: Any], key: String) async throws -> [String: Any] {
+    /// One request to Jev; Tidy.swift asks through here too.
+    static func post(_ url: URL, _ body: [String: Any], key: String) async throws -> [String: Any] {
         var request = URLRequest(url: url, timeoutInterval: 20)
         request.httpMethod = "POST"
         request.setValue("Bearer \(key)", forHTTPHeaderField: "Authorization")
