@@ -286,6 +286,10 @@ struct SettingsPanel: View {
                 Line("Hide the sidebar until the pointer reaches the edge", "The page takes the whole window; push against its left edge for the tabs. ⌘S keeps them out.") {
                     Switch(on: $prefs.sideHides)
                 }
+                Rule()
+                Line("Colour the sidebar like the page", "It takes on the colour of the page beside it, through the glass, and turns light on a dark page") {
+                    Switch(on: $prefs.sideTint)
+                }
             }
             Rule()
             Line("Tabs show", "Beside the title, and on a pinned square") {

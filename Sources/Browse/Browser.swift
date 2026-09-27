@@ -12,6 +12,7 @@ final class Browser: NSObject, ObservableObject {
     @Published var activeID: Tab.ID? {
         didSet {
             guard oldValue != activeID else { return }
+            activeHue = active?.hue
             guess()
             // Another tab picked, opened or come to the front while the talk
             // fills the stage is a page wanted: the stage goes back to it.
@@ -24,6 +25,9 @@ final class Browser: NSObject, ObservableObject {
             tabs.first { $0.id == old }?.touch()
         }
     }
+
+    /// The colour of the page in front (Tab.hue), which the sidebar takes on.
+    @Published private(set) var activeHue: NSColor?
 
     /// The tab whose page is currently out in the little window. Nothing
     /// floating means no window: the two are checked against each other rather
@@ -2077,6 +2081,15 @@ final class Browser: NSObject, ObservableObject {
             .sink { [weak self, weak tab] title in
                 guard let tab, !tab.shy, let url = tab.address else { return }
                 self?.history.retitle(url, title)
+            }
+            .store(in: &bag)
+
+        // The page in front's colour, for the sidebar to take on.
+        tab.$hue
+            .dropFirst()
+            .sink { [weak self, weak tab] hue in
+                guard let self, let tab, tab.id == activeID, activeHue != hue else { return }
+                activeHue = hue
             }
             .store(in: &bag)
     }

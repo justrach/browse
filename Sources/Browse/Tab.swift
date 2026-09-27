@@ -202,6 +202,17 @@ final class Tab: ObservableObject, Identifiable {
     /// True while the page has been stripped back to its article.
     @Published private(set) var reader = false
 
+    /// The page's own colour: what it asks a browser's chrome to be
+    /// (`<meta name="theme-color">`), or else what WebKit sees behind its
+    /// content. The sidebar takes it on (PageTint). Nil on a blank tab; a
+    /// tab put to sleep keeps the last one.
+    @Published private(set) var hue: NSColor?
+
+    private func readHue() {
+        guard let web = built else { return }
+        hue = isBlank ? nil : (web.themeColor ?? web.underPageBackgroundColor)
+    }
+
     /// Leaving reading mode reloads rather than putting the old markup back:
     /// restoring the HTML gives you a page that looks right and does nothing,
     /// because every listener the page had was thrown away with it.
@@ -487,6 +498,7 @@ final class Tab: ObservableObject, Identifiable {
                     let moved = fresh.host() != self.address?.host()
                     self.address = fresh
                     if moved { self.adoptIcon() }
+                    self.readHue()
                 }
             },
             web.observe(\.estimatedProgress, options: [.new]) { [weak self] _, _ in
@@ -500,6 +512,12 @@ final class Tab: ObservableObject, Identifiable {
             },
             web.observe(\.canGoForward, options: [.new]) { [weak self] _, _ in
                 MainActor.assumeIsolated { self?.canGoForward = self?.built?.canGoForward ?? false }
+            },
+            web.observe(\.themeColor, options: [.new]) { [weak self] _, _ in
+                MainActor.assumeIsolated { self?.readHue() }
+            },
+            web.observe(\.underPageBackgroundColor, options: [.new]) { [weak self] _, _ in
+                MainActor.assumeIsolated { self?.readHue() }
             },
         ]
 

@@ -247,17 +247,61 @@ struct Raised: View {
     }
 }
 
+/// The page's colour, made into the sidebar's: laid over the glass, so the
+/// column reads as the page carried on under frosted glass rather than a
+/// panel painted beside it. A quiet colour — a cream, a white, a near-black —
+/// goes on nearly solid; a loud one (a brand's red, a saturated blue) lets
+/// more of the glass through, so it colours the column without shouting.
+/// `dark` is whether what's seen ends up dark enough to want light words.
+struct PageTint: Equatable {
+    let color: NSColor
+    let strength: Double
+    let dark: Bool
+
+    init?(_ hue: NSColor?, over scheme: ColorScheme) {
+        guard let c = hue?.usingColorSpace(.sRGB), c.alphaComponent > 0.5 else { return nil }
+        let (r, g, b) = (Double(c.redComponent), Double(c.greenComponent), Double(c.blueComponent))
+        let top = max(r, g, b), bottom = min(r, g, b)
+        let saturation = top == 0 ? 0 : (top - bottom) / top
+        strength = 0.86 - 0.36 * saturation
+        // What shows through the rest: the glass, about as light as the
+        // window it's in.
+        let glass = scheme == .dark ? 0.12 : 0.94
+        let seen = (0.299 * r + 0.587 * g + 0.114 * b) * strength + glass * (1 - strength)
+        dark = seen < 0.5
+        color = NSColor(srgbRed: r, green: g, blue: b, alpha: 1)
+    }
+
+    /// Laid over the glass: the colour, and a sheen of light down from the
+    /// top, as on the rest of the app's glass (Raised).
+    var wash: some View {
+        ZStack {
+            Color(nsColor: color).opacity(strength)
+            LinearGradient(
+                colors: [.white.opacity(dark ? 0.05 : 0.18), .clear],
+                startPoint: .top, endPoint: .center
+            )
+        }
+    }
+}
+
 /// Behind the sidebar: the desktop, blurred, as a Mac's own sidebars show
 /// it, with the theme's ground laid over so every theme still reads as
-/// itself — only lighter.
+/// itself — only lighter. `dark`, when a page's colour asks for it, is the
+/// blur's own appearance, so a dark page's column isn't frosted white.
 struct SideGlass: NSViewRepresentable {
+    var dark: Bool?
+
     func makeNSView(context: Context) -> NSVisualEffectView {
         let view = NSVisualEffectView()
         view.material = .sidebar
         view.blendingMode = .behindWindow
         view.state = .followsWindowActiveState
+        updateNSView(view, context: context)
         return view
     }
 
-    func updateNSView(_ view: NSVisualEffectView, context: Context) {}
+    func updateNSView(_ view: NSVisualEffectView, context: Context) {
+        view.appearance = dark.map { NSAppearance(named: $0 ? .darkAqua : .aqua) } ?? nil
+    }
 }

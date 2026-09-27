@@ -94,15 +94,22 @@ struct SideBar: View {
         // Rows on their way to or from another space stay in the column.
         .clipped()
         .onAppear { SpaceSwipe.shared.start(for: browser) }
-        // Glass: the desktop behind, blurred, under the theme's own ground.
+        // Glass: the desktop behind, blurred, under the page's colour when it
+        // has one and the theme's own ground when it doesn't.
         .background {
             ZStack {
-                SideGlass()
-                (landing ? Palette.hover : Palette.ground).opacity(0.45)
+                SideGlass(dark: tint?.dark)
+                if let tint {
+                    tint.wash
+                    if landing { Palette.hover.opacity(0.45) }
+                } else {
+                    (landing ? Palette.hover : Palette.ground).opacity(0.45)
+                }
             }
+            .animation(Motion.glide, value: tint)
         }
         .overlay(alignment: .trailing) {
-            Rectangle().fill(Palette.hairline).frame(width: 1)
+            Rectangle().fill(seam).frame(width: 1)
         }
         .overlay(alignment: .trailing) { edge }
         .onDrop(of: [.url, .text], isTargeted: $landing) { providers in
@@ -113,6 +120,24 @@ struct SideBar: View {
         .animation(Motion.glide, value: browser.editingTab)
         .animation(Motion.settle, value: browser.tabs.map(\.id))
         .animation(Motion.settle, value: browser.pinnedCount)
+        // On a dark page the column is dark, whatever the window is: its
+        // words and greys follow what's behind them, not the Mac.
+        .environment(\.colorScheme, tint.map { $0.dark ? .dark : .light } ?? scheme)
+    }
+
+    @Environment(\.colorScheme) private var scheme
+
+    /// The page's colour, for the column to wear — none on a blank tab, or
+    /// with Settings › Tabs › Colour the sidebar like the page off.
+    private var tint: PageTint? {
+        prefs.sideTint ? PageTint(browser.activeHue, over: scheme) : nil
+    }
+
+    /// The column's lines — its edge, the rule over today's tabs. On a
+    /// page's colour the theme's grey reads as a pale seam; a shade of
+    /// whatever's there doesn't.
+    private var seam: Color {
+        tint.map { $0.dark ? Color.white.opacity(0.1) : Color.black.opacity(0.08) } ?? Palette.hairline
     }
 
     /// The column's edge: pull it to make the column wider or narrower,
@@ -461,7 +486,7 @@ struct SideBar: View {
     private func today(loose: Bool) -> some View {
         HStack(spacing: 2) {
             Rectangle()
-                .fill(Palette.hairline)
+                .fill(seam)
                 .frame(height: 1)
                 .padding(.leading, 10)
                 .padding(.trailing, 6)
