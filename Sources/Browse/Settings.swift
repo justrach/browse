@@ -13,6 +13,9 @@ struct SettingsPanel: View {
     @ObservedObject private var shield = Shield.shared
     @State private var isDefault = Links.isDefault
     @State private var page: Page = Page(rawValue: Store.settings.string(forKey: "settings.page") ?? "") ?? .general
+    /// The rail's row under the pointer, if any (see `pages`).
+    @State private var hovered: Page?
+    @Namespace private var glow
 
     enum Page: String, CaseIterable, Identifiable {
         case general, themes, tabs, extensions, agent, passwords, downloads, privacy, sync, about
@@ -79,7 +82,14 @@ struct SettingsPanel: View {
                 .padding(.top, 14)
                 .padding(.bottom, 12)
             ForEach(Page.allCases) { item in
-                PageRow(page: item, on: page == item) { page = item }
+                PageRow(page: item, on: page == item, hovering: hovered == item, glow: glow) { page = item }
+                    // One row under the pointer for the whole rail, not one
+                    // flag per row: a row that missed the pointer leaving —
+                    // a quick sweep does that — stayed lit beside the one
+                    // actually under it.
+                    .onHover { over in
+                        if over { hovered = item } else if hovered == item { hovered = nil }
+                    }
             }
             Spacer(minLength: 0)
         }
@@ -87,13 +97,19 @@ struct SettingsPanel: View {
         .frame(width: SettingsPanel.rail, alignment: .leading)
         .frame(maxHeight: .infinity, alignment: .top)
         .background(Palette.wash.opacity(0.45), in: Rectangle())
+        // Out of the rail altogether: nothing under the pointer.
+        .onHover { if !$0 { hovered = nil } }
+        .animation(Motion.quick, value: hovered)
     }
 
     private struct PageRow: View {
         let page: Page
         let on: Bool
+        let hovering: Bool
+        /// The hover's own wash, one for the rail, gliding from row to row
+        /// after the pointer.
+        let glow: Namespace.ID
         let act: () -> Void
-        @State private var hovering = false
 
         var body: some View {
             Button(action: act) {
@@ -108,16 +124,23 @@ struct SettingsPanel: View {
                 .foregroundStyle(on ? Palette.ink : (hovering ? Palette.ink.opacity(0.75) : Palette.muted))
                 .padding(.horizontal, 10)
                 .frame(height: 30)
-                .background(
-                    RoundedRectangle(cornerRadius: 8, style: .continuous)
-                        .fill(on ? Palette.ground : (hovering ? Palette.hover : .clear))
-                        .shadow(color: .black.opacity(on ? 0.06 : 0), radius: 3, y: 1)
-                )
+                .background {
+                    ZStack {
+                        if hovering && !on {
+                            RoundedRectangle(cornerRadius: 8, style: .continuous)
+                                .fill(Palette.hover)
+                                .matchedGeometryEffect(id: "hover", in: glow)
+                        }
+                        if on {
+                            RoundedRectangle(cornerRadius: 8, style: .continuous)
+                                .fill(Palette.ground)
+                                .shadow(color: .black.opacity(0.06), radius: 3, y: 1)
+                        }
+                    }
+                }
                 .contentShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
             }
             .buttonStyle(.plain)
-            .onHover { hovering = $0 }
-            .animation(Motion.quick, value: hovering)
         }
     }
 
