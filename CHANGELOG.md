@@ -11,6 +11,8 @@ in [ROADMAP.md](ROADMAP.md).
 
 ## Unreleased
 
+## 1.1.1 — 27 September 2026
+
 ### Fixed
 
 - In Split View, the page you're typing in is the page in front. A page that took the keys itself — Google's search box as it loads, or Tab from the other page — left the other one in front, so ⌘L, Find and Codegraff went to the wrong side. And the page put in front gets the keys.
