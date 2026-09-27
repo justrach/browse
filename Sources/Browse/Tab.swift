@@ -559,6 +559,14 @@ final class Tab: ObservableObject, Identifiable {
                 WKUserScript(source: AutoScroll.script, injectionTime: .atDocumentEnd, forMainFrameOnly: true, in: Web.world)
             )
         }
+        // A bench tab keeps every request it made, not WebKit's first 250,
+        // for benchmarks/shield_check.py to count.
+        if bench {
+            controller.addUserScript(WKUserScript(
+                source: "performance.setResourceTimingBufferSize(100000)",
+                injectionTime: .atDocumentStart, forMainFrameOnly: true, in: Web.world
+            ))
+        }
         // Google's sign-in card without a white box round it (Frames.swift).
         controller.addUserScript(Frames.userScript)
         // Every frame: a swipe over an embedded map is the map's, and only the
