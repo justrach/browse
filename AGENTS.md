@@ -65,8 +65,11 @@ line below, even when Search can work around it.
 
 ## Commits
 
-No assistant attribution: no `Co-Authored-By` for an AI, no "Generated with"
-lines, in commits or pull requests. Commits carry the owner's git identity.
+No assistant or model-vendor attribution: no `Co-Authored-By` for Claude or
+any other vendor's model, no "Generated with" lines, no session links, in
+commits or pull requests. Commits carry the owner's git identity. When graff
+makes the commit, `Co-Authored-By: Codegraff <blackfloofie@codegraff.com>` is
+allowed (and is the only allowed trailer). Omit it if the user says not to.
 
 ## Building, testing, releasing
 
