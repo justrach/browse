@@ -422,8 +422,11 @@ final class Sync: ObservableObject {
         }
         var pushed = state.pushedPasswords ?? [:]
         var local: [String: Secret] = [:]
+        // The list holds no secrets (see Vault.all); sync compares each one
+        // with what it last sent, so each is read here.
         for login in Vault.all() {
-            local[id(login.host, login.user)] = Secret(host: login.host, user: login.user, password: login.password, used: login.used, clear: login.clear)
+            guard let password = Vault.secret(of: login) else { continue }
+            local[id(login.host, login.user)] = Secret(host: login.host, user: login.user, password: password, used: login.used, clear: login.clear)
         }
         try await pull("passwords", login: login) { id, body in
             // Changed here since the last round: this Mac's wins.

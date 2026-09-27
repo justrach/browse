@@ -106,9 +106,13 @@ struct WelcomePanel: View {
                 DataFlow(from: (source ?? sources[0]).name)
             }
             if sources.isEmpty {
-                Text("No Chrome, Arc, Brave or other Chromium browser on this Mac.")
+                let unreadable = Chromium.unreadable()
+                Text(unreadable.isEmpty
+                     ? "No Chrome, Arc, Brave or other Chromium browser on this Mac."
+                     : unreadable.map { "\($0.source.name) is on this Mac, but nothing of it was found in \($0.looked)." }.joined(separator: "\n"))
                     .font(.system(size: 13))
                     .foregroundStyle(Palette.faint)
+                    .fixedSize(horizontal: false, vertical: true)
             } else {
                 VStack(alignment: .leading, spacing: 14) {
                     if sources.count > 1 {
@@ -331,10 +335,12 @@ struct WelcomePanel: View {
 
     private func bringAll() {
         guard let source = source ?? Chromium.present().first else { return }
-        guard browser.unlock(source) else {
-            brought = "\(source.name)'s folder needs Full Disk Access for browse. Once it's on, reopen browse and bring them in."
-            return
+        if !browser.unlock(source, then: { bring(from: source) }) {
+            brought = "\(source.name)'s folder needs Full Disk Access for browse. Turned on from here, bringing starts by itself; if not, reopen browse and try again."
         }
+    }
+
+    private func bring(from source: Chromium.Source) {
         bringing = true
         var lines: [String] = []
         let group = DispatchGroup()

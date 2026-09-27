@@ -47,21 +47,22 @@ struct HistoryPanel: View {
     /// The list as drawn: each day's name, then its pages. Worked out when
     /// the history or the search changes, not each time the panel is drawn.
     @State private var lines: [Listed] = []
-    @State private var clearing = false
+    private var clearing: Bool { browser.recallMode == .clearing }
     @State private var bringing = false
 
     /// Another browser's history into this one, then the list again.
     private func bring(from source: Chromium.Source) {
-        guard browser.unlock(source) else { return }
-        bringing = true
-        browser.takePlaces(from: source) { count in
-            bringing = false
-            // Nothing at all is most often macOS keeping the other browser's
-            // folder shut, not an empty history.
-            browser.announce(count == 0
-                ? "Nothing came from \(source.name) — if macOS asked about other apps' data, allow it and try again"
-                : "\(count) places from \(source.name)")
-            refresh()
+        browser.unlock(source) {
+            bringing = true
+            browser.takePlaces(from: source) { count in
+                bringing = false
+                // Nothing at all is most often macOS keeping the other browser's
+                // folder shut, not an empty history.
+                browser.announce(count == 0
+                    ? "Nothing came from \(source.name) — if macOS asked about other apps' data, allow it and try again"
+                    : "\(count) places from \(source.name)")
+                refresh()
+            }
         }
     }
 
@@ -150,7 +151,7 @@ struct HistoryPanel: View {
                         .menuStyle(.borderlessButton)
                         .fixedSize()
                     }
-                    Pill("Clear…") { withAnimation(Motion.settle) { clearing = true } }
+                    Pill("Clear…") { withAnimation(Motion.settle) { browser.recallMode = .clearing } }
                 }
             }
         }
@@ -171,7 +172,7 @@ struct HistoryPanel: View {
                     Pill("Clear") {
                         browser.clearHistory()
                         refresh()
-                        withAnimation(Motion.settle) { clearing = false }
+                        withAnimation(Motion.settle) { browser.recallMode = .history }
                     }
                 }
                 Rule()
@@ -185,7 +186,7 @@ struct HistoryPanel: View {
             }
             HStack {
                 Spacer()
-                Pill("Back") { withAnimation(Motion.settle) { clearing = false } }
+                Pill("Back") { withAnimation(Motion.settle) { browser.recallMode = .history } }
             }
         }
         .transition(.opacity)

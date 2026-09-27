@@ -60,6 +60,15 @@ private struct Visit: Codable {
         counts = mine
         count = mine.values.reduce(0, +)
     }
+
+    /// Brought in from another browser: at least `by` visits here, never
+    /// added to what an earlier import already counted.
+    mutating func atLeast(_ by: Int) {
+        var mine = counts ?? [Sync.device: count]
+        mine[Sync.device] = max(mine[Sync.device] ?? 0, by)
+        counts = mine
+        count = mine.values.reduce(0, +)
+    }
 }
 
 @MainActor
@@ -141,7 +150,9 @@ final class History: ObservableObject {
         let key = History.key(for: url)
         guard !key.isEmpty else { return }
         if var seen = visits[key] {
-            seen.bump(count)
+            // The larger of the two, not their sum: the same browser brought
+            // in again must not count every visit twice.
+            seen.atLeast(count)
             if last > seen.last { seen.last = last }
             if seen.title.isEmpty { seen.title = title }
             visits[key] = seen
@@ -280,36 +291,48 @@ final class History: ObservableObject {
         // the way of the one thing they came here to do.
         guard !needle.isEmpty else { return [] }
 
+        let bytes = Array(needle.utf8)
+        let ascii = bytes.allSatisfy { $0 >= 0x20 && $0 < 0x7F } ? bytes : nil
         let now = Date()
-        var scored: [(Suggestion, Double)] = []
+        // Only the best few are kept while scanning, in order, and only those
+        // become suggestions. Making one for every match in a big history,
+        // only to sort them all and keep five, was work thrown away each key.
+        var best: [(Suggestion, Double)] = []
+        // Higher first, then the shorter key, then whichever came first: the
+        // order a stable sort of every match would have left them in.
+        func ahead(_ score: Double, _ key: String, of other: (Suggestion, Double)) -> Bool {
+            score == other.1 ? key.count < other.0.key.count : score > other.1
+        }
+        func offer(_ key: String, _ score: Double, _ make: () -> Suggestion?) {
+            if best.count == limit, let last = best.last, !ahead(score, key, of: last) { return }
+            guard let made = make() else { return }
+            best.insert((made, score), at: best.firstIndex { ahead(score, key, of: $0) } ?? best.endIndex)
+            if best.count > limit { best.removeLast() }
+        }
 
         for visit in visits.values {
-            guard let rank = rank(visit.key, against: needle) else { continue }
-            guard let url = URL(string: visit.url) else { continue }
-            if let results, results.might(visit.key), results.words(in: url) != nil { continue }
-            scored.append((
-                Suggestion(key: visit.key, title: visit.title, url: url, kind: .visited),
-                // The front door before the room inside it: a bare domain is
-                // what a bare domain typed into a field means.
-                rank + 4 + frecency(visit, now: now) + (visit.key.contains("/") ? 0 : 1.5)
-            ))
+            guard let rank = rank(visit.key, against: needle, ascii: ascii) else { continue }
+            // The front door before the room inside it: a bare domain is
+            // what a bare domain typed into a field means.
+            let score = rank + 4 + frecency(visit, now: now) + (visit.key.contains("/") ? 0 : 1.5)
+            offer(visit.key, score) {
+                guard let url = URL(string: visit.url) else { return nil }
+                // A search's own results page is offered as the search.
+                if let results, results.might(visit.key), results.words(in: url) != nil { return nil }
+                return Suggestion(key: visit.key, title: visit.title, url: url, kind: .visited)
+            }
         }
 
         // Only where memory has nothing to offer. A list of famous websites is
         // a poor substitute for knowing where someone actually goes.
         for known in History.known where visits[known.0] == nil {
-            guard let rank = rank(known.0, against: needle) else { continue }
-            guard let url = URL(string: "https://" + known.0) else { continue }
-            scored.append((
-                Suggestion(key: known.0, title: known.1, url: url, kind: .known),
-                rank
-            ))
+            guard let rank = rank(known.0, against: needle, ascii: ascii) else { continue }
+            offer(known.0, rank) {
+                URL(string: "https://" + known.0).map { Suggestion(key: known.0, title: known.1, url: $0, kind: .known) }
+            }
         }
 
-        return scored
-            .sorted { $0.1 == $1.1 ? $0.0.key.count < $1.0.key.count : $0.1 > $1.1 }
-            .prefix(limit)
-            .map(\.0)
+        return best.map(\.0)
     }
 
     /// Things searched for before that what has been typed could be, best
@@ -358,12 +381,30 @@ final class History: ObservableObject {
 
     /// Where the match falls decides most of the ordering: the start of the
     /// host is what people mean, the middle of a path almost never is.
-    private func rank(_ key: String, against needle: String) -> Double? {
+    private func rank(_ key: String, against needle: String, ascii: [UInt8]?) -> Double? {
+        // Plain addresses can be read as bytes. Check the whole key: even a
+        // mark attached to a slash can change where a Character ends. A nil
+        // score asks the original matcher below; zero means no ASCII match.
+        if let ascii,
+           let score = key.utf8.withContiguousStorageIfAvailable({ bytes -> Double? in
+               guard bytes.allSatisfy({ $0 >= 0x20 && $0 < 0x7F }) else { return nil }
+               if bytes.starts(with: ascii) { return 6 }
+               let host = bytes[..<(bytes.firstIndex(of: 0x2F) ?? bytes.endIndex)]
+               if let dot = host.firstIndex(of: 0x2E), host[(dot + 1)...].starts(with: ascii) { return 3 }
+               if ascii.count >= 2, ascii.count <= host.count {
+                   for start in 0...(host.count - ascii.count) {
+                       if host[start...].starts(with: ascii) { return 2 }
+                   }
+               }
+               return 0
+           }), let score {
+            return score == 0 ? nil : score
+        }
         if key.hasPrefix(needle) { return 6 }
         // Read in place: this runs for every place in the history on every
         // key, and splitting each key into new strings was most of its cost.
         let host = key[..<(key.firstIndex(of: "/") ?? key.endIndex)]
-        // "hub" finding github.com, once the "git" has been skipped.
+        // "google" finding mail.google.com without the subdomain.
         if let dot = host.firstIndex(of: "."), host[host.index(after: dot)...].hasPrefix(needle) { return 3 }
         // Only from two letters up. A single letter matching anywhere inside
         // a name turns "x" into example.com and netflix.com, which is not what

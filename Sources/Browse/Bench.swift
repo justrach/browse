@@ -278,7 +278,9 @@ final class Bench {
 
         switch verb {
         case "tabs":
-            answer(["tabs": browser.tabs.map(describe)])
+            // A private tab is nobody's business but yours: a test run has none
+            // of yours, so there every tab is listed.
+            answer(["tabs": browser.tabs.filter { Store.testing || !$0.shy }.map(describe)])
 
         case "open":
             guard let url = (request["url"] as? String).flatMap(Address.url(from:)) else {
@@ -336,10 +338,11 @@ final class Bench {
                     let inside = try FileManager.default.contentsOfDirectory(atPath: root.path)
                     row["entries"] = inside.count
                     row["profiles"] = inside.filter { $0 == "Default" || $0.hasPrefix("Profile ") }.sorted()
-                    row["loginData"] = source.files.count
-                    row["history"] = source.files.filter {
-                        FileManager.default.fileExists(atPath: $0.deletingLastPathComponent().appendingPathComponent("History").path)
-                    }.count
+                    // Per file Chromium keeps, how many profiles have it.
+                    let folders = source.folders
+                    row["files"] = Dictionary(uniqueKeysWithValues: Chromium.marks.map { mark in
+                        (mark, folders.filter { FileManager.default.fileExists(atPath: $0.appendingPathComponent(mark).path) }.count)
+                    })
                 } catch {
                     row["error"] = (error as NSError).localizedDescription + " (" + String((error as NSError).code) + ")"
                 }
@@ -572,6 +575,7 @@ final class Bench {
             default: out["passkeyAccess"] = "notDetermined"
             }
             out["passkeyAsks"] = Passkeys.asked
+            out["handedOff"] = Browser.handedOff
             out["passkeyLast"] = Passkeys.last
             answer(out)
 
@@ -987,6 +991,38 @@ final class Bench {
                 next(0)
             }
 
+        case "import":
+            // Another browser's passwords, bookmarks and history, brought in
+            // through the same calls the Welcome and the panels make. Only on
+            // a test run, which reads made-up profiles from its own folder's
+            // Import/ (see Chromium.base), never a real browser.
+            guard Store.testing else { answer(["error": "import only works on a --test run"]); return }
+            let found = Chromium.installed()
+            guard let source = found.first(where: { $0.name == request["from"] as? String }) else {
+                answer(["found": found.map(\.name)])
+                return
+            }
+            let what = request["what"] as? [String] ?? []
+            var out: [String: Any] = ["found": found.map(\.name), "profiles": source.folders.map(\.lastPathComponent)]
+            if what.contains("bookmarks") {
+                let (added, already) = browser.bookmarks.take(Chromium.bookmarks(in: source), from: source.name)
+                out["bookmarks"] = ["added": added, "already": already, "total": browser.bookmarks.count,
+                                    "top": browser.bookmarks.roots.map(\.title)]
+            }
+            if what.contains("history") {
+                let places = Chromium.places(in: source)
+                for place in places { browser.history.take(place.url, title: place.title, count: place.count, last: place.last) }
+                browser.history.settle()
+                out["places"] = places.count
+            }
+            if what.contains("passwords") {
+                let outcome = Result { try Chromium.read(source) }
+                if case .success(let read) = outcome { out["read"] = read.logins.count }
+                browser.took(outcome, from: source)
+                out["saved"] = browser.saved.count
+            }
+            answer(out)
+
         case "menu":
             // The Bookmarks menu as it is about to open: the menu bar
             // told it is being tracked, SwiftUI's own update run on it, its
@@ -1094,7 +1130,7 @@ final class Bench {
         case "place":
             // A tab put at another place in the row, as a drag would.
             guard let id = request["id"] as? String, let to = request["to"] as? Int,
-                  let tab = browser.tabs.first(where: { Bench.short($0) == id })
+                  let tab = browser.tabs.first(where: { Bench.short($0) == id && (Store.testing || $0.bench) })
             else { answer(["error": "place needs a tab id and an index"]); return }
             browser.move(tab, to: to)
             answer(["at": browser.tabs.firstIndex { $0.id == tab.id } ?? -1])
@@ -1408,6 +1444,7 @@ final class Bench {
         case "site":
             // The site card for the tab on screen, or one step in on its
             // connection, drawn off screen (see SiteCard.swift).
+            guard Store.testing else { answer(["error": "site only works on a --test run — it would picture your tab"]); return }
             guard let path = request["path"] as? String else { answer(["error": "site needs a path"]); return }
             guard let tab = browser.active, !tab.isBlank else { answer(["error": "no page on screen"]); return }
             let deeper = request["security"] as? Bool == true
@@ -1432,6 +1469,7 @@ final class Bench {
         case "column":
             // The column of tabs, drawn off screen at its width, with what the
             // browser has now — the rows, the card for a new space, the dots.
+            guard Store.testing else { answer(["error": "column only works on a --test run — it would picture your tabs"]); return }
             guard let path = request["path"] as? String else { answer(["error": "column needs a path"]); return }
             let height = request["height"] as? Double ?? 600
             let width = Double(browser.prefs.sideWidth)
@@ -1518,7 +1556,7 @@ final class Bench {
             // Open or close the app's own panels, to reproduce what a person
             // did without a person.
             if let on = request["settings"] as? Bool { browser.tuning = on }
-            if let on = request["passwords"] as? Bool { browser.managing = on }
+            if let on = request["passwords"] as? Bool, Store.testing { browser.managing = on }
             if let on = request["welcome"] as? Bool { browser.welcoming = on }
             if let on = request["history"] as? Bool { browser.recalling = on }
             if let on = request["downloads"] as? Bool { browser.hoarding = on }
@@ -1591,7 +1629,7 @@ final class Bench {
 
         default:
             answer(["error": "unknown command “\(verb)”", "commands": [
-                "tabs", "open", "go", "close", "wait", "sleep", "tidy", "shield", "sources", "acp", "select", "text", "eval", "click", "type", "submit", "shot", "probe", "key", "resize", "hit", "film", "window", "pages", "picture", "place", "field", "bookmark", "menu", "keyeq", "pull", "space", "strip", "column", "fold", "consent", "site", "little", "ui",
+                "tabs", "open", "go", "close", "wait", "sleep", "tidy", "shield", "sources", "acp", "select", "text", "eval", "click", "type", "submit", "shot", "probe", "key", "resize", "hit", "film", "window", "pages", "picture", "place", "field", "bookmark", "import", "menu", "keyeq", "pull", "space", "strip", "column", "fold", "consent", "site", "little", "ui",
             ]])
         }
     }
@@ -1721,6 +1759,7 @@ final class Bench {
         [
             "id": Bench.short(tab),
             "url": tab.address?.absoluteString ?? "",
+            "page": tab.pageAddress?.absoluteString ?? "",
             "title": tab.title,
             "name": tab.name ?? "",
             "loading": tab.loading,

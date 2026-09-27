@@ -6,7 +6,8 @@ import CommonCrypto
 // Reading what another browser on this Mac already holds.
 //
 // Every Chromium browser — Chrome, Dia, Arc, Brave, Edge, the rest — keeps its
-// passwords the same way: a SQLite file called "Login Data", each password
+// passwords the same way: a SQLite file called "Login Data" (and "Login Data
+// For Account" beside it for a signed-in Google account), each password
 // encrypted with a key that the browser itself keeps in the macOS keychain
 // under "<Name> Safe Storage". macOS asks you before handing that key to
 // anyone else, which is the one thing here you have to say yes to. After
@@ -25,36 +26,73 @@ enum Chromium {
         let folder: String
         let service: String
         let account: String
+        /// The app itself, to say so when it is on this Mac but its data
+        /// isn't where it should be.
+        let app: String
 
         var id: String { name }
 
-        var root: URL {
-            FileManager.default
-                .urls(for: .applicationSupportDirectory, in: .userDomainMask)[0]
-                .appendingPathComponent(folder, isDirectory: true)
+        var root: URL { Chromium.base.appendingPathComponent(folder, isDirectory: true) }
+
+        /// Every profile's folder — Default, Profile 1 and on — known by
+        /// having something of a person's in it. Chrome's own Guest and
+        /// System profiles are nobody's. A browser that keeps its only
+        /// profile in its own folder, as Opera does, has that one.
+        var folders: [URL] {
+            let inside = (try? FileManager.default.contentsOfDirectory(at: root, includingPropertiesForKeys: nil, options: .skipsHiddenFiles)) ?? []
+            return ([root] + inside)
+                .filter { !["Guest Profile", "System Profile"].contains($0.lastPathComponent) }
+                .filter { folder in
+                    Chromium.marks.contains { FileManager.default.fileExists(atPath: folder.appendingPathComponent($0).path) }
+                }
         }
 
-        /// every profile's file, each one directly inside its profile folder.
-        var files: [URL] {
-            ((try? FileManager.default.contentsOfDirectory(at: root, includingPropertiesForKeys: nil, options: .skipsHiddenFiles)) ?? [])
-                .map { $0.appendingPathComponent("Login Data") }
-                .filter { FileManager.default.fileExists(atPath: $0.path) }
+        /// Whether the app is in /Applications or ~/Applications.
+        var appInstalled: Bool {
+            let home = FileManager.default.homeDirectoryForCurrentUser.appendingPathComponent("Applications")
+            return [URL(fileURLWithPath: "/Applications"), home].contains {
+                FileManager.default.fileExists(atPath: $0.appendingPathComponent(app).path)
+            }
         }
     }
 
+    /// What makes a folder a profile: its passwords, its bookmarks or its
+    /// history, in any of the files Chrome has kept them in.
+    static let marks = ["Login Data", "Login Data For Account", "Bookmarks", "AccountBookmarks",
+                        "EncryptedBookmarks2", "EncryptedAccountBookmarks2", "History"]
+
     static let known: [Source] = [
-        Source(name: "Dia", folder: "Dia/User Data", service: "Dia Safe Storage", account: "Dia"),
-        Source(name: "Chrome", folder: "Google/Chrome", service: "Chrome Safe Storage", account: "Chrome"),
-        Source(name: "Arc", folder: "Arc/User Data", service: "Arc Safe Storage", account: "Arc"),
-        Source(name: "Brave", folder: "BraveSoftware/Brave-Browser", service: "Brave Safe Storage", account: "Brave"),
-        Source(name: "Edge", folder: "Microsoft Edge", service: "Microsoft Edge Safe Storage", account: "Microsoft Edge"),
-        Source(name: "Vivaldi", folder: "Vivaldi", service: "Vivaldi Safe Storage", account: "Vivaldi"),
-        Source(name: "Chromium", folder: "Chromium", service: "Chromium Safe Storage", account: "Chromium"),
+        Source(name: "Dia", folder: "Dia/User Data", service: "Dia Safe Storage", account: "Dia", app: "Dia.app"),
+        Source(name: "Chrome", folder: "Google/Chrome", service: "Chrome Safe Storage", account: "Chrome", app: "Google Chrome.app"),
+        Source(name: "Arc", folder: "Arc/User Data", service: "Arc Safe Storage", account: "Arc", app: "Arc.app"),
+        Source(name: "Brave", folder: "BraveSoftware/Brave-Browser", service: "Brave Safe Storage", account: "Brave", app: "Brave Browser.app"),
+        Source(name: "Edge", folder: "Microsoft Edge", service: "Microsoft Edge Safe Storage", account: "Microsoft Edge", app: "Microsoft Edge.app"),
+        Source(name: "Vivaldi", folder: "Vivaldi", service: "Vivaldi Safe Storage", account: "Vivaldi", app: "Vivaldi.app"),
+        Source(name: "Chromium", folder: "Chromium", service: "Chromium Safe Storage", account: "Chromium", app: "Chromium.app"),
     ]
+
+    /// Where browsers keep their data: ~/Library/Application Support. A test
+    /// run reads made-up profiles from its own folder instead, never a real
+    /// browser's (see ./bench import).
+    static var base: URL {
+        if Store.testing { return Store.folder.appendingPathComponent("Import", isDirectory: true) }
+        return FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0]
+    }
 
     /// Only the browsers actually on this Mac, with something to read.
     static func installed() -> [Source] {
-        known.filter { !$0.files.isEmpty }
+        known.filter { !$0.folders.isEmpty }
+    }
+
+    /// Browsers whose app is on this Mac with no folder where their data
+    /// should be — said by name, with where browse looked, rather than
+    /// "no other browser". A folder macOS keeps shut is there, and is
+    /// Chromium.locked's to explain instead.
+    static func unreadable() -> [(source: Source, looked: String)] {
+        guard !Store.testing else { return [] }
+        return known.filter { $0.appInstalled && !FileManager.default.fileExists(atPath: $0.root.path) }.map {
+            ($0, $0.root.path.replacingOccurrences(of: NSHomeDirectory(), with: "~"))
+        }
     }
 
     /// macOS has shut the browser's folder to other apps. From macOS 27,
@@ -92,14 +130,22 @@ enum Chromium {
 
     static func read(_ source: Source) throws -> Found {
         guard let passphrase = safeStorage(source) else { throw Trouble.noPassphrase }
-        let key = stretch(passphrase)
+        return try read(source.folders, key: stretch(passphrase))
+    }
 
+    /// Every profile folder's passwords, opened with the browser's key.
+    static func read(_ folders: [URL], key: [UInt8]) throws -> Found {
         var logins: [Login] = []
         var never: [String] = []
         var seen = Set<String>()
         var readAny = false
 
-        for file in source.files {
+        // Signed in to Chrome, what's saved goes to the account's own file
+        // beside the old one; Chrome shows both as one list, and so do we.
+        let files = folders.flatMap { folder in
+            ["Login Data", "Login Data For Account"].map { folder.appendingPathComponent($0) }
+        }
+        for file in files where FileManager.default.fileExists(atPath: file.path) {
             guard let rows = try? rows(in: file) else { continue }
             readAny = true
             for row in rows {
@@ -127,30 +173,50 @@ enum Chromium {
     /// profile; with more than one profile, each comes in as a folder under
     /// the profile's name.
     static func bookmarks(in source: Source) -> [Bookmark] {
+        // The keychain is asked only if a profile keeps nothing but sealed
+        // files, and then once.
+        var asked: [UInt8]??
+        let key = { () -> [UInt8]? in
+            if asked == nil { asked = .some(try? Chromium.key(for: source)) }
+            return asked ?? nil
+        }
         let all = profiles(in: source)
-        guard all.count > 1 else { return all.first.map { bookmarks(at: $0.folder) } ?? [] }
+        guard all.count > 1 else { return all.first.map { bookmarks(at: $0.folder, key: key) } ?? [] }
         return all.compactMap { profile in
-            let marks = bookmarks(at: profile.folder)
+            let marks = bookmarks(at: profile.folder, key: key)
             return marks.isEmpty ? nil : .folder(profile.name, marks)
         }
     }
 
-    private static func bookmarks(at folder: URL) -> [Bookmark] {
-        guard let data = try? Data(contentsOf: folder.appendingPathComponent("Bookmarks")),
-              let top = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
-              let roots = top["roots"] as? [String: Any]
-        else { return [] }
-        var out: [Bookmark] = []
-        if let bar = roots["bookmark_bar"] as? [String: Any] {
-            out += nodes(in: bar["children"] as? [[String: Any]] ?? [])
-        }
-        for key in ["other", "synced"] {
-            if let more = roots[key] as? [String: Any] {
-                let kids = nodes(in: more["children"] as? [[String: Any]] ?? [])
-                if !kids.isEmpty { out.append(.folder(key == "other" ? "Other" : "Mobile", kids)) }
+    /// A profile's bookmarks, from both the files Chrome keeps: "Bookmarks",
+    /// and "AccountBookmarks" for what's saved to a signed-in account
+    /// without sync. Chrome shows the two side by side; here they merge.
+    static func bookmarks(at folder: URL, key: () -> [UInt8]?) -> [Bookmark] {
+        let roots = [("Bookmarks", "EncryptedBookmarks2"), ("AccountBookmarks", "EncryptedAccountBookmarks2")]
+            .compactMap { clear, sealed -> [String: Any]? in
+                guard let data = bookmarkFile(clear, sealed: sealed, in: folder, key: key),
+                      let top = try? JSONSerialization.jsonObject(with: data) as? [String: Any]
+                else { return nil }
+                return top["roots"] as? [String: Any]
             }
+        func kids(_ root: String) -> [Bookmark] {
+            roots.flatMap { nodes(in: ($0[root] as? [String: Any])?["children"] as? [[String: Any]] ?? []) }
+        }
+        var out = kids("bookmark_bar")
+        for (root, name) in [("other", "Other"), ("synced", "Mobile")] {
+            let more = kids(root)
+            if !more.isEmpty { out.append(.folder(name, more)) }
         }
         return out
+    }
+
+    /// One bookmarks file as JSON: the clear one Chrome has always written,
+    /// or where Chrome has moved on to keeping only a sealed copy, that one
+    /// opened — "v10" and the passwords' own key, over the whole file.
+    private static func bookmarkFile(_ clear: String, sealed: String, in folder: URL, key: () -> [UInt8]?) -> Data? {
+        if let data = try? Data(contentsOf: folder.appendingPathComponent(clear)) { return data }
+        guard let blob = try? Data(contentsOf: folder.appendingPathComponent(sealed)), let key = key() else { return nil }
+        return decrypt(blob, key: key)
     }
 
     private static func nodes(in raw: [[String: Any]]) -> [Bookmark] {
@@ -184,13 +250,10 @@ enum Chromium {
         }
         guard !wanted.isEmpty else { return out }
 
-        for file in source.files {
-            let icons = file.deletingLastPathComponent().appendingPathComponent("Favicons")
-            guard FileManager.default.fileExists(atPath: icons.path) else { continue }
-            let temp = FileManager.default.temporaryDirectory
-                .appendingPathComponent("office-import-\(UUID().uuidString).db")
-            guard (try? FileManager.default.copyItem(at: icons, to: temp)) != nil else { continue }
-            defer { try? FileManager.default.removeItem(at: temp) }
+        for folder in source.folders {
+            let icons = folder.appendingPathComponent("Favicons")
+            guard FileManager.default.fileExists(atPath: icons.path), let temp = try? snapshot(icons) else { continue }
+            defer { try? FileManager.default.removeItem(at: temp.deletingLastPathComponent()) }
 
             var db: OpaquePointer?
             guard sqlite3_open_v2(temp.path, &db, SQLITE_OPEN_READONLY, nil) == SQLITE_OK, let db else { continue }
@@ -239,8 +302,7 @@ enum Chromium {
         let state = (try? Data(contentsOf: source.root.appendingPathComponent("Local State")))
             .flatMap { try? JSONSerialization.jsonObject(with: $0) as? [String: Any] }
         let cache = (state?["profile"] as? [String: Any])?["info_cache"] as? [String: Any] ?? [:]
-        return source.files.map { file -> Profile in
-            let folder = file.deletingLastPathComponent()
+        return source.folders.map { folder -> Profile in
             let name = (cache[folder.lastPathComponent] as? [String: Any])?["name"] as? String
             return Profile(folder: folder, name: name?.isEmpty == false ? name! : folder.lastPathComponent)
         }
@@ -260,19 +322,10 @@ enum Chromium {
         let file = [profile.folder.appendingPathComponent("Network/Cookies"), profile.folder.appendingPathComponent("Cookies")]
             .first { FileManager.default.fileExists(atPath: $0.path) }
         guard let file else { return [] }
-        // The database with its journal beside it, so what the browser
-        // hasn't folded in yet comes too.
-        let temp = FileManager.default.temporaryDirectory.appendingPathComponent("office-import-\(UUID().uuidString)", isDirectory: true)
-        try FileManager.default.createDirectory(at: temp, withIntermediateDirectories: true)
-        defer { try? FileManager.default.removeItem(at: temp) }
-        for suffix in ["", "-wal", "-journal"] {
-            let from = URL(fileURLWithPath: file.path + suffix)
-            if FileManager.default.fileExists(atPath: from.path) {
-                try FileManager.default.copyItem(at: from, to: temp.appendingPathComponent("Cookies" + suffix))
-            }
-        }
+        let temp = try snapshot(file)
+        defer { try? FileManager.default.removeItem(at: temp.deletingLastPathComponent()) }
         var db: OpaquePointer?
-        guard sqlite3_open_v2(temp.appendingPathComponent("Cookies").path, &db, SQLITE_OPEN_READONLY, nil) == SQLITE_OK, let db else {
+        guard sqlite3_open_v2(temp.path, &db, SQLITE_OPEN_READONLY, nil) == SQLITE_OK, let db else {
             throw Trouble.unreadable
         }
         defer { sqlite3_close(db) }
@@ -329,14 +382,7 @@ enum Chromium {
     private static func open(_ blob: Data, key: [UInt8], hashed: Bool) -> String? {
         guard !blob.isEmpty else { return "" }
         guard blob.count > 3, blob.prefix(3) == Data("v10".utf8) else { return String(data: blob, encoding: .utf8) }
-        let body = [UInt8](blob.dropFirst(3))
-        let iv = [UInt8](repeating: 0x20, count: 16)
-        var out = [UInt8](repeating: 0, count: body.count + kCCBlockSizeAES128)
-        var moved = 0
-        guard CCCrypt(CCOperation(kCCDecrypt), CCAlgorithm(kCCAlgorithmAES128), CCOptions(kCCOptionPKCS7Padding),
-                      key, key.count, iv, body, body.count, &out, out.count, &moved) == kCCSuccess
-        else { return nil }
-        var plain = Data(out.prefix(moved))
+        guard var plain = decrypt(blob, key: key) else { return nil }
         if hashed {
             guard plain.count >= 32 else { return nil }
             plain = plain.dropFirst(32)
@@ -356,15 +402,14 @@ enum Chromium {
     /// The other browser's history — what it takes to finish an address on
     /// the first day. Same file rules as the passwords: a copy, read once.
     static func places(in source: Source, limit: Int = 10_000) -> [Place] {
-        places(beside: source.files, limit: limit)
+        places(in: source.folders, limit: limit)
     }
 
-    /// Each profile's History, beside the Login Data files that mark out its
-    /// profiles.
-    static func places(beside files: [URL], limit: Int) -> [Place] {
+    /// Each profile folder's History, newest first across them all.
+    static func places(in folders: [URL], limit: Int) -> [Place] {
         var out: [Place] = []
-        for file in files {
-            let history = file.deletingLastPathComponent().appendingPathComponent("History")
+        for folder in folders {
+            let history = folder.appendingPathComponent("History")
             guard FileManager.default.fileExists(atPath: history.path) else { continue }
             out += (try? placeRows(in: history, limit: limit)) ?? []
         }
@@ -372,19 +417,8 @@ enum Chromium {
     }
 
     private static func placeRows(in file: URL, limit: Int) throws -> [Place] {
-        // With its journal beside it, as the cookies are: a browser that's
-        // open hasn't folded its last visits into the file yet.
-        let folder = FileManager.default.temporaryDirectory
-            .appendingPathComponent("office-import-\(UUID().uuidString)", isDirectory: true)
-        try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
-        defer { try? FileManager.default.removeItem(at: folder) }
-        for suffix in ["", "-wal", "-journal"] {
-            let from = URL(fileURLWithPath: file.path + suffix)
-            if FileManager.default.fileExists(atPath: from.path) {
-                try FileManager.default.copyItem(at: from, to: folder.appendingPathComponent("History" + suffix))
-            }
-        }
-        let temp = folder.appendingPathComponent("History")
+        let temp = try snapshot(file)
+        defer { try? FileManager.default.removeItem(at: temp.deletingLastPathComponent()) }
 
         var db: OpaquePointer?
         guard sqlite3_open_v2(temp.path, &db, SQLITE_OPEN_READONLY, nil) == SQLITE_OK, let db else {
@@ -420,6 +454,12 @@ enum Chromium {
     // MARK: - the key
 
     private static func safeStorage(_ source: Source) -> String? {
+        // A test run's made-up browser keeps its key beside its profiles,
+        // not in the keychain.
+        if Store.testing {
+            let file = source.root.appendingPathComponent("Safe Storage")
+            return (try? String(contentsOf: file, encoding: .utf8))?.trimmingCharacters(in: .whitespacesAndNewlines)
+        }
         var out: CFTypeRef?
         let status = SecItemCopyMatching([
             kSecClass as String: kSecClassGenericPassword,
@@ -460,6 +500,19 @@ enum Chromium {
             // Not encrypted at all, on some very old profiles.
             return String(data: blob, encoding: .utf8)
         }
+        guard let plain = decrypt(blob, key: key) else { return nil }
+        if let text = String(data: plain, encoding: .utf8) { return text }
+        // Newer builds prefix the password with a hash of the site. Past it,
+        // the password is the same as ever.
+        guard plain.count > 32 else { return nil }
+        return String(data: plain.dropFirst(32), encoding: .utf8)
+    }
+
+    /// Everything Chromium seals on a Mac — passwords, cookies, now its
+    /// bookmarks — is "v10" and then AES-128-CBC with an IV of sixteen
+    /// spaces. Nil for anything else, or anything that won't open.
+    private static func decrypt(_ blob: Data, key: [UInt8]) -> Data? {
+        guard blob.count > 3, blob.prefix(3) == Data("v10".utf8) else { return nil }
         let body = [UInt8](blob.dropFirst(3))
         let iv = [UInt8](repeating: 0x20, count: 16)
         var out = [UInt8](repeating: 0, count: body.count + kCCBlockSizeAES128)
@@ -471,15 +524,33 @@ enum Chromium {
             &out, out.count, &moved
         )
         guard status == kCCSuccess else { return nil }
-        let plain = Data(out.prefix(moved))
-        if let text = String(data: plain, encoding: .utf8) { return text }
-        // Newer builds prefix the password with a hash of the site. Past it,
-        // the password is the same as ever.
-        guard plain.count > 32 else { return nil }
-        return String(data: plain.dropFirst(32), encoding: .utf8)
+        return Data(out.prefix(moved))
     }
 
     // MARK: - the file
+
+    /// A copy of one of the other browser's databases, in a folder of its
+    /// own the caller removes, with its journal beside it: a browser that's
+    /// open hasn't folded what it last did into the file yet. The copy is so
+    /// nothing reads the live file underneath it.
+    private static func snapshot(_ file: URL) throws -> URL {
+        let folder = FileManager.default.temporaryDirectory
+            .appendingPathComponent("office-import-\(UUID().uuidString)", isDirectory: true)
+        try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
+        let name = file.lastPathComponent
+        for suffix in ["", "-wal", "-journal"] {
+            let from = URL(fileURLWithPath: file.path + suffix)
+            if FileManager.default.fileExists(atPath: from.path) {
+                do {
+                    try FileManager.default.copyItem(at: from, to: folder.appendingPathComponent(name + suffix))
+                } catch {
+                    try? FileManager.default.removeItem(at: folder)
+                    throw error
+                }
+            }
+        }
+        return folder.appendingPathComponent(name)
+    }
 
     private struct Row {
         let origin: String
@@ -490,11 +561,8 @@ enum Chromium {
     }
 
     private static func rows(in file: URL) throws -> [Row] {
-        // A copy, next to nothing the other browser is watching.
-        let temp = FileManager.default.temporaryDirectory
-            .appendingPathComponent("office-import-\(UUID().uuidString).db")
-        try FileManager.default.copyItem(at: file, to: temp)
-        defer { try? FileManager.default.removeItem(at: temp) }
+        let temp = try snapshot(file)
+        defer { try? FileManager.default.removeItem(at: temp.deletingLastPathComponent()) }
 
         var db: OpaquePointer?
         guard sqlite3_open_v2(temp.path, &db, SQLITE_OPEN_READONLY, nil) == SQLITE_OK, let db else {
