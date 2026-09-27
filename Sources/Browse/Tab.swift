@@ -289,6 +289,8 @@ final class Tab: ObservableObject, Identifiable {
     /// to follow along.
     var onScroll: ((Tab, Double, Double) -> Void)?
     var onZoom: ((Tab, CGFloat) -> Void)?
+    /// The keys have gone to this tab's page (PageView.onFocus).
+    var onFocus: ((Tab) -> Void)?
     /// The resolved address under the pointer, or nil when it leaves a link.
     var onLink: ((Tab, String?) -> Void)?
 
@@ -444,6 +446,10 @@ final class Tab: ObservableObject, Identifiable {
         Swipe.calm(web)
         web.onPull = { [weak self] pull in self?.pull = pull }
         web.onTouch = { [weak self] in self?.uncover() }
+        web.onFocus = { [weak self] in
+            guard let self else { return }
+            self.onFocus?(self)
+        }
         web.searchName = { [weak self] in self?.searchName?() }
         web.onSearch = { [weak self] text in
             guard let self else { return }
@@ -1095,6 +1101,7 @@ final class Tab: ObservableObject, Identifiable {
         controller.removeAllUserScripts()
         web.onPull = nil
         web.onTouch = nil
+        web.onFocus = nil
         web.searchName = nil
         web.onSearch = nil
         web.stopLoading()
@@ -1287,6 +1294,17 @@ final class PageView: WKWebView {
     override func mouseDown(with event: NSEvent) {
         onTouch?()
         super.mouseDown(with: event)
+    }
+
+    /// Told when the keys start going to this page — a click, a Tab from
+    /// elsewhere, or a page that puts its own search box in focus as it
+    /// loads. In a split that's which page is in front (Split.swift).
+    var onFocus: (() -> Void)?
+
+    override func becomeFirstResponder() -> Bool {
+        let took = super.becomeFirstResponder()
+        if took { onFocus?() }
+        return took
     }
 
     /// The side buttons a mouse has for back and forward — button 3 and 4.

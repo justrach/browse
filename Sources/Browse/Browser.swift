@@ -1541,8 +1541,13 @@ final class Browser: NSObject, ObservableObject {
         // wake is this the other case, one whose page quietly died while you
         // were elsewhere, which revive() checks for on its own.
         if !tab.wake() { tab.revive() }
-        // Its other half, when it has one, is on screen too.
+        // Its other half, when it has one, is on screen too — and the keys go
+        // to the half now in front, not the one left.
         wakePair()
+        if showing(inSplit: tab), let web = tab.built, let window = web.window,
+           !((window.firstResponder as? NSView)?.isDescendant(of: web) ?? false) {
+            window.makeFirstResponder(web)
+        }
         rememberSession()
         editing = false
         typed = ""
@@ -2104,6 +2109,14 @@ final class Browser: NSObject, ObservableObject {
 
         // The line at the bottom doubles as the zoom read-out: it keeps being
         // rewritten while you pinch and fades a moment after you stop.
+        // In a split, the page the keys go to is the page in front: ⌘L, Find
+        // and Codegraff act on the page you're typing in, however it got
+        // the keys — a click, Tab, or a search box that took them itself.
+        tab.onFocus = { [weak self] tab in
+            guard let self, tab.id != activeID, showing(inSplit: tab) else { return }
+            select(tab)
+        }
+
         tab.onZoom = { [weak self] _, value in
             guard let self else { return }
             let percent = Int((value * 100).rounded())
