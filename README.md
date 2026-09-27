@@ -121,4 +121,4 @@ Contributions are welcome; read [CONTRIBUTING.md](CONTRIBUTING.md) first. [Relea
 
 browse and all new code and contributions are licensed under [AGPL-3.0](LICENSE). This is not an MIT/AGPL dual-license offer.
 
-Earlier upstream code retains its original [MIT copyright and permission notice](docs/legal/upstream-mit.txt). That notice applies to the inherited code; it does not license new browse work under MIT. The Jev step code adapts Browser Use's jev-ultrafast (MIT).
+browse began as a fork of [Search](https://github.com/driceroland/Search) by Office Commun. Earlier upstream code retains its original [MIT copyright and permission notice](docs/legal/upstream-mit.txt). That notice applies to the inherited code; it does not license new browse work under MIT. The Jev step code adapts Browser Use's jev-ultrafast (MIT).
