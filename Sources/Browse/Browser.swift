@@ -1432,6 +1432,19 @@ final class Browser: NSObject, ObservableObject {
             }
             .store(in: &bag)
 
+        // Every open page that hasn't a size of its own takes the new one.
+        // Asleep, a tab has no page to resize; it takes it on waking.
+        prefs.$pageZoom
+            .dropFirst()
+            .sink { [weak self] _ in
+                // Published before it is stored; the tabs read the stored one.
+                DispatchQueue.main.async {
+                    guard let self else { return }
+                    for tab in self.tabs + self.parkedTabs where tab.built != nil { tab.applyRememberedZoom() }
+                }
+            }
+            .store(in: &bag)
+
         prefs.$passkeys
             .dropFirst()
             .sink { [weak self] on in
@@ -1917,11 +1930,20 @@ final class Browser: NSObject, ObservableObject {
 
     /// A bookmark picked from the button's list or the full one. Either
     /// goes as the page starts: the list off the button used to stay open
-    /// over the page it had just sent you to.
-    func pickBookmark(_ url: URL) {
-        bookmarking = false
-        bookmarksOpen = false
-        visit(url)
+    /// over the page it had just sent you to. A middle-click opens it in a
+    /// new tab behind this one and leaves the list open for the next; with
+    /// ⇧ it goes to the new tab, and the list closes.
+    func pickBookmark(_ url: URL, inNewTab: Bool = false) {
+        let foreground = !inNewTab || NSApp.currentEvent?.modifierFlags.contains(.shift) == true
+        if foreground {
+            bookmarking = false
+            bookmarksOpen = false
+        }
+        if inNewTab {
+            open(url, foreground: foreground, from: active)
+        } else {
+            visit(url)
+        }
     }
 
     /// ⌘⇧N. A tab that keeps nothing — its own cookies, its own sign-ins, no
@@ -2617,7 +2639,8 @@ extension Browser: WKNavigationDelegate, WKUIDelegate {
 
         // An extension's OAuth sign-in coming back: the address is the
         // answer, handed to the extension, and never loaded.
-        if ExtensionAuth.intercept(url, browser: self, from: webView) {
+        if ExtensionAuth.intercept(url, browser: self, from: webView)
+            || ExtensionAuth.handOver(url, mainFrame: action.targetFrame?.isMainFrame == true, browser: self, from: webView) {
             decisionHandler(.cancel)
             return
         }
@@ -2861,6 +2884,7 @@ extension Browser: WKNavigationDelegate, WKUIDelegate {
         didBecome download: WKDownload
     ) {
         keep(download)
+        dropEmpty(webView)
     }
 
     func webView(
@@ -2869,6 +2893,27 @@ extension Browser: WKNavigationDelegate, WKUIDelegate {
         didBecome download: WKDownload
     ) {
         keep(download)
+        dropEmpty(webView)
+    }
+
+    /// A tab that has shown nothing, and whose first page turned out to be a
+    /// file: a download link that opens in a new tab, as a course site's
+    /// attachments do. The file goes on arriving without it. Kept, the tab
+    /// held the file's address, came back with the session, and downloaded
+    /// the file again each time it was opened. It forgets the address; and
+    /// when a page's link opened it, it closes, as in Safari and Chrome, and
+    /// you are back on that page. A tab you opened yourself stays, as a new
+    /// tab, and so does a window's only tab: closing it would close the
+    /// window.
+    private func dropEmpty(_ webView: WKWebView) {
+        guard let tab = tab(for: webView), tab.committed == nil, tab.pin == nil else { return }
+        // Without its address, it is not offered back by ⇧⌘T either.
+        tab.forget()
+        guard let opener = tab.opener, tabs.count > 1 else { return }
+        if tab.id == activeID, let home = tabs.first(where: { $0.id == opener }) {
+            select(home)
+        }
+        close(tab)
     }
 
     /// Every download this window has going, heard from until it ends — and
@@ -3071,24 +3116,9 @@ extension Browser: WKDownloadDelegate {
         completionHandler: @escaping (URL?) -> Void
     ) {
         let asked = response.url.flatMap { namedDownloads.removeValue(forKey: $0) }
-        let name = asked ?? (suggestedFilename.isEmpty ? "download" : suggestedFilename)
-
-        guard !prefs.asksWhereToSave else {
-            let panel = NSSavePanel()
-            panel.nameFieldStringValue = name
-            panel.directoryURL = downloadsFolder
-            panel.canCreateDirectories = true
-            guard panel.runModal() == .OK, let url = panel.url else {
-                completionHandler(nil)
-                return
-            }
-            completionHandler(url)
-            announce("Downloading \(url.lastPathComponent)")
-            return
-        }
-
-        completionHandler(Browser.free(name, in: downloadsFolder))
-        announce("Downloading \(name)")
+        let file = whereToSave(asked ?? suggestedFilename)
+        completionHandler(file)
+        if let file { announce("Downloading \(file.lastPathComponent)") }
     }
 
     func downloadDidFinish(_ download: WKDownload) {
@@ -3106,14 +3136,48 @@ extension Browser: WKDownloadDelegate {
            let id = ExtensionShims.askedDownloads.removeValue(forKey: asked) {
             ExtensionShims.ownDownloads[id, default: []].insert(file.path)
         }
-        loot.add(
-            Keep(
-                name: file.lastPathComponent,
-                from: download.originalRequest?.url?.host() ?? "",
-                path: file.path,
-                date: Date()
-            )
-        )
+        saved(file, from: download.originalRequest?.url)
+    }
+
+    /// The download button in the bar WebKit draws over a PDF. WebKit has the
+    /// file already and hands it over whole — to a delegate that answers
+    /// this name, outside the public framework, and to nobody otherwise: the
+    /// button did nothing at all.
+    @objc(_webView:saveDataToFile:suggestedFilename:mimeType:originatingURL:)
+    func webView(
+        _ webView: WKWebView,
+        saveDataToFile data: Data?,
+        suggestedFilename: String?,
+        mimeType: String?,
+        originatingURL: URL?
+    ) {
+        guard let data, let file = whereToSave(suggestedFilename ?? "") else { return }
+        do {
+            try data.write(to: file)
+            saved(file, from: originatingURL)
+        } catch {
+            announce("Download failed")
+        }
+    }
+
+    /// Where a file goes: the downloads folder, or wherever you say when
+    /// Settings says to ask. Nil when the question was cancelled. The name
+    /// comes from the page, so only its last part is taken: never a path
+    /// out of the folder.
+    private func whereToSave(_ name: String) -> URL? {
+        let last = (name as NSString).lastPathComponent
+        let name = ["", ".", "..", "/"].contains(last) ? "download" : last
+        guard prefs.asksWhereToSave else { return Browser.free(name, in: downloadsFolder) }
+        let panel = NSSavePanel()
+        panel.nameFieldStringValue = name
+        panel.directoryURL = downloadsFolder
+        panel.canCreateDirectories = true
+        guard panel.runModal() == .OK else { return nil }
+        return panel.url
+    }
+
+    private func saved(_ file: URL, from source: URL?) {
+        loot.add(Keep(name: file.lastPathComponent, from: source?.host() ?? "", path: file.path, date: Date()))
         announce("Saved \(file.lastPathComponent)")
     }
 

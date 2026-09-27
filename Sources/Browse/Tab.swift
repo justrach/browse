@@ -199,6 +199,27 @@ final class Tab: ObservableObject, Identifiable {
 
     func didCommit() {
         if let url = built?.url, url.absoluteString != "about:blank" { committed = url }
+        // A page arrived after all: the address is its own again.
+        if held != nil, let url = built?.url, url.absoluteString != "about:blank" {
+            held = nil
+            address = url
+        }
+    }
+
+    /// An address the tab shows, and reports to extensions, without loading
+    /// it (see ExtensionAuth.handOver). The page on screen stays. WebKit
+    /// going back to that page's address as the cancelled load unwinds is not
+    /// a move, so the observer below lets it pass. The page is WebKit's own
+    /// current item, not `committed`, which a same-site load in progress has
+    /// already moved on.
+    private(set) var held: URL?
+    private var heldOver: URL?
+
+    func hold(_ url: URL) {
+        held = url
+        heldOver = built?.backForwardList.currentItem?.url
+        address = url
+        failure = nil
     }
     @Published private(set) var progress: Double = 0
     @Published private(set) var loading = false
@@ -273,11 +294,18 @@ final class Tab: ObservableObject, Identifiable {
     /// A sideways swipe in progress, for the disc that shows it.
     @Published var pull: Pull?
 
+    /// What a site opens at until you zoom it yourself: Settings › General ›
+    /// Page zoom. Read from the file, not from the one object the window holds.
+    static var defaultZoom: CGFloat {
+        CGFloat(Store.settings.object(forKey: "pageZoom") as? Double ?? 1)
+    }
+
     /// Remembered for the site, not for the tab: setting a paper's type to
-    /// 125% once should be the last time you think about it.
+    /// 125% once should be the last time you think about it. A site at the
+    /// size every site starts at keeps nothing, and follows that size.
     func rememberZoom() {
         guard let host = address?.host(), !shy else { return }
-        if abs(zoom - 1) < 0.01 {
+        if abs(zoom - Tab.defaultZoom) < 0.01 {
             Store.settings.removeObject(forKey: "zoom." + host)
         } else {
             Store.settings.set(Double(zoom), forKey: "zoom." + host)
@@ -286,10 +314,11 @@ final class Tab: ObservableObject, Identifiable {
 
     func applyRememberedZoom() {
         guard let host = address?.host() else { return }
-        let kept = Store.settings.object(forKey: "zoom." + host) as? Double ?? 1
-        guard abs(CGFloat(kept) - web.pageZoom) > 0.004 else { return }
-        web.pageZoom = CGFloat(kept)
-        zoom = CGFloat(kept)
+        let kept = (Store.settings.object(forKey: "zoom." + host) as? Double).map { CGFloat($0) }
+            ?? Tab.defaultZoom
+        guard abs(kept - web.pageZoom) > 0.004 else { return }
+        web.pageZoom = kept
+        zoom = kept
     }
 
     /// How much bigger the page is being drawn. Not a magnifying glass over
@@ -297,9 +326,6 @@ final class Tab: ObservableObject, Identifiable {
     /// stays as sharp at 200% as it was at 100%.
     @Published private(set) var zoom: CGFloat = 1
 
-    /// Where the page is and which way it just went, for anything that wants
-    /// to follow along.
-    var onScroll: ((Tab, Double, Double) -> Void)?
     var onZoom: ((Tab, CGFloat) -> Void)?
     /// The keys have gone to this tab's page (PageView.onFocus).
     var onFocus: ((Tab) -> Void)?
@@ -364,7 +390,6 @@ final class Tab: ObservableObject, Identifiable {
     private let passkeyRelay = PasskeyRelay()
     private let hovered = HoveredLink()
     private let ears = AudioWatch()
-    private var lastY: Double = 0
 
     /// A tab that keeps nothing: its own cookies, no history, no place in the
     /// session. Signed in as nobody, and forgotten when it goes.
@@ -513,6 +538,10 @@ final class Tab: ObservableObject, Identifiable {
                     // a pinned tab lost the only thing that could bring it
                     // back, and vanished from the session altogether.
                     guard fresh.absoluteString != "about:blank" else { return }
+                    if self.held != nil {
+                        if fresh == self.heldOver { return }
+                        self.held = nil
+                    }
                     let moved = fresh.host() != self.address?.host()
                     self.address = fresh
                     // Within the same origin — history.pushState, a fragment —
@@ -567,9 +596,10 @@ final class Tab: ObservableObject, Identifiable {
 
     func magnify(by factor: CGFloat) { magnify(to: web.pageZoom * factor) }
 
-    /// ⌘0 undoes both kinds of zoom at once — whichever one you reached for.
+    /// ⌘0 undoes both kinds of zoom at once — whichever one you reached for —
+    /// back to the size every site starts at.
     func resetZoom() {
-        magnify(to: 1)
+        magnify(to: Tab.defaultZoom)
         guard web.magnification != 1 else { return }
         web.magnification = 1
         onZoom?(self, 1)
@@ -781,9 +811,6 @@ final class Tab: ObservableObject, Identifiable {
         // core on the thread WebKit needs to put the scrolled page on screen.
         let fraction = ceiling > 0 ? (min(1, max(0, y / ceiling)) * 100).rounded() / 100 : 0
         if fraction != reading { reading = fraction }
-        let delta = y - lastY
-        lastY = y
-        onScroll?(self, y, delta)
     }
 
     func go(to url: URL) {
@@ -800,10 +827,10 @@ final class Tab: ObservableObject, Identifiable {
         // stop being blank in the same frame the field disappears, or the empty
         // state flashes back for an instant on its way out.
         address = url
+        held = nil
         title = ""
         failure = nil
         reading = 0
-        lastY = 0
         reader = false
         typing = false
         immersed = false
@@ -840,7 +867,6 @@ final class Tab: ObservableObject, Identifiable {
         memory = nil
         picture = nil
         reading = 0
-        lastY = 0
         noisy = false
         stale = false
         pull = nil
@@ -1037,7 +1063,6 @@ final class Tab: ObservableObject, Identifiable {
         pending = nil
         failure = nil
         reading = 0
-        lastY = 0
         reader = false
         typing = false
         immersed = false
@@ -1060,6 +1085,14 @@ final class Tab: ObservableObject, Identifiable {
         address = url
         failure = nil
         adoptIcon()
+    }
+
+    /// A new tab again: where it was going turned out to be a file, not a
+    /// page, and an address kept for it downloads the file once more
+    /// whenever the tab is opened (see Browser.dropEmpty).
+    func forget() {
+        address = nil
+        icon = nil
     }
 
     func touch() { touched = Date() }
@@ -1096,7 +1129,6 @@ final class Tab: ObservableObject, Identifiable {
     /// Called when the tab is thrown away. Without it the view keeps running
     /// whatever the page left behind — timers, video, sockets.
     func close() {
-        onScroll = nil
         onZoom = nil
         onLink = nil
         onPick = nil

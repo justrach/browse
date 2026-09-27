@@ -31,7 +31,7 @@ struct TabBar: View {
             ZStack(alignment: .leading) {
                 // The empty half of the strip is what you grab to move the
                 // window; the tabs keep the run they sit on.
-                DragStrip(reserved: Metrics.lights + dot + (making ? min(540, room(in: geo.size.width)) : run(in: geo.size.width)) + Metrics.tabGap + Metrics.plusWidth, trailing: Metrics.helm + 26 + 24)
+                DragStrip(reserved: Metrics.lights + dot + (making ? min(540, room(in: geo.size.width)) : run(in: geo.size.width)) + Metrics.tabGap + Metrics.plusWidth, trailing: Metrics.helm + 26 + 24, onDoubleClick: browser.newTab)
                 // And the corner the lights sit in, which is title bar too —
                 // the one stretch left to take hold of when tabs fill the row.
                 DragStrip()
@@ -595,12 +595,13 @@ private struct TabPill: View {
                 // look. What you have to hit is the whole right-hand end of the
                 // tab: an overlay is not laid out, so it can reach past its own
                 // frame without moving anything that is.
+                //
+                // A view of AppKit's own takes the click there, while the
+                // cross shows (see CloseClick).
                 .overlay {
                     if !editing {
-                        Color.clear
+                        CloseClick(armed: hovering, act: close)
                             .frame(width: 30, height: 28)
-                            .contentShape(Rectangle())
-                            .onTapGesture { if hovering { close() } }
                     }
                 }
                 .animation(Motion.quick, value: hovering)
@@ -920,6 +921,55 @@ struct OneClick: ViewModifier {
     }
 }
 
+/// A click on a tab's cross closes it — taken by a real view laid over the
+/// cross rather than by a SwiftUI tap. Out over the page, in the strip folded
+/// away with ⌘S, the tap never came: the cross showed under the pointer and
+/// clicking it did nothing (Drice). A view of AppKit's own is handed the
+/// press by AppKit itself, as the middle button's is (MiddleClick), and it
+/// answers only while the cross is there to be pressed, only to the left
+/// button; to anything else it isn't there, and the tab goes on as before.
+struct CloseClick: NSViewRepresentable {
+    let armed: Bool
+    let act: () -> Void
+
+    func makeNSView(context: Context) -> NSView { Cross() }
+
+    func updateNSView(_ view: NSView, context: Context) {
+        (view as? Cross)?.armed = armed
+        (view as? Cross)?.act = act
+    }
+
+    private final class Cross: NSView {
+        var armed = false
+        var act: () -> Void = {}
+        private var pressed = false
+
+        /// Never the window's to drag from: the press is the cross's.
+        override var mouseDownCanMoveWindow: Bool { false }
+
+        /// Asked about every event over the cross, the pointer moving included;
+        /// only a left press, while the cross shows, is this view's.
+        override func hitTest(_ point: NSPoint) -> NSView? {
+            guard armed, let event = NSApp.currentEvent,
+                  event.type == .leftMouseDown, event.modifierFlags.intersection([.command, .control, .option, .shift]).isEmpty
+            else { return nil }
+            return super.hitTest(point)
+        }
+
+        override func mouseDown(with event: NSEvent) {
+            pressed = true
+        }
+
+        /// On the release, and only if it is still over the cross: a press
+        /// taken back by moving off before letting go closes nothing.
+        override func mouseUp(with event: NSEvent) {
+            guard pressed else { return }
+            pressed = false
+            if bounds.contains(convert(event.locationInWindow, from: nil)) { act() }
+        }
+    }
+}
+
 /// The middle button on a tab closes it, as it does in every other browser.
 ///
 /// SwiftUI has no gesture for that button, so this is a real view laid over
@@ -966,24 +1016,79 @@ struct MiddleClick: NSViewRepresentable {
 
 /// An almost-closed ring, turning — the same one the canvas app uses, small
 /// enough to sit inside a tab without becoming the loudest thing in it.
-struct Ring: View {
+///
+/// Turned by Core Animation rather than SwiftUI. A SwiftUI animation that
+/// never ends has the whole window's view tree laid out and redrawn every
+/// frame for as long as it runs — a fifth of a core, all the while a page
+/// in some tab behind was still loading. A layer's own animation is played
+/// by the render server and costs this process nothing.
+struct Ring: NSViewRepresentable {
     var size: CGFloat = 10
-    @State private var angle: Double = 0
 
-    var body: some View {
-        Circle()
-            .trim(from: 0, to: 0.78)
-            .stroke(
-                Palette.muted.opacity(0.7),
-                style: StrokeStyle(lineWidth: 1.4, lineCap: .round)
-            )
-            .frame(width: size, height: size)
-            .rotationEffect(.degrees(angle))
-            .onAppear {
-                withAnimation(.linear(duration: 0.85).repeatForever(autoreverses: false)) {
-                    angle = 360
-                }
+    func makeNSView(context: Context) -> RingView { RingView() }
+    func updateNSView(_ view: RingView, context: Context) {}
+    func sizeThatFits(_ proposal: ProposedViewSize, nsView: RingView, context: Context) -> CGSize? {
+        CGSize(width: size, height: size)
+    }
+
+    final class RingView: NSView {
+        private let ring = CAShapeLayer()
+
+        override init(frame: NSRect) {
+            super.init(frame: frame)
+            wantsLayer = true
+            ring.fillColor = nil
+            ring.lineWidth = 1.4
+            ring.lineCap = .round
+            ring.strokeEnd = 0.78
+            // Nothing but the turn moves: a new size or colour is there at
+            // once, not eased into by Core Animation's own quarter second.
+            ring.actions = ["bounds": NSNull(), "position": NSNull(), "path": NSNull(), "strokeColor": NSNull()]
+            layer?.addSublayer(ring)
+        }
+
+        required init?(coder: NSCoder) { nil }
+
+        /// Seen, never pressed: it sits in a tab, over the × while the page
+        /// loads and in the middle of a tab down to its mark, and a real view
+        /// would take the click meant for either.
+        override func hitTest(_ point: NSPoint) -> NSView? { nil }
+
+        override func layout() {
+            super.layout()
+            let inset = ring.lineWidth / 2
+            CATransaction.begin()
+            CATransaction.setDisableActions(true)
+            ring.frame = bounds
+            ring.path = CGPath(ellipseIn: bounds.insetBy(dx: inset, dy: inset), transform: nil)
+            CATransaction.commit()
+        }
+
+        /// The colour is resolved against the window's appearance, so it is
+        /// set again whenever that changes.
+        override func viewDidChangeEffectiveAppearance() {
+            super.viewDidChangeEffectiveAppearance()
+            effectiveAppearance.performAsCurrentDrawingAppearance {
+                ring.strokeColor = Palette.NS.muted.withAlphaComponent(0.7).cgColor
             }
+        }
+
+        /// Turning only while it is in a window: a layer animation is dropped
+        /// when the view leaves one, so it is added each time it arrives.
+        override func viewDidMoveToWindow() {
+            super.viewDidMoveToWindow()
+            viewDidChangeEffectiveAppearance()
+            ring.removeAnimation(forKey: "turn")
+            guard window != nil else { return }
+            let turn = CABasicAnimation(keyPath: "transform.rotation.z")
+            // Clockwise, as the SwiftUI one turned: a layer's positive angle
+            // is anticlockwise in a view that isn't flipped.
+            turn.fromValue = 0
+            turn.toValue = -2 * Double.pi
+            turn.duration = 0.85
+            turn.repeatCount = .infinity
+            ring.add(turn, forKey: "turn")
+        }
     }
 }
 

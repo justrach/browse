@@ -239,7 +239,31 @@ final class Bookmarks: ObservableObject {
         return node
     }
 
-    /// A new title or address for one that is kept. chrome.bookmarks.update.
+    /// A folder of your own, its name asked for as a rename's is: inside
+    /// `parent`, or at the top level for nil. An empty name makes none.
+    func askNewFolder(in parent: Bookmark.ID?, made: @escaping (Bookmark.ID) -> Void = { _ in }) {
+        Ask.name("New Folder", placeholder: "Folder name", confirm: "Make") { name in
+            made(self.insert(.folder(name, []), into: parent).id)
+        }
+    }
+
+    /// A folder with bookmarks in it asks first: they all go with it, and
+    /// there is no taking it back. Anything else goes at once.
+    func askRemove(_ node: Bookmark) {
+        guard node.isFolder, let kids = node.children, !kids.isEmpty else { return remove(node.id) }
+        let count = Bookmarks.count(kids)
+        let detail = switch count {
+        case 0: "The empty folders in it go too."
+        case 1: "The bookmark in it goes too."
+        default: "The \(count) bookmarks in it go too."
+        }
+        Ask.sure("Remove \u{201C}\(node.title)\u{201D}?", detail: detail, confirm: "Remove") {
+            self.remove(node.id)
+        }
+    }
+
+    /// A new title or address for one that is kept. chrome.bookmarks.update,
+    /// and Rename… in the list's right-click menu.
     func update(_ id: Bookmark.ID, title: String?, url: String?) {
         func walk(_ nodes: inout [Bookmark]) -> Bool {
             for i in nodes.indices {
@@ -300,6 +324,7 @@ final class Bookmarks: ObservableObject {
 struct BookmarkOutline: View {
     @ObservedObject var bookmarks: Bookmarks
     let open: (URL) -> Void
+    let openInNewTab: (URL) -> Void
 
     @State private var expanded: Set<Bookmark.ID> = []
     @State private var dragging: Bookmark.ID?
@@ -320,14 +345,25 @@ struct BookmarkOutline: View {
             Row(
                 node: node,
                 depth: depth,
-                open: node.isFolder ? nil : { open(URL(string: node.url!)!) },
+                // An extension can write an address that does not parse,
+                // and the menu below already unwraps this the same way.
+                open: node.isFolder ? nil : { if let text = node.url, let url = URL(string: text) { open(url) } },
                 isOpen: expanded.contains(node.id),
                 dragging: dragging == node.id,
                 toggle: node.isFolder ? { toggle(node.id) } : nil,
                 moveTargets: Bookmarks.folders(bookmarks.roots).filter { !Bookmarks.holds($0.node.id, node) },
                 moveTo: { bookmarks.move(node.id, into: $0) },
-                remove: { bookmarks.remove(node.id) }
+                rename: { rename(node) },
+                newFolder: node.isFolder ? {
+                    bookmarks.askNewFolder(in: node.id) { _ in expanded.insert(node.id) }
+                } : nil,
+                remove: { bookmarks.askRemove(node) }
             )
+            .overlay {
+                if let url = node.url.flatMap(URL.init(string:)) {
+                    MiddleClick { openInNewTab(url) }
+                }
+            }
             .onDrag {
                 dragging = node.id
                 return NSItemProvider(object: node.id.uuidString as NSString)
@@ -352,6 +388,16 @@ struct BookmarkOutline: View {
 
     private func toggle(_ id: Bookmark.ID) {
         if expanded.contains(id) { expanded.remove(id) } else { expanded.insert(id) }
+    }
+
+    /// A name of your own for a bookmark or a folder, asked for the way a
+    /// space's is: the page's title is what a bookmark starts with, and a
+    /// folder brought in from another browser is called after it. The name
+    /// it has arrives in the field; an empty one changes nothing.
+    private func rename(_ node: Bookmark) {
+        Ask.name(node.isFolder ? "Rename Folder" : "Rename Bookmark", placeholder: node.title, initial: node.title, confirm: "Rename") {
+            bookmarks.update(node.id, title: $0, url: nil)
+        }
     }
 
     private func drop(_ providers: [NSItemProvider], into folderID: Bookmark.ID?) -> Bool {
@@ -397,6 +443,9 @@ struct BookmarkOutline: View {
         let toggle: (() -> Void)?
         let moveTargets: [(node: Bookmark, depth: Int)]
         let moveTo: (Bookmark.ID?) -> Void
+        let rename: () -> Void
+        /// A folder in this one: only on a folder.
+        let newFolder: (() -> Void)?
         let remove: () -> Void
 
         @State private var hovering = false
@@ -443,6 +492,10 @@ struct BookmarkOutline: View {
                     Button("Open", action: open)
                     Divider()
                 }
+                Button("Rename…", action: rename)
+                if let newFolder {
+                    Button("New Folder Inside…", action: newFolder)
+                }
                 Menu("Move to") {
                     Button("Top Level", action: { moveTo(nil) })
                     if !moveTargets.isEmpty {
@@ -479,6 +532,8 @@ struct BookmarksDropdown: View {
                 ScrollView {
                     BookmarkOutline(bookmarks: bookmarks) { url in
                         browser.pickBookmark(url)
+                    } openInNewTab: { url in
+                        browser.pickBookmark(url, inNewTab: true)
                     }
                     .padding(6)
                 }
@@ -543,6 +598,8 @@ struct BookmarksPanel: View {
                     Card {
                         BookmarkOutline(bookmarks: bookmarks) { url in
                             browser.pickBookmark(url)
+                        } openInNewTab: { url in
+                            browser.pickBookmark(url, inNewTab: true)
                         }
                         .padding(.horizontal, 6)
                         .padding(.vertical, 6)
@@ -563,6 +620,7 @@ struct BookmarksPanel: View {
                 }
                 Pill("Safari or a file…") { browser.importExport() }
                 Spacer()
+                Pill("New Folder…") { bookmarks.askNewFolder(in: nil) }
                 Text(bookmarks.count == 1 ? "1 bookmark" : "\(bookmarks.count) bookmarks")
                     .font(.system(size: 12))
                     .foregroundStyle(Palette.muted)
