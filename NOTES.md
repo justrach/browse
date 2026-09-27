@@ -1,3 +1,5 @@
+In Split View, the page you're typing in is now the page in front, so ⌘L, Find and Codegraff act on it. And the highlight in Settings' list of pages follows the pointer instead of staying on a row it has left.
+
 In Split View, the page you're typing in is now the page in front — a page that put its own search box in focus no longer leaves ⌘L, Find and Codegraff acting on the other side.
 
 Split View: ⌘D puts two tabs side by side, or pull a tab onto the page — each on a card of its own, the gap pulled to share the room, and the pair still there next launch. The sidebar is glass that takes on the colour of the page beside it, and goes dark on a dark page. Codegraff's chat reads as Harness draws it, keeps a queue of what you type while it works, and can be pinned to one tab — Fill in with Codegraff appears on a page with a form. Tidy This Page takes off the cookie bars and pop-ups the ad blocker let through. Chrome's history comes over, from onboarding or History, and the ad blocker no longer blocks whole sites by accident — Google's logo is back.
