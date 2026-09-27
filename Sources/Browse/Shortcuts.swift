@@ -14,6 +14,7 @@ enum Shortcuts {
         Shortcut(keys: "⌘K", what: "Search open tabs"),
         Shortcut(keys: "⇧⌘T", what: "Reopen closed tab"),
         Shortcut(keys: "⇧⌘N", what: "New private tab"),
+        Shortcut(keys: "⇧⌘⌫", what: "Clear browsing data"),
         Shortcut(keys: "⌃Tab", what: "Next tab"),
         Shortcut(keys: "⌃⇧Tab", what: "Previous tab"),
         Shortcut(keys: "⌘,", what: "Settings"),
