@@ -28,10 +28,14 @@ struct SideBar: View {
     @State private var pinFrom = 0
     @State private var pinTravel: CGSize = .zero
 
-    private static let row: CGFloat = 28
-    private static let gap: CGFloat = 2
-    private static let square: CGFloat = 34
-    private static let pinGap: CGFloat = 4
+    /// A tab's line: room for 13-point type to breathe, as a Mac's own
+    /// sidebars give it.
+    fileprivate static let row: CGFloat = 32
+    fileprivate static let gap: CGFloat = 2
+    /// A pinned tile's height: tall enough for a site's icon to be the tile,
+    /// as favourites are in Arc, rather than a key on a keyboard.
+    private static let square: CGFloat = 48
+    private static let pinGap: CGFloat = 6
 
     var body: some View {
         ZStack(alignment: .top) {
@@ -62,6 +66,10 @@ struct SideBar: View {
                     Color.clear.frame(width: Metrics.sideLights)
                     Helm(browser: browser)
                     Spacer(minLength: 0)
+                    // The page's address, to paste somewhere else.
+                    Door(icon: "link", help: "Copy Address   ⇧⌘C") { browser.copyAddress() }
+                        .disabled(browser.active?.isBlank != false)
+                        .opacity(browser.active?.isBlank != false ? 0.3 : 1)
                 }
                 .frame(height: Metrics.strip)
 
@@ -86,7 +94,13 @@ struct SideBar: View {
         // Rows on their way to or from another space stay in the column.
         .clipped()
         .onAppear { SpaceSwipe.shared.start(for: browser) }
-        .background(landing ? Palette.hover : Palette.ground)
+        // Glass: the desktop behind, blurred, under the theme's own ground.
+        .background {
+            ZStack {
+                SideGlass()
+                (landing ? Palette.hover : Palette.ground).opacity(0.45)
+            }
+        }
         .overlay(alignment: .trailing) {
             Rectangle().fill(Palette.hairline).frame(width: 1)
         }
@@ -240,12 +254,12 @@ struct SideBar: View {
                 }
                 .padding(.bottom, 10)
             }
+            today(loose: !rest.isEmpty)
             VStack(spacing: SideBar.gap) {
                 ForEach(rest) { tab in
                     SideRow(browser: browser, prefs: prefs, tab: tab, live: tab.id == row.active, pill: pill, close: {})
                 }
             }
-            newTab
         }
         .allowsHitTesting(false)
     }
@@ -260,7 +274,9 @@ struct SideBar: View {
         let pinBlock = pinRows == 0 ? 0
             : CGFloat(pinRows) * pinHeight + CGFloat(pinRows - 1) * SideBar.pinGap + 10
         let loose = CGFloat(browser.tabs.count - pins) * (SideBar.row + SideBar.gap)
-        return Metrics.strip + pinBlock + loose + SideBar.row + 8
+        let chats = prefs.usesAgent ? CGFloat(min(SideChats.most, browser.agent.chats.all.count)) * (SideChats.row + SideBar.gap) : 0
+        let ask = prefs.usesAgent ? SideBar.row + SideBar.gap + chats : 0
+        return Metrics.strip + pinBlock + ask + SideBar.todayHeight + loose + 8
     }
 
     // MARK: - the pinned squares
@@ -293,7 +309,7 @@ struct SideBar: View {
     /// The one dimension that doesn't chase the sidebar's width: past three
     /// columns' worth of room a cell would otherwise turn into a big square
     /// rather than the wide, short button pinned tabs actually look like
-    /// everywhere else in this app. It only shrinks below 34 alongside the
+    /// everywhere else in this app. It only shrinks below 48 alongside the
     /// width, once a narrow column leaves no other choice.
     private var pinHeight: CGFloat {
         min(SideBar.square, pinWidth)
@@ -426,18 +442,38 @@ struct SideBar: View {
                 AskTab(browser: browser, pill: pill, title: "Ask Codegraff")
                     .frame(height: SideBar.row)
                     .padding(.bottom, SideBar.gap)
+                SideChats(browser: browser, agent: browser.agent, chats: browser.agent.chats)
             }
+            today(loose: !looseTabs.isEmpty)
             loose
-            newTab
         }
     }
 
     /// The foot's door and its margin beneath.
     private static let footHeight: CGFloat = 26 + 10
 
-    private var newTab: some View {
-        Quiet(icon: "plus", title: "New tab", height: SideBar.row) { browser.newTab() }
-            .padding(.top, SideBar.gap)
+    private static let todayHeight: CGFloat = 26
+
+    /// The line between what's kept and what's today's: a new tab at its
+    /// end, and — while there are any — the loose tabs cleared in one go,
+    /// as Arc's Clear does. Pinned tiles and Codegraff stay; ⌘⇧T brings
+    /// what went back.
+    private func today(loose: Bool) -> some View {
+        HStack(spacing: 2) {
+            Rectangle()
+                .fill(Palette.hairline)
+                .frame(height: 1)
+                .padding(.leading, 10)
+                .padding(.trailing, 6)
+            Nib(icon: "plus", help: "New Tab   ⌘T") { browser.newTab() }
+            if loose {
+                Nib(icon: "trash", help: "Close Tabs That Aren't Pinned") { browser.clearLoose() }
+                    .transition(.opacity)
+            }
+        }
+        .frame(height: SideBar.todayHeight)
+        .padding(.bottom, SideBar.gap)
+        .animation(Motion.quick, value: loose)
     }
 
     /// One small door at the bottom: the settings.
@@ -513,7 +549,9 @@ private struct PinSquare: View {
             if browser.editingPin == tab.id {
                 PinField(browser: browser, tab: tab)
             } else if prefs.glyph == .icons, let icon = tab.icon {
-                Mark(icon: icon, letter: tab.pin ?? "", size: scale * 16 / 34, dim: tab.asleep)
+                // In full colour asleep or awake: a pinned tile is mostly
+                // asleep, and a row of faded icons reads as switched off.
+                Mark(icon: icon, letter: tab.pin ?? "", size: scale * 16 / 34, dim: false)
             } else {
                 Text(tab.pin ?? "")
                     .font(.system(size: scale * 12 / 34, weight: .medium))
@@ -524,12 +562,13 @@ private struct PinSquare: View {
         .frame(width: width, height: height)
         .background {
             if live {
-                RoundedRectangle(cornerRadius: scale * 9 / 34, style: .continuous)
-                    .fill(Palette.wash)
+                Raised(corner: scale * 9 / 34)
                     .matchedGeometryEffect(id: "live", in: pill)
             } else {
+                // The ink, thinly, rather than a grey of its own: on glass a
+                // solid grey is a patch; this is a shade of whatever's behind.
                 RoundedRectangle(cornerRadius: scale * 9 / 34, style: .continuous)
-                    .fill(hovering ? Palette.hover : Palette.wash.opacity(0.55))
+                    .fill(Palette.ink.opacity(hovering ? 0.085 : 0.05))
             }
         }
         .contentShape(RoundedRectangle(cornerRadius: scale * 9 / 34, style: .continuous))
@@ -569,13 +608,13 @@ private struct SideRow: View {
     private var speaker: Bool { !tab.loading && (tab.noisy || tab.muted) }
 
     var body: some View {
-        HStack(spacing: 8) {
+        HStack(spacing: 9) {
             if editing {
                 TabAddressField(browser: browser)
                     .frame(height: 16)
             } else {
                 if prefs.glyph == .icons, !tab.isBlank {
-                    Mark(icon: tab.icon, letter: tab.monogram, size: 15)
+                    Mark(icon: tab.icon, letter: tab.monogram, size: 16)
                 }
                 if tab.bench {
                     // A script's tab, not yours.
@@ -589,7 +628,7 @@ private struct SideRow: View {
                         .foregroundStyle(colour.opacity(0.7))
                 }
                 Text(tab.label)
-                    .font(.system(size: 12.5))
+                    .font(.system(size: 13, weight: live ? .medium : .regular))
                     .lineLimit(1)
                     .truncationMode(.tail)
                     .foregroundStyle(colour)
@@ -614,7 +653,7 @@ private struct SideRow: View {
         }
         .padding(.leading, 10)
         .padding(.trailing, status ? 7 : 10)
-        .frame(height: 28)
+        .frame(height: SideBar.row)
         .frame(maxWidth: .infinity, alignment: .leading)
         // The title keeps its length under the pointer and fades out
         // beneath the cross, rather than being cut shorter, so its end
@@ -645,7 +684,7 @@ private struct SideRow: View {
                 .frame(width: 15, height: 15)
                 .overlay {
                     Color.clear
-                        .frame(width: 30, height: 28)
+                        .frame(width: 30, height: SideBar.row)
                         .contentShape(Rectangle())
                         .onTapGesture { if hovering { close() } }
                 }
@@ -677,7 +716,7 @@ private struct SideRow: View {
     private var ground: some View {
         if live {
             ZStack(alignment: .leading) {
-                Rectangle().fill(Palette.wash)
+                Raised(corner: 9)
                 if prefs.showsReading {
                     GeometryReader { geo in
                         Rectangle()
@@ -685,19 +724,21 @@ private struct SideRow: View {
                             .frame(width: geo.size.width * tab.reading)
                             .animation(.easeOut(duration: 0.15), value: tab.reading)
                     }
+                    .clipShape(RoundedRectangle(cornerRadius: 9, style: .continuous))
                 }
             }
-            .clipShape(RoundedRectangle(cornerRadius: 9, style: .continuous))
             .matchedGeometryEffect(id: "live", in: pill)
         } else if hovering {
             RoundedRectangle(cornerRadius: 9, style: .continuous)
-                .fill(Palette.hover)
+                .fill(Palette.ink.opacity(0.05))
         }
     }
 
+    /// Every title in ink, as a list you read rather than a list of
+    /// what's switched off; the one you're on is only a shade stronger.
     private var colour: Color {
-        if live { return Palette.ink }
-        return hovering ? Palette.ink.opacity(0.7) : Palette.muted
+        if live || hovering { return Palette.ink }
+        return Palette.ink.opacity(0.78)
     }
 }
 
@@ -757,6 +798,99 @@ struct Speaker: View {
         .buttonStyle(.plain)
         .onHover { hovering = $0 }
         .help(tab.muted ? "Unmute Tab" : "Mute Tab")
+        .animation(Motion.quick, value: hovering)
+    }
+}
+
+/// The latest chats with Codegraff, under its row, pinned ones first: one
+/// pressed puts that conversation back on the stage, picked up with graff
+/// where it was left. Right-click renames, pins or deletes it; the Ask page
+/// has them all, and a search.
+private struct SideChats: View {
+    @ObservedObject var browser: Browser
+    @ObservedObject var agent: Agent
+    @ObservedObject var chats: Chats
+
+    @State private var renaming: Chat?
+
+    static let most = 4
+    static let row: CGFloat = 28
+
+    var body: some View {
+        VStack(spacing: SideBar.gap) {
+            ForEach(Array(chats.ordered.prefix(Self.most))) { chat in
+                ChatRow(chat: chat, live: browser.talkOnStage && agent.chatID == chat.id) {
+                    browser.takeStage()
+                    agent.resume(chat)
+                }
+                .contextMenu { ChatMenu(chat: chat, agent: agent) { renaming = chat } }
+            }
+        }
+        .padding(.bottom, chats.all.isEmpty ? 0 : SideBar.gap)
+        .modifier(ChatRenamer(chats: chats, chat: $renaming))
+    }
+}
+
+/// One chat, as a line tucked under Codegraff's. The one on screen is
+/// marked quietly: the raised glass is Codegraff's own row's.
+private struct ChatRow: View {
+    let chat: Chat
+    let live: Bool
+    let open: () -> Void
+
+    @State private var hovering = false
+
+    var body: some View {
+        Button(action: open) {
+            HStack(spacing: 8) {
+                Image(systemName: chat.isPinned ? "pin.fill" : "bubble.left")
+                    .font(.system(size: 9.5))
+                    .foregroundStyle(Palette.muted)
+                    .frame(width: 14)
+                Text(chat.title.isEmpty ? "Untitled" : chat.title)
+                    .font(.system(size: 12.5))
+                    .lineLimit(1)
+                    .truncationMode(.tail)
+                    .foregroundStyle(live || hovering ? Palette.ink : Palette.ink.opacity(0.66))
+                Spacer(minLength: 0)
+            }
+            .padding(.leading, 22)
+            .padding(.trailing, 10)
+            .frame(height: SideChats.row)
+            .background(
+                RoundedRectangle(cornerRadius: 8, style: .continuous)
+                    .fill(Palette.ink.opacity(live ? 0.07 : hovering ? 0.045 : 0))
+            )
+            .contentShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
+        }
+        .buttonStyle(.plain)
+        .onHover { hovering = $0 }
+        .help(chat.title)
+        .animation(Motion.quick, value: hovering)
+    }
+}
+
+/// A Door's smaller cousin, for the end of a line: a symbol and nothing else
+/// until the pointer is on it.
+private struct Nib: View {
+    let icon: String
+    var help = ""
+    let act: () -> Void
+
+    @State private var hovering = false
+
+    var body: some View {
+        Button(action: act) {
+            Image(systemName: icon)
+                .font(.system(size: 10, weight: .medium))
+                .foregroundStyle(hovering ? Palette.ink.opacity(0.75) : Palette.muted)
+                .frame(width: 22, height: 22)
+                .background(Circle().fill(Palette.ink.opacity(hovering ? 0.07 : 0)))
+                .contentShape(Circle())
+        }
+        .buttonStyle(.plain)
+        .onHover { hovering = $0 }
+        .help(help)
         .animation(Motion.quick, value: hovering)
     }
 }

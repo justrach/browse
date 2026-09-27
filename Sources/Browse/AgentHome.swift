@@ -16,6 +16,9 @@ struct AgentHome: View {
     @State private var mode: Mode = .ask
     @State private var typed = ""
     @State private var everything = false
+    /// What the chats are being searched for.
+    @State private var looking = ""
+    @State private var renaming: Chat?
     @State private var shake: CGFloat = 0
     @FocusState private var focused: Bool
 
@@ -55,6 +58,7 @@ struct AgentHome: View {
             .scrollIndicators(.never)
         }
         .background(Palette.ground)
+        .modifier(ChatRenamer(chats: chats, chat: $renaming))
         .onAppear { DispatchQueue.main.async { focused = true } }
         .animation(Motion.settle, value: everything)
         .animation(Motion.quick, value: mode)
@@ -168,7 +172,24 @@ struct AgentHome: View {
                     .padding(.vertical, 6)
                     .background(Palette.wash, in: RoundedRectangle(cornerRadius: 9, style: .continuous))
                 Spacer(minLength: 0)
+                // Past a row of them, a way to find one.
                 if chats.all.count > 3 {
+                    HStack(spacing: 6) {
+                        Image(systemName: "magnifyingglass")
+                            .font(.system(size: 11))
+                            .foregroundStyle(Palette.muted)
+                        TextField("", text: $looking, prompt: Text("Search chats").foregroundStyle(Palette.muted.opacity(0.8)))
+                            .textFieldStyle(.plain)
+                            .font(.system(size: 12.5))
+                            .foregroundStyle(Palette.ink)
+                    }
+                    .padding(.horizontal, 10)
+                    .padding(.vertical, 6)
+                    .frame(width: 220)
+                    .background(Palette.hover, in: RoundedRectangle(cornerRadius: 9, style: .continuous))
+                    .overlay(RoundedRectangle(cornerRadius: 9, style: .continuous).strokeBorder(Palette.hairline, lineWidth: 1))
+                }
+                if chats.all.count > 3, looking.isEmpty {
                     Button { everything.toggle() } label: {
                         HStack(spacing: 4) {
                             Text(everything ? "Fewer" : "All Chats")
@@ -188,13 +209,20 @@ struct AgentHome: View {
                     .foregroundStyle(Palette.muted)
                     .padding(.vertical, 20)
             } else {
+                let found = chats.ordered.filter { $0.mentions(looking) }
+                let shown = everything || !looking.isEmpty ? found : Array(found.prefix(3))
+                if shown.isEmpty {
+                    Text("No chat mentions “\(looking)”.")
+                        .font(.system(size: 12.5))
+                        .foregroundStyle(Palette.muted)
+                        .padding(.vertical, 20)
+                }
                 LazyVGrid(columns: Array(repeating: GridItem(.flexible(), spacing: 16, alignment: .top), count: 3), spacing: 16) {
-                    ForEach(everything ? chats.all : Array(chats.all.prefix(3))) { chat in
+                    ForEach(shown) { chat in
                         ChatCard(chat: chat) {
                             agent.resume(chat)
-                        } forget: {
-                            agent.forget(chat)
                         }
+                        .contextMenu { ChatMenu(chat: chat, agent: agent) { renaming = chat } }
                     }
                 }
             }
@@ -207,7 +235,6 @@ struct AgentHome: View {
 private struct ChatCard: View {
     let chat: Chat
     let open: () -> Void
-    let forget: () -> Void
 
     @State private var hovering = false
 
@@ -220,9 +247,15 @@ private struct ChatCard: View {
     var body: some View {
         Button(action: open) {
             VStack(alignment: .leading, spacing: 6) {
-                Text(abs(chat.updated.timeIntervalSinceNow) < 60 ? "Just now" : Self.ago.localizedString(for: chat.updated, relativeTo: Date()))
-                    .font(.system(size: 11.5))
-                    .foregroundStyle(Palette.muted)
+                HStack(spacing: 5) {
+                    if chat.isPinned {
+                        Image(systemName: "pin.fill")
+                            .font(.system(size: 9))
+                    }
+                    Text(abs(chat.updated.timeIntervalSinceNow) < 60 ? "Just now" : Self.ago.localizedString(for: chat.updated, relativeTo: Date()))
+                }
+                .font(.system(size: 11.5))
+                .foregroundStyle(Palette.muted)
                 Text(chat.title.isEmpty ? "Untitled" : chat.title)
                     .font(.system(size: 14, weight: .semibold))
                     .foregroundStyle(Palette.ink)
@@ -253,9 +286,6 @@ private struct ChatCard: View {
         .buttonStyle(.plain)
         .onHover { hovering = $0 }
         .animation(Motion.quick, value: hovering)
-        .contextMenu {
-            Button("Delete Chat", role: .destructive, action: forget)
-        }
         .help(chat.title)
     }
 
@@ -336,5 +366,44 @@ struct AgentNotice: View {
             .foregroundStyle(Palette.muted)
             .textSelection(.enabled)
             .fixedSize(horizontal: false, vertical: true)
+    }
+}
+
+/// What can be done to a chat wherever it's listed — on the Ask page and in
+/// the sidebar: renamed, pinned to the top, or deleted.
+struct ChatMenu: View {
+    let chat: Chat
+    let agent: Agent
+    let rename: () -> Void
+
+    var body: some View {
+        Button("Rename…", action: rename)
+        Button(chat.isPinned ? "Unpin" : "Pin to Top") { agent.chats.pin(chat.id, !chat.isPinned) }
+        Divider()
+        Button("Delete Chat", role: .destructive) { agent.forget(chat) }
+    }
+}
+
+/// Asks what a chat should be called. Left empty, it's named after the
+/// first thing asked again.
+struct ChatRenamer: ViewModifier {
+    let chats: Chats
+    @Binding var chat: Chat?
+
+    @State private var name = ""
+
+    func body(content: Content) -> some View {
+        content
+            .alert("Rename Chat", isPresented: Binding(get: { chat != nil }, set: { if !$0 { chat = nil } })) {
+                TextField("Name", text: $name)
+                Button("Rename") {
+                    if let chat { chats.rename(chat.id, to: name) }
+                    chat = nil
+                }
+                Button("Cancel", role: .cancel) { chat = nil }
+            } message: {
+                Text("Leave it empty to name it after the first thing asked.")
+            }
+            .onChange(of: chat?.id) { _, _ in name = chat?.title ?? "" }
     }
 }

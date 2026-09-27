@@ -214,3 +214,50 @@ struct Shake: GeometryEffect {
         )
     }
 }
+
+/// What's picked, raised off the column: a lens of Liquid Glass where the Mac
+/// has it (macOS 26 on), the theme's wash where it doesn't. A thin light
+/// edge along the top and a soft shadow beneath are what make it read as
+/// lifted rather than as a grey patch.
+struct Raised: View {
+    let corner: CGFloat
+
+    var body: some View {
+        let shape = RoundedRectangle(cornerRadius: corner, style: .continuous)
+        Group {
+            // Glass is in the macOS 26 SDK (Swift 6.2); an older Xcode builds
+            // the wash alone.
+            #if compiler(>=6.2)
+            if #available(macOS 26, *) {
+                Color.clear.glassEffect(.regular.interactive(), in: shape)
+            } else {
+                shape.fill(Palette.wash)
+            }
+            #else
+            shape.fill(Palette.wash)
+            #endif
+        }
+        // Light catching the top edge and fading down it, as on a pane of
+        // glass lit from above.
+        .overlay(shape.strokeBorder(
+            LinearGradient(colors: [.white.opacity(0.65), .white.opacity(0.12)], startPoint: .top, endPoint: .bottom),
+            lineWidth: 0.75
+        ))
+        .shadow(color: .black.opacity(0.10), radius: 4, y: 1.5)
+    }
+}
+
+/// Behind the sidebar: the desktop, blurred, as a Mac's own sidebars show
+/// it, with the theme's ground laid over so every theme still reads as
+/// itself — only lighter.
+struct SideGlass: NSViewRepresentable {
+    func makeNSView(context: Context) -> NSVisualEffectView {
+        let view = NSVisualEffectView()
+        view.material = .sidebar
+        view.blendingMode = .behindWindow
+        view.state = .followsWindowActiveState
+        return view
+    }
+
+    func updateNSView(_ view: NSVisualEffectView, context: Context) {}
+}

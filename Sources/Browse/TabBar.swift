@@ -310,23 +310,31 @@ struct AskTab: View {
                     .frame(width: 16, height: 16)
                 if let title {
                     Text(title)
-                        .font(.system(size: 12.5))
+                        .font(.system(size: 13, weight: live ? .medium : .regular))
                     Spacer(minLength: 0)
                 }
             }
-            .foregroundStyle(live ? Palette.ink : (hovering ? Palette.ink.opacity(0.7) : Palette.muted))
+            // As a row in the column it reads like the tabs under it (Side.swift).
+            .foregroundStyle(live || (title != nil && hovering) ? Palette.ink
+                             : title != nil ? Palette.ink.opacity(0.78)
+                             : (hovering ? Palette.ink.opacity(0.7) : Palette.muted))
             .padding(.horizontal, title == nil ? 7 : 10)
             .padding(.vertical, 6)
             .frame(width: title == nil ? width : nil)
             .frame(maxWidth: title == nil ? nil : .infinity, alignment: .leading)
             .background {
-                if live {
+                if live, title != nil {
+                    // The column's raised glass, as its tabs have.
+                    Raised(corner: 9)
+                        .matchedGeometryEffect(id: "live", in: pill)
+                } else if live {
                     RoundedRectangle(cornerRadius: 9, style: .continuous)
                         .fill(Palette.wash)
                         .matchedGeometryEffect(id: "live", in: pill)
                 } else {
                     RoundedRectangle(cornerRadius: 9, style: .continuous)
-                        .fill(hovering ? Palette.hover : (title == nil ? Palette.wash.opacity(0.55) : .clear))
+                        .fill(title != nil ? Palette.ink.opacity(hovering ? 0.05 : 0)
+                              : (hovering ? Palette.hover : Palette.wash.opacity(0.55)))
                 }
             }
             .contentShape(RoundedRectangle(cornerRadius: 9, style: .continuous))
@@ -836,6 +844,12 @@ struct TabMenu: View {
         }
         .disabled(tab.isBlank)
         Button(tab.muted ? "Unmute Tab" : "Mute Tab") { tab.toggleMute() }
+        Divider()
+        // Codegraff on this tab alone (Browser.talk).
+        Button("Ask Codegraff About This Tab") { browser.talk(about: tab) }
+            .disabled(tab.isBlank)
+        Button("Fill In the Form with Codegraff") { browser.talk(about: tab, task: Browser.fillTask) }
+            .disabled(tab.isBlank)
         Divider()
         Button("Close Tab", action: close)
         Button("Close Other Tabs") { browser.closeOthers(but: tab) }
