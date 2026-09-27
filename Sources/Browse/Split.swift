@@ -62,6 +62,8 @@ extension Browser {
                          fraction: split?.fraction ?? 0.5)
         } else {
             guard active.id != tab.id else { return }
+            // An empty tab has nothing to put beside: the page just takes it.
+            guard !active.isBlank else { select(tab); return }
             pair = Split(left: side == .left ? tab.id : active.id, right: side == .left ? active.id : tab.id)
         }
         withAnimation(Motion.glide) {
@@ -75,7 +77,7 @@ extension Browser {
     /// The tab in front beside the tab looked at before it — the other way
     /// round from `open`, since what you were reading stays in front.
     func split(with tab: Tab) {
-        guard let active, active.id != tab.id, !active.isBlank || !tab.isBlank else { return }
+        guard let active, active.id != tab.id, !active.isBlank, !tab.isBlank else { return }
         if talkOnStage { leaveStage() }
         let pair = Split(left: active.id, right: tab.id)
         withAnimation(Motion.glide) {
@@ -89,7 +91,7 @@ extension Browser {
     /// front is split with the tab looked at before it.
     func toggleSplit() {
         if shownSplit != nil { unsplit(); return }
-        guard let active else { return }
+        guard let active, !active.isBlank else { NSSound.beep(); return }
         let others = tabs.filter { $0.id != active.id && !$0.isBlank && !$0.shy }
         guard let partner = others.max(by: { $0.touched < $1.touched }) else { NSSound.beep(); return }
         split(with: partner)

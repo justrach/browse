@@ -31,7 +31,9 @@ final class Browser: NSObject, ObservableObject {
 
     /// Two tabs kept side by side (Split.swift). Shown whenever either is
     /// the tab in front.
-    @Published var split: Split?
+    @Published var split: Split? {
+        didSet { if split != oldValue { rememberSession() } }
+    }
     /// A tab carried out of the sidebar over the page, where it is in the
     /// window (SplitDropZone lights the half it's over).
     @Published var splitDrag: CGPoint?
@@ -1261,13 +1263,19 @@ final class Browser: NSObject, ObservableObject {
             }
             return
         }
-        for entry in saved.tabs {
+        // Which tab each saved entry became, for the pair.
+        var made: [Int: Tab] = [:]
+        for (at, entry) in saved.tabs.enumerated() {
             guard let url = URL(string: entry.url) else { continue }
             let tab = Tab()
             prepare(tab)
             tab.restore(url: url, title: entry.title, name: entry.name)
             tab.pin = entry.pin
             tabs.append(tab)
+            made[at] = tab
+        }
+        if let pair = saved.split, pair.count == 2, let left = made[pair[0]], let right = made[pair[1]], left !== right {
+            split = Split(left: left.id, right: right.id, fraction: CGFloat(saved.share ?? 0.5))
         }
         guard !tabs.isEmpty else {
             adopt(Tab())
@@ -1275,8 +1283,10 @@ final class Browser: NSObject, ObservableObject {
         }
         let here = min(max(0, saved.active), tabs.count - 1)
         activeID = tabs[here].id
-        // Only the one you were looking at actually loads.
+        // Only the one you were looking at actually loads — and its other
+        // half, when it's one of a pair on screen.
         tabs[here].wake()
+        wakePair()
     }
 
     /// The few settings that something else has to be told about. The rest are
@@ -1396,23 +1406,35 @@ final class Browser: NSObject, ObservableObject {
     }
 
     func writeSession(now: Bool = false) {
+        var entries: [Session.Entry] = []
+        // Where each tab written landed in the list, for the pair.
+        var written: [Tab.ID: Int] = [:]
+        for tab in tabs {
+            guard !tab.shy, !tab.bench else { continue }
+            // A sleeping tab holds its address in `pending`; asking for
+            // it there too means a pin can never be written out of
+            // existence by whatever its web view happens to be showing.
+            guard let url = tab.pending ?? tab.address,
+                  url.scheme?.hasPrefix("http") == true
+            else { continue }
+            written[tab.id] = entries.count
+            entries.append(Session.Entry(
+                url: url.absoluteString, title: tab.title, pin: tab.pin, name: tab.name
+            ))
+        }
+        // Two tabs side by side (Split.swift), by their places in the list.
+        var pair: [Int]?
+        if let split, let left = written[split.left], let right = written[split.right] {
+            pair = [left, right]
+        }
         Session.write(
             now: now,
             space: spaceID,
             .init(
-                tabs: tabs.compactMap { tab in
-                    guard !tab.shy, !tab.bench else { return nil }
-                    // A sleeping tab holds its address in `pending`; asking for
-                    // it there too means a pin can never be written out of
-                    // existence by whatever its web view happens to be showing.
-                    guard let url = tab.pending ?? tab.address,
-                          url.scheme?.hasPrefix("http") == true
-                    else { return nil }
-                    return Session.Entry(
-                        url: url.absoluteString, title: tab.title, pin: tab.pin, name: tab.name
-                    )
-                },
-                active: tabs.firstIndex { $0.id == activeID } ?? 0
+                tabs: entries,
+                active: tabs.firstIndex { $0.id == activeID } ?? 0,
+                split: pair,
+                share: pair == nil ? nil : Double(split?.fraction ?? 0.5)
             )
         )
     }
@@ -1531,8 +1553,14 @@ final class Browser: NSObject, ObservableObject {
     func close(_ tab: Tab) {
         guard let index = tabs.firstIndex(where: { $0.id == tab.id }) else { return }
 
-        // Half a pair gone is no pair: the other half is a tab of its own.
-        if split?.has(tab.id) == true { split = nil }
+        // Half a pair gone is no pair: the other half is a tab of its own,
+        // and the one you land on if this one was in front.
+        var partner: Tab?
+        if let pair = split, pair.has(tab.id) {
+            let other = pair.left == tab.id ? pair.right : pair.left
+            partner = tabs.first { $0.id == other }
+            split = nil
+        }
 
         // A tab whose page is out in the little window takes the window with
         // it. Left alone, the window would go on holding a page belonging to a
@@ -1583,7 +1611,7 @@ final class Browser: NSObject, ObservableObject {
             // right — through select(), same as everywhere else you land on
             // a tab, so one that was never built yet actually wakes up
             // instead of sitting there blank until a manual reload.
-            select(tabs[min(index, tabs.count - 1)])
+            select(partner ?? tabs[min(index, tabs.count - 1)])
         }
         rememberSession()
     }

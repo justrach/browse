@@ -501,6 +501,10 @@ final class Bench {
             var out: [String: Any] = [
                 "settings": browser.tuning,
                 "welcome": browser.welcoming,
+                // Two tabs side by side (Split.swift): kept, and on screen.
+                "split": browser.split.map { ["left": $0.left.uuidString, "right": $0.right.uuidString,
+                                              "fraction": $0.fraction, "shown": browser.shownSplit != nil] as [String: Any] } ?? [:],
+                "talkOnStage": browser.talkOnStage,
                 "passwords": browser.managing,
                 "history": browser.recalling,
                 "downloads": browser.hoarding,
