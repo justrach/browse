@@ -1022,32 +1022,36 @@ final class Bench {
 
         case "import":
             // Another browser's passwords, bookmarks and history, brought in
-            // through the same calls the Welcome and the panels make. Only on
-            // a test run, which reads made-up profiles from its own folder's
-            // Import/ (see Chromium.base), never a real browser.
+            // through the same calls the import sheet makes. Only on a test
+            // run, which reads made-up profiles from its own folder's Import/
+            // (see Chromium.base), never a real browser.
             guard Store.testing else { answer(["error": "import only works on a --test run"]); return }
-            let found = Chromium.installed()
+            let found = ImportSource.installed()
             guard let source = found.first(where: { $0.name == request["from"] as? String }) else {
                 answer(["found": found.map(\.name)])
                 return
             }
             let what = request["what"] as? [String] ?? []
-            var out: [String: Any] = ["found": found.map(\.name), "profiles": source.folders.map(\.lastPathComponent)]
+            let profile = request["profile"] as? String
+            var out: [String: Any] = ["found": found.map(\.name), "profiles": source.profiles.map(\.id)]
+            let preview = source.preview(profile: profile)
+            out["preview"] = ["bookmarks": preview.bookmarks, "places": preview.places, "passwords": preview.passwords,
+                              "extensions": preview.extensions, "sealedBookmarks": preview.sealedBookmarks]
             if what.contains("bookmarks") {
-                let (added, already) = browser.bookmarks.take(Chromium.bookmarks(in: source), from: source.name)
+                let (added, already) = browser.takeBookmarks(from: source, profile: profile)
                 out["bookmarks"] = ["added": added, "already": already, "total": browser.bookmarks.count,
                                     "top": browser.bookmarks.roots.map(\.title)]
             }
             if what.contains("history") {
-                let places = Chromium.places(in: source)
+                let places = source.places(profile: profile, limit: 10_000)
                 for place in places { browser.history.take(place.url, title: place.title, count: place.count, last: place.last) }
                 browser.history.settle()
                 out["places"] = places.count
             }
             if what.contains("passwords") {
-                let outcome = Result { try Chromium.read(source) }
+                let outcome = Result { try source.read(profile: profile) }
                 if case .success(let read) = outcome { out["read"] = read.logins.count }
-                browser.took(outcome, from: source)
+                browser.took(outcome, from: source.name)
                 out["saved"] = browser.saved.count
             }
             answer(out)

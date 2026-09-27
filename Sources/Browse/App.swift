@@ -530,6 +530,9 @@ struct ContentView: View {
         if browser.managing {
             sheet { PasswordsPanel(browser: browser) } close: { browser.managing = false }
         }
+        if browser.bringingIn != nil {
+            sheet { ImportPanel(browser: browser) } close: { browser.bringingIn = nil }
+        }
         if browser.reviewing {
             // No dimming for this one: the whole point is to keep looking at
             // the page while the list offers to put things back on it.
@@ -615,6 +618,7 @@ struct ContentView: View {
             .animation(Motion.settle, value: browser.showingShortcuts)
             .animation(Motion.settle, value: browser.bookmarking)
             .animation(Motion.settle, value: browser.managing)
+            .animation(Motion.settle, value: browser.bringingIn != nil)
             .animation(Motion.settle, value: browser.reviewing)
         .onAppear {
             watchKeys()
@@ -954,6 +958,10 @@ struct ContentView: View {
             }
             if browser.managing {
                 browser.managing = false
+                return true
+            }
+            if browser.bringingIn != nil {
+                browser.bringingIn = nil
                 return true
             }
             if browser.recalling {

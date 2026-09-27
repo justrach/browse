@@ -51,7 +51,7 @@ struct HistoryPanel: View {
     @State private var bringing = false
 
     /// Another browser's history into this one, then the list again.
-    private func bring(from source: Chromium.Source) {
+    private func bring(from source: ImportSource) {
         browser.unlock(source) {
             bringing = true
             browser.takePlaces(from: source) { count in
@@ -139,7 +139,7 @@ struct HistoryPanel: View {
                             .foregroundStyle(Palette.muted)
                     } else {
                         Menu {
-                            ForEach(Chromium.present()) { source in
+                            ForEach(ImportSource.present()) { source in
                                 Button(source.name) { bring(from: source) }
                             }
                             Divider()

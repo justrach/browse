@@ -254,12 +254,14 @@ final class Browser: NSObject, ObservableObject {
         announce("Bookmarked")
     }
 
-    /// Another browser's bookmarks, folders and all — and, behind them, the
-    /// icons it had for those sites, so the menu wears them from the start
-    /// instead of a letter each. Returns how many pages came over.
+    /// Another browser's bookmarks, folders and all — one profile's, or
+    /// every profile's when nil — and, behind them, the icons it had for
+    /// those sites, so the menu wears them from the start instead of a
+    /// letter each. Returns how many pages came over, and how many were
+    /// here already.
     @discardableResult
-    func takeBookmarks(from source: Chromium.Source) -> Int {
-        let found = Chromium.bookmarks(in: source)
+    func takeBookmarks(from source: ImportSource, profile: String? = nil) -> (added: Int, already: Int) {
+        let found = source.bookmarks(profile: profile)
         let (count, already) = bookmarks.take(found, from: source.name)
         announce(
             Bookmarks.count(found) == 0 ? "No bookmarks in \(source.name)"
@@ -269,14 +271,21 @@ final class Browser: NSObject, ObservableObject {
         )
         let urls = Bookmarks.urls(found)
         DispatchQueue.global(qos: .utility).async {
-            let icons = Chromium.icons(in: source, for: urls)
+            let icons = source.icons(profile: profile, for: urls)
             Task { @MainActor in
                 for (host, data) in icons { await Favicons.shared.adopt(data, for: host) }
                 self.objectWillChange.send()
             }
         }
-        return count
+        return (count, already)
     }
+
+    /// The "Bring things over" sheet (ImportPanel), open while set: the
+    /// browser it starts on by name, or "" for the first one found.
+    @Published var bringingIn: String?
+    /// The sheet opened from Settings › Extensions: only the extensions
+    /// ticked, on a browser that has some. Read once as it opens.
+    var bringingExtensions = false
 
     /// ⇧⌘S. The same tabs, down the left or across the top.
     func toggleSidebar() {
@@ -691,8 +700,8 @@ final class Browser: NSObject, ObservableObject {
     /// itself once it can, while they're in System Settings. True when it
     /// ran now.
     @discardableResult
-    func unlock(_ source: Chromium.Source, then go: @escaping () -> Void) -> Bool {
-        guard Chromium.locked(source) else { go(); return true }
+    func unlock(_ source: ImportSource, then go: @escaping () -> Void) -> Bool {
+        guard source.locked else { go(); return true }
         let alert = NSAlert()
         alert.messageText = "macOS keeps \(source.name)'s folder for \(source.name) alone"
         alert.informativeText = """
@@ -716,7 +725,7 @@ final class Browser: NSObject, ObservableObject {
             for _ in 0..<300 {
                 try? await Task.sleep(for: .seconds(1))
                 guard !Task.isCancelled, let self else { return }
-                if !Chromium.locked(source) {
+                if !source.locked {
                     self.unlockWatch = nil
                     self.announce("Full Disk Access is on — bringing \(source.name)'s things over")
                     go()
@@ -727,34 +736,51 @@ final class Browser: NSObject, ObservableObject {
         return false
     }
 
+    /// The same, for a Chromium browser.
+    @discardableResult
+    func unlock(_ source: Chromium.Source, then go: @escaping () -> Void) -> Bool {
+        unlock(.chromium(source), then: go)
+    }
+
     private var unlockWatch: Task<Void, Never>?
 
-    /// What came back from another browser's store, put in the keychain.
-    func took(_ outcome: Result<Chromium.Found, Error>, from source: Chromium.Source) {
+    /// What came back from another browser's store, put in the keychain,
+    /// with the sites it was told never to ask about. Saving one already
+    /// kept updates it, so bringing the same in again adds nothing twice.
+    /// Returns how many were kept.
+    func keep(_ found: Chromium.Found) -> Int {
+        var kept = 0
+        for login in found.logins
+        where Vault.save(host: login.host, user: login.user, password: login.password, used: login.used, clear: login.clear) {
+            kept += 1
+        }
+        var never = Vault.never
+        found.never.forEach { never.insert($0) }
+        Vault.never = never
+        relist()
+        return kept
+    }
+
+    /// The same, said as it lands.
+    func took(_ outcome: Result<Chromium.Found, Error>, from name: String) {
         switch outcome {
         case .success(let found):
-            var kept = 0
-            for login in found.logins
-            where Vault.save(host: login.host, user: login.user, password: login.password, used: login.used, clear: login.clear) {
-                kept += 1
-            }
-            var never = Vault.never
-            found.never.forEach { never.insert($0) }
-            Vault.never = never
-            relist()
-            announce(kept == 0 ? "Nothing new in \(source.name)" : "\(kept) passwords from \(source.name)")
+            let kept = keep(found)
+            announce(kept == 0 ? "Nothing new in \(name)" : "\(kept) passwords from \(name)")
         case .failure(Chromium.Trouble.noPassphrase):
-            announce("\(source.name) didn't give up its keychain key")
+            announce("\(name) didn't give up its keychain key")
+        case .failure(Mozilla.Trouble.primaryPassword):
+            announce("\(name) has a primary password — export your passwords from it and bring in the CSV file")
         case .failure:
-            announce("Nothing readable in \(source.name)")
+            announce("Nothing readable in \(name)")
         }
     }
 
     /// The other browser's history, into this one's. Off the main thread for
     /// the reading; the merge itself is a moment.
-    func takePlaces(from source: Chromium.Source, then done: @escaping (Int) -> Void) {
+    func takePlaces(from source: ImportSource, profile: String? = nil, then done: @escaping (Int) -> Void) {
         DispatchQueue.global(qos: .userInitiated).async {
-            let places = Chromium.places(in: source)
+            let places = source.places(profile: profile, limit: 10_000)
             DispatchQueue.main.async {
                 for place in places {
                     self.history.take(place.url, title: place.title, count: place.count, last: place.last)
@@ -770,8 +796,8 @@ final class Browser: NSObject, ObservableObject {
     /// first profile goes into the first space only while that has no
     /// sign-ins of its own — a first run — so nothing here is written over;
     /// a profile brought in before goes back into its space.
-    func takeSignIns(from source: Chromium.Source) async -> String {
-        let profiles = Chromium.profiles(in: source)
+    func takeSignIns(from source: Chromium.Source, profile: String? = nil) async -> String {
+        let profiles = Chromium.profiles(in: source).filter { profile == nil || $0.folder.lastPathComponent == profile }
         let read = await Task.detached(priority: .userInitiated) { () -> Result<[(Chromium.Profile, [HTTPCookie])], Error> in
             Result {
                 let key = try Chromium.key(for: source)
@@ -833,10 +859,10 @@ final class Browser: NSObject, ObservableObject {
     /// browser. `done` hears what came over, as the announcement says it.
     func importExport(then done: ((String) -> Void)? = nil) {
         let panel = NSOpenPanel()
-        panel.allowedContentTypes = [.zip, .html, .json]
+        panel.allowedContentTypes = [.zip, .html, .json, .commaSeparatedText]
         panel.allowsMultipleSelection = false
         panel.prompt = "Import"
-        panel.message = "In Safari, File › Export Browsing Data to File… makes this zip. A bookmarks file from any browser works too."
+        panel.message = "A file another browser exported: Safari's File › Export Browsing Data to File… (.zip), bookmarks (.html), or passwords (.csv)."
         guard panel.runModal() == .OK, let url = panel.url else { return }
         DispatchQueue.global(qos: .userInitiated).async {
             let outcome = Result { try SafariExport.read(url) }

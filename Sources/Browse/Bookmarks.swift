@@ -40,12 +40,12 @@ final class Bookmarks: ObservableObject {
     /// How many sites, folders included.
     var count: Int { Bookmarks.count(roots) }
 
-    static func count(_ nodes: [Bookmark]) -> Int {
+    nonisolated static func count(_ nodes: [Bookmark]) -> Int {
         nodes.reduce(0) { $0 + ($1.isFolder ? count($1.children ?? []) : 1) }
     }
 
     /// Every site in the list, in order, folders opened.
-    static func urls(_ nodes: [Bookmark]) -> [URL] {
+    nonisolated static func urls(_ nodes: [Bookmark]) -> [URL] {
         nodes.flatMap { node -> [URL] in
             if node.isFolder { return urls(node.children ?? []) }
             return node.url.flatMap(URL.init(string:)).map { [$0] } ?? []
@@ -606,13 +606,9 @@ struct BookmarksPanel: View {
             }
         } foot: {
             HStack(spacing: 8) {
-                Text("Bring in from")
-                    .font(.system(size: 12))
-                    .foregroundStyle(Palette.muted)
-                ForEach(Chromium.present()) { source in
-                    Pill(source.name) {
-                        browser.unlock(source) { browser.takeBookmarks(from: source) }
-                    }
+                Pill("From another browser…") {
+                    browser.bookmarking = false
+                    browser.bringingIn = ""
                 }
                 Pill("Safari or a file…") { browser.importExport() }
                 Spacer()
