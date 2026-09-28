@@ -62,20 +62,24 @@ The release workflow needs five repository secrets
 |---|---|
 | `MACOS_CERTIFICATE` | The **Developer ID Application** certificate with its private key, exported as .p12, base64 |
 | `MACOS_CERTIFICATE_PASSWORD` | The password given when exporting it |
-| `APPLE_ID` | The Apple Account that notarises |
-| `APPLE_APP_PASSWORD` | An app-specific password for it, from account.apple.com › Sign-In and Security |
-| `APPLE_TEAM_ID` | The team, `WWP9DLJ27P` |
+| `AC_API_KEY_P8` | An App Store Connect API key, which notarises: the downloaded `AuthKey_<id>.p8`, as it is |
+| `AC_API_KEY_ID` | Its key ID |
+| `AC_API_ISSUER_ID` | The issuer ID shown above the keys |
 
 The certificate: in Keychain Access, find "Developer ID Application: …" under
 My Certificates, open it to show the private key under it, select the
-certificate, File › Export Items…, save as .p12 with a password. Then:
+certificate, File › Export Items…, save as .p12 with a password.
+
+The API key: in App Store Connect, Users and Access › Integrations › App Store
+Connect API, make a Team key with the Developer role and download its .p8
+(Apple offers it only once). The issuer ID is above the list of keys. Then:
 
 ```sh
 base64 -i DeveloperID.p12 | gh secret set MACOS_CERTIFICATE -R justrach/browse
 gh secret set MACOS_CERTIFICATE_PASSWORD -R justrach/browse   # asks for it
-gh secret set APPLE_ID -R justrach/browse
-gh secret set APPLE_APP_PASSWORD -R justrach/browse
-gh secret set APPLE_TEAM_ID -R justrach/browse --body WWP9DLJ27P
+gh secret set AC_API_KEY_P8 -R justrach/browse < AuthKey_<id>.p8
+gh secret set AC_API_KEY_ID -R justrach/browse --body <id>
+gh secret set AC_API_ISSUER_ID -R justrach/browse   # asks for it
 rm DeveloperID.p12
 ```
 
