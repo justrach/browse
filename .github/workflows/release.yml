@@ -6,9 +6,10 @@
 # Needs these repository secrets (docs/releasing.md says how to make them):
 #   MACOS_CERTIFICATE           the Developer ID Application certificate, .p12, base64
 #   MACOS_CERTIFICATE_PASSWORD  the .p12's password
-#   APPLE_ID                    the Apple Account that notarises
-#   APPLE_APP_PASSWORD          an app-specific password for it
-#   APPLE_TEAM_ID               the team, e.g. WWP9DLJ27P
+#   AC_API_KEY_P8               an App Store Connect API key (the .p8's contents),
+#                               which notarises
+#   AC_API_KEY_ID               its key ID
+#   AC_API_ISSUER_ID            its issuer ID
 # And, for passkeys (optional; without it the app is signed without them):
 #   MACOS_PROVISION_PROFILE     the Developer ID provisioning profile, base64
 name: release
@@ -67,12 +68,12 @@ jobs:
         env:
           CERTIFICATE: ${{ secrets.MACOS_CERTIFICATE }}
           CERTIFICATE_PASSWORD: ${{ secrets.MACOS_CERTIFICATE_PASSWORD }}
-          APPLE_ID: ${{ secrets.APPLE_ID }}
-          APPLE_APP_PASSWORD: ${{ secrets.APPLE_APP_PASSWORD }}
-          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+          AC_API_KEY_P8: ${{ secrets.AC_API_KEY_P8 }}
+          AC_API_KEY_ID: ${{ secrets.AC_API_KEY_ID }}
+          AC_API_ISSUER_ID: ${{ secrets.AC_API_ISSUER_ID }}
         run: |
           if [ -n "$CERTIFICATE" ] && [ -n "$CERTIFICATE_PASSWORD" ] \
-            && [ -n "$APPLE_ID" ] && [ -n "$APPLE_APP_PASSWORD" ] && [ -n "$APPLE_TEAM_ID" ]; then
+            && [ -n "$AC_API_KEY_P8" ] && [ -n "$AC_API_KEY_ID" ] && [ -n "$AC_API_ISSUER_ID" ]; then
             echo "available=true" >> "$GITHUB_OUTPUT"
           else
             echo "available=false" >> "$GITHUB_OUTPUT"
@@ -117,9 +118,9 @@ jobs:
         env:
           CERTIFICATE: ${{ secrets.MACOS_CERTIFICATE }}
           CERTIFICATE_PASSWORD: ${{ secrets.MACOS_CERTIFICATE_PASSWORD }}
-          APPLE_ID: ${{ secrets.APPLE_ID }}
-          APPLE_APP_PASSWORD: ${{ secrets.APPLE_APP_PASSWORD }}
-          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+          AC_API_KEY_P8: ${{ secrets.AC_API_KEY_P8 }}
+          AC_API_KEY_ID: ${{ secrets.AC_API_KEY_ID }}
+          AC_API_ISSUER_ID: ${{ secrets.AC_API_ISSUER_ID }}
         run: |
           [ -n "$CERTIFICATE" ] || { echo "MACOS_CERTIFICATE isn't set — see docs/releasing.md" >&2; exit 1; }
           KEYCHAIN="$RUNNER_TEMP/release.keychain-db"
@@ -132,8 +133,10 @@ jobs:
           security set-key-partition-list -S apple-tool:,apple: -s -k "$PASSWORD" "$KEYCHAIN" >/dev/null
           security list-keychains -d user -s "$KEYCHAIN" $(security list-keychains -d user | tr -d '"')
           rm "$RUNNER_TEMP/certificate.p12"
-          xcrun notarytool store-credentials release --apple-id "$APPLE_ID" --team-id "$APPLE_TEAM_ID" \
-            --password "$APPLE_APP_PASSWORD" --keychain "$KEYCHAIN"
+          printf '%s' "$AC_API_KEY_P8" > "$RUNNER_TEMP/notary-key.p8"
+          xcrun notarytool store-credentials release --key "$RUNNER_TEMP/notary-key.p8" \
+            --key-id "$AC_API_KEY_ID" --issuer "$AC_API_ISSUER_ID" --keychain "$KEYCHAIN"
+          rm "$RUNNER_TEMP/notary-key.p8"
           echo "SEARCH_NOTARY_KEYCHAIN=$KEYCHAIN" >> "$GITHUB_ENV"
           echo "SEARCH_SIGN_IDENTITY=$(security find-identity -v -p codesigning "$KEYCHAIN" | grep -o '"Developer ID Application: [^"]*"' | head -1 | tr -d '"')" >> "$GITHUB_ENV"
 
