@@ -11,6 +11,37 @@ in [ROADMAP.md](ROADMAP.md).
 
 ## Unreleased
 
+### Added
+
+- Bring things over from another browser in one sheet: Chrome and its Beta, Dev and Canary, Arc, Brave, Edge, Vivaldi, Chromium, Dia, Opera and Opera GX, Comet, Helium, Firefox and Zen. Bookmarks (the ones Chrome keeps for your account, and sealed ones, too), history and passwords, from every profile, the newest copy, with nothing added twice. On macOS 27, where other browsers' folders need Full Disk Access, browse opens the setting and carries on by itself once it's on. Passwords can come from a CSV file too.
+- ⌘D with one page open, or from an empty tab, splits with a new tab: the empty side has the address field, standing over that half. Split View in the menu works whenever there's a page.
+- Bookmark folders of your own, folders inside folders too; a bookmark or a folder is renamed from its right-click menu, and a middle-click on one opens it in a new tab.
+- A default page zoom for every site, in Settings › General.
+- Prevent cross-site tracking can be turned off, as in Safari.
+- A double-click below the tabs opens a new one.
+- ⇧⌘⌫ opens the controls for clearing browsing data.
+- ⌥⌘R reloads from the origin, as in Safari; ⌘R reloads as before.
+- A mouse's sideways wheel goes from space to space in the column.
+- Two fingers sideways on a canvas pan it instead of going back.
+- A search suggestion wears the engine's icon.
+
+### Fixed
+
+- ⌘K is browse's on every page, and ⌘← and ⌘→ go back and forward again.
+- A tab no longer wears another site's icon.
+- The window opens at its saved size instead of jumping to it, and moves from the top band with the tab bar folded away too.
+- A folded sidebar comes out when the pointer overshoots the window's left edge, and stays out while the bookmarks list is open.
+- A tab opened only to download a file closes once the file is on its way; the download button on a PDF saves it.
+- A middle-click opens a link on pages that stop the click on its way up; a link's right-click menu says Open Link in New Tab.
+- Scrolling is lighter: it no longer redraws the window for the reading fill, the caret or a turning load ring.
+- Faster address suggestions with a large history; ⌥⌫ lets go of an inline completion and deletes the last word; editing a tab's address keeps its port, query and fragment.
+- Saves land in order, the right tab comes back at launch, and pages parked in another space reach History.
+- Passkeys carry the WebAuthn PRF extension through.
+- Extensions: ScriptCat's requests work, Figma's and NordPass's sign-ins return, 1Password's popup hears the app, Bitwarden signs in, a second click on a button closes its popup, popups stay anchored after switching tab layouts, and extensions load before a restored page. Their permissions are kept to what they asked for.
+- Camera and microphone choices are kept per site, and never for a private tab; a private tab's downloads stay out of the list.
+- The floating video drags on the first click, the Web Inspector comes back with its tab, and Reduce Motion follows the system setting.
+- Dev servers' addresses open: 0.0.0.0, [::1], .local and 172.16/12.
+
 ## 1.1.2 — 27 September 2026
 
 ### Fixed

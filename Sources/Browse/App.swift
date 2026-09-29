@@ -94,7 +94,7 @@ struct BrowseApp: App {
                 // before it.
                 Button(browser.shownSplit != nil ? "Leave Split View" : "Split View") { browser.toggleSplit() }
                     .keyboardShortcut("d")
-                    .disabled(browser.shownSplit == nil && browser.tabs.filter { !$0.isBlank }.count < 2)
+                    .disabled(browser.shownSplit == nil && !browser.tabs.contains { !$0.isBlank })
                 if browser.shownSplit != nil {
                     Button("Swap Sides") { browser.swapSplit() }
                 }
@@ -495,10 +495,20 @@ struct ContentView: View {
                 // Centred on the page, not on the window. The column of tabs
                 // is not what the field is standing over, and dimming it along
                 // with the page says otherwise.
-                .padding(.leading, sidebar ? browser.prefs.sideWidth : 0)
-                .padding(.trailing, consulting && !browser.agentFull ? browser.prefs.agentWidth : 0)
+                .padding(.leading, (sidebar ? browser.prefs.sideWidth : 0) + otherHalf.leading)
+                .padding(.trailing, (consulting && !browser.agentFull ? browser.prefs.agentWidth : 0) + otherHalf.trailing)
                 .transition(.scale(scale: 0.97).combined(with: .opacity))
         }
+    }
+
+    /// In a split, the field stands over the half in front — the empty
+    /// side ⌘D just opened, say — not across both pages.
+    private var otherHalf: (leading: CGFloat, trailing: CGFloat) {
+        guard let pair = browser.shownSplit, let split = browser.split else { return (0, 0) }
+        let width = browser.stageFrame.width
+        let usable = max(1, width - Split.gap * 3)
+        let left = Split.gap * 1.5 + usable * min(0.8, max(0.2, split.fraction))
+        return pair.left.id == browser.activeID ? (0, width - left) : (left, 0)
     }
 
     /// The panels. All the same kind of thing, so they are built the same way.

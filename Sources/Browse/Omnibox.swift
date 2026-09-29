@@ -30,7 +30,8 @@ struct Omnibox: View {
             }
 
             field
-                .frame(width: Metrics.fieldWidth)
+                // Narrower over one half of a split than the page is wide.
+                .frame(maxWidth: Metrics.fieldWidth)
                 // The list hangs below the field rather than stacking with it,
                 // so a list that grows never lifts the field out from under
                 // what is being typed.
@@ -40,10 +41,11 @@ struct Omnibox: View {
                     // keeps that from moving the field.
                     if !browser.offers.isEmpty {
                         list
-                            .frame(width: Metrics.fieldWidth)
+                            .frame(maxWidth: Metrics.fieldWidth)
                             .offset(y: Self.fieldHeight + 8)
                     }
                 }
+                .padding(.horizontal, 24)
                 // Lifted a little above centre: dead centre reads as low,
                 // because the strip at the top isn't part of what the eye is
                 // measuring.
