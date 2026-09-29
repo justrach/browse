@@ -1,3 +1,5 @@
+Bring things over from another browser in one sheet — Chrome and its channels, Arc, Brave, Edge, Vivaldi, Dia, Opera, Comet, Helium, Firefox and Zen: bookmarks, history and passwords from every profile, with nothing added twice, and on macOS 27 browse asks for Full Disk Access and carries on by itself once it's on. ⌘D splits with a new tab when there's no other page to put beside. Bookmark folders of your own, a default page zoom for every site, a switch for Prevent cross-site tracking, and a long list of fixes to tabs, scrolling, downloads and extensions.
+
 In Split View, the page you're typing in is now the page in front, so ⌘L, Find and Codegraff act on it. And the highlight in Settings' list of pages follows the pointer instead of staying on a row it has left.
 
 In Split View, the page you're typing in is now the page in front — a page that put its own search box in focus no longer leaves ⌘L, Find and Codegraff acting on the other side.

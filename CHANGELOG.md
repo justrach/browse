@@ -11,6 +11,8 @@ in [ROADMAP.md](ROADMAP.md).
 
 ## Unreleased
 
+## 1.2.0 — 29 September 2026
+
 ### Added
 
 - Bring things over from another browser in one sheet: Chrome and its Beta, Dev and Canary, Arc, Brave, Edge, Vivaldi, Chromium, Dia, Opera and Opera GX, Comet, Helium, Firefox and Zen. Bookmarks (the ones Chrome keeps for your account, and sealed ones, too), history and passwords, from every profile, the newest copy, with nothing added twice. On macOS 27, where other browsers' folders need Full Disk Access, browse opens the setting and carries on by itself once it's on. Passwords can come from a CSV file too.
