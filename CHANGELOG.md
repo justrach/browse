@@ -11,6 +11,8 @@ in [ROADMAP.md](ROADMAP.md).
 
 ## Unreleased
 
+## 1.2.1 — 29 September 2026
+
 ### Added
 
 - Onboarding has a page for Google's suggestions as you type: a drawn address field types a few searches by itself, with Google's rows under them while the switch is on, so what it does is seen before it's chosen. Still off until turned on.
