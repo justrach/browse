@@ -1,10 +1,10 @@
 import SwiftUI
 
-/// The first time. Six short pages over the window, in the app's own
+/// The first time. Seven short pages over the window, in the app's own
 /// language: what this is, signing in to Codegraff, what to bring over, how
-/// to hold it, what Codegraff does on a page, and whether links from other
-/// apps should come here. Nothing is asked twice, and every
-/// page can be skipped.
+/// to hold it, whether Google suggests as you type, what Codegraff does on a
+/// page, and whether links from other apps should come here. Nothing is
+/// asked twice, and every page can be skipped.
 struct WelcomePanel: View {
     @ObservedObject var browser: Browser
     @ObservedObject var prefs: Preferences
@@ -35,7 +35,7 @@ struct WelcomePanel: View {
     @State private var asked = false
     @State private var remindShortcuts = false
 
-    private let pages = 6
+    private let pages = 7
 
     var body: some View {
         ZStack {
@@ -49,7 +49,8 @@ struct WelcomePanel: View {
                     case 1: account
                     case 2: bring
                     case 3: hold
-                    case 4: codegraff
+                    case 4: suggest
+                    case 5: codegraff
                     default: links
                     }
                 }
@@ -187,6 +188,135 @@ struct WelcomePanel: View {
                     .font(.system(size: 13))
                     .foregroundStyle(Palette.muted)
                 Segmented(options: Glyph.allCases.map { ($0, $0.title) }, selection: $prefs.glyph)
+            }
+        }
+    }
+
+    /// Google's suggestions under the address field: off until asked for,
+    /// since what's typed goes to Google before Return. The field drawn
+    /// above the switch shows what the switch changes.
+    private var suggest: some View {
+        VStack(alignment: .leading, spacing: 22) {
+            heading("Suggestions as you type.", "The address field can ask Google what people search for while you're still typing, as Chrome and Safari do. What you type then goes to Google before you press Return — never an address, and never from a private tab.")
+            SuggestDemo(on: prefs.googleSuggestions && prefs.engine == .google)
+            Choice("Google search suggestions",
+                   prefs.engine == .google
+                       ? "Change your mind in Settings › General"
+                       : "Only while Google is the search engine; yours is \(prefs.engine.name(custom: prefs.customEngine))",
+                   on: $prefs.googleSuggestions)
+        }
+    }
+
+    /// The address field, drawn: it types a few searches by itself, with
+    /// Google's rows under them while the switch is on. Nothing is sent
+    /// anywhere; the rows are written here.
+    private struct SuggestDemo: View {
+        let on: Bool
+        @State private var typed = ""
+        @State private var which = 0
+
+        private static let searches: [(words: String, said: [String])] = [
+            ("where to eat", ["where to eat near me", "where to eat tonight", "where to eat in tokyo"]),
+            ("how long to boil an egg", ["how long to boil an egg soft", "how long to boil an egg for ramen", "how long to boil an egg in the microwave"]),
+            ("weather this weekend", ["weather this weekend near me", "weather this weekend for hiking", "weather this weekend in london"]),
+        ]
+
+        /// Google's rows for what's typed so far.
+        private var said: [String] {
+            let start = typed.lowercased()
+            guard on, start.count >= 2 else { return [] }
+            return Self.searches[which].said.filter { $0.hasPrefix(start) && $0 != start }
+        }
+
+        var body: some View {
+            VStack(spacing: 8) {
+                HStack(spacing: 1) {
+                    Text(typed)
+                        .font(.system(size: 14.5))
+                        .foregroundStyle(Palette.ink)
+                    Rectangle()
+                        .fill(Palette.accent)
+                        .frame(width: 1.5, height: 17)
+                    Spacer(minLength: 0)
+                }
+                .padding(.horizontal, 18)
+                .frame(height: 44)
+                .background(Palette.ground, in: RoundedRectangle(cornerRadius: 12, style: .continuous))
+                .overlay(RoundedRectangle(cornerRadius: 12, style: .continuous).strokeBorder(Palette.hairline, lineWidth: 1))
+
+                if !typed.isEmpty {
+                    VStack(spacing: 0) {
+                        ForEach(said, id: \.self) { words in
+                            row("magnifyingglass", phrase(words))
+                                .transition(.opacity)
+                        }
+                        row("magnifyingglass", Text(typed), note: "Google")
+                        row("sparkle", Text(typed), note: "Ask Codegraff", keys: "⌘↩")
+                    }
+                    .padding(5)
+                    .background(Palette.ground, in: RoundedRectangle(cornerRadius: 12, style: .continuous))
+                    .overlay(RoundedRectangle(cornerRadius: 12, style: .continuous).strokeBorder(Palette.hairline, lineWidth: 1))
+                }
+            }
+            .shadow(color: .black.opacity(0.06), radius: 16, y: 5)
+            .animation(Motion.quick, value: said)
+            // Room for every row, so the switch below never moves.
+            .frame(height: 236, alignment: .top)
+            .allowsHitTesting(false)
+            .task { await play() }
+        }
+
+        /// Words typed plain, what Google adds in bold, as the real list has it.
+        private func phrase(_ words: String) -> Text {
+            guard words.count > typed.count else { return Text(words) }
+            let split = words.index(words.startIndex, offsetBy: typed.count)
+            return Text(words[..<split]).foregroundStyle(Palette.ink.opacity(0.72))
+                + Text(words[split...]).fontWeight(.semibold)
+        }
+
+        private func row(_ icon: String, _ words: Text, note: String? = nil, keys: String? = nil) -> some View {
+            HStack(spacing: 10) {
+                Image(systemName: icon)
+                    .font(.system(size: 10, weight: .medium))
+                    .foregroundStyle(Palette.muted)
+                    .frame(width: 14)
+                words
+                    .font(.system(size: 13))
+                    .foregroundStyle(Palette.ink)
+                    .lineLimit(1)
+                if let note {
+                    Text(note)
+                        .font(.system(size: 12))
+                        .foregroundStyle(Palette.muted)
+                }
+                Spacer(minLength: 0)
+                if let keys {
+                    Text(keys)
+                        .font(.system(size: 11, design: .rounded))
+                        .foregroundStyle(Palette.muted.opacity(0.8))
+                }
+            }
+            .padding(.horizontal, 12)
+            .padding(.vertical, 8)
+        }
+
+        /// A key at a time, a pause to read, and the next search. With
+        /// Reduce Motion on, one search, typed out and still.
+        private func play() async {
+            if Motion.reduced {
+                typed = Self.searches[0].words
+                return
+            }
+            while !Task.isCancelled {
+                let words = Self.searches[which].words
+                for count in 1...words.count {
+                    typed = String(words.prefix(count))
+                    guard (try? await Task.sleep(nanoseconds: 80_000_000)) != nil else { return }
+                }
+                guard (try? await Task.sleep(nanoseconds: 2_600_000_000)) != nil else { return }
+                typed = ""
+                guard (try? await Task.sleep(nanoseconds: 500_000_000)) != nil else { return }
+                which = (which + 1) % Self.searches.count
             }
         }
     }
