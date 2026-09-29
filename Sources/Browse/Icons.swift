@@ -106,6 +106,17 @@ final class Favicons {
         arrived?(host, image)
     }
 
+    /// A site's icon with no page of it open — the search engine's, for the
+    /// rows under the address field: its /favicon.ico, asked once a session,
+    /// and nothing if one is already kept.
+    func fetch(host: String) {
+        let host = host.lowercased()
+        guard cached(host) == nil, !busy.contains(host), !missing.contains(host),
+              let url = URL(string: "https://\(host)/favicon.ico") else { return }
+        busy.insert(host)
+        Task { await download([url], host: host, key: host, shy: false) }
+    }
+
     /// Asks the page which icon it wants to be known by, fetches it, and keeps
     /// it. Nothing happens if a fresh one is already on disk.
     func fetch(for tab: Tab) {

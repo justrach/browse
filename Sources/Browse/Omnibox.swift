@@ -152,12 +152,12 @@ struct Omnibox: View {
         var body: some View {
             HStack(spacing: 10) {
                 switch offer.kind {
-                case .search:
-                    // The engine's own icon when this Mac already has it: a
-                    // search sent to a site you have been to says so with the
-                    // site rather than a magnifying glass. Nothing is fetched
-                    // for one that isn't known; the glass is what the row
-                    // wears until then.
+                case .search, .google:
+                    // The engine's own icon, on its suggestions too: a search
+                    // sent to a site says so with the site rather than a
+                    // magnifying glass. Browser.guess fetches it once when no
+                    // page of it has been open; the glass is what the row
+                    // wears until it's here.
                     if let host = offer.url.host()?.lowercased(), let icon = Favicons.shared.cached(host) {
                         Image(nsImage: icon)
                             .resizable()
@@ -171,10 +171,6 @@ struct Omnibox: View {
                     }
                 case .searched:
                     Image(systemName: "clock.arrow.circlepath")
-                        .font(.system(size: 10, weight: .medium))
-                        .foregroundStyle(Palette.muted)
-                case .google:
-                    Image(systemName: "magnifyingglass")
                         .font(.system(size: 10, weight: .medium))
                         .foregroundStyle(Palette.muted)
                 case .ask:
