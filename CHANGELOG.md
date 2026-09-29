@@ -14,6 +14,7 @@ in [ROADMAP.md](ROADMAP.md).
 ### Added
 
 - Onboarding has a page for Google's suggestions as you type: a drawn address field types a few searches by itself, with Google's rows under them while the switch is on, so what it does is seen before it's chosen. Still off until turned on.
+- The search engine's icon on its rows under the address field, Google's suggestions included. On a Mac that has never opened the engine's site, browse fetches the icon once, instead of showing a magnifying glass.
 
 ## 1.2.0 — 29 September 2026
 
