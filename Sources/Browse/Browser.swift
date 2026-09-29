@@ -1274,6 +1274,10 @@ final class Browser: NSObject, ObservableObject {
                     tab.icon = image
                 }
             }
+            // The search engine's, for the rows under the field.
+            if fieldShowing, offers.contains(where: { $0.url.host()?.lowercased() == lower }) {
+                objectWillChange.send()
+            }
         }
         // The little window's own three buttons.
         floater.onReturn = { [weak self] in
@@ -2382,6 +2386,9 @@ final class Browser: NSObject, ObservableObject {
             list.append(
                 Suggestion(key: typed, title: prefs.engine.name(custom: prefs.customEngine), url: asked, kind: .search)
             )
+            // The engine's icon for its rows, fetched once if no page of it
+            // has been open yet — a new Mac's field wore a magnifying glass.
+            if !privateTab, let host = asked.host() { Favicons.shared.fetch(host: host) }
         }
         // Words that aren't a place can be a question instead: the last row
         // hands them to Codegraff, with the page you're on.
