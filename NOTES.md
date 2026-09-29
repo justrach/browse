@@ -1,3 +1,5 @@
+Onboarding shows what Google's suggestions as you type look like, and asks before turning them on. Google's suggestion rows wear its icon, and a new Mac fetches it once instead of showing a magnifying glass.
+
 Bring things over from another browser in one sheet — Chrome and its channels, Arc, Brave, Edge, Vivaldi, Dia, Opera, Comet, Helium, Firefox and Zen: bookmarks, history and passwords from every profile, with nothing added twice, and on macOS 27 browse asks for Full Disk Access and carries on by itself once it's on. ⌘D splits with a new tab when there's no other page to put beside. Bookmark folders of your own, a default page zoom for every site, a switch for Prevent cross-site tracking, and a long list of fixes to tabs, scrolling, downloads and extensions.
 
 In Split View, the page you're typing in is now the page in front, so ⌘L, Find and Codegraff act on it. And the highlight in Settings' list of pages follows the pointer instead of staying on a row it has left.
