@@ -11,6 +11,8 @@ in [ROADMAP.md](ROADMAP.md).
 
 ## Unreleased
 
+## 1.2.2 — 29 September 2026
+
 ### Changed
 
 - A simpler icon, the same as the website's: two pages and the sun between them, in the Dock, the disk image, onboarding and Settings.
