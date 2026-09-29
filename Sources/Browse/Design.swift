@@ -187,7 +187,7 @@ enum Motion {
     }
 }
 
-/// The same Codegraff artwork used for the Dock icon. The bundle copy is
+/// browse's mark, the same as the Dock icon and the website's. The bundle copy is
 /// used in packaged builds; a source-tree build can load the original file.
 struct BrandMark: View {
     private static let artwork: NSImage? = {

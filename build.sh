@@ -122,7 +122,8 @@ if [ "$CONFIG" = "release" ]; then
   strip -x "$APP/Contents/MacOS/Browse"
 fi
 
-# Build the macOS icon from the Codegraff artwork used in the app.
+# Build the macOS icon from the mark used in the app — browse's own, the
+# same as the website's: two pages and the sun between them.
 ICONSET="build/AppIcon.iconset"
 rm -rf "$ICONSET"
 mkdir -p "$ICONSET"
