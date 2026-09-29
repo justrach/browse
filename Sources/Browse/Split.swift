@@ -88,13 +88,29 @@ extension Browser {
     }
 
     /// ⌘D: the pair on screen goes back to one page; otherwise the tab in
-    /// front is split with the tab looked at before it.
+    /// front is split with the tab looked at before it. With no other page
+    /// to put beside it — one page open, or an empty tab in front — the
+    /// other side is an empty tab with the address field open, as a new tab
+    /// is: ⌘D used to only beep there, and read as broken.
     func toggleSplit() {
         if shownSplit != nil { unsplit(); return }
-        guard let active, !active.isBlank else { NSSound.beep(); return }
+        guard let active else { NSSound.beep(); return }
         let others = tabs.filter { $0.id != active.id && !$0.isBlank && !$0.shy }
-        guard let partner = others.max(by: { $0.touched < $1.touched }) else { NSSound.beep(); return }
-        split(with: partner)
+        let last = others.max(by: { $0.touched < $1.touched })
+        if !active.isBlank, let last {
+            split(with: last)
+            return
+        }
+        guard let page = active.isBlank ? last : active else { NSSound.beep(); return }
+        if talkOnStage { leaveStage() }
+        if !active.isBlank { newTab() }
+        guard let empty = self.active, empty.id != page.id else { return }
+        let pair = Split(left: page.id, right: empty.id)
+        withAnimation(Motion.glide) {
+            split = pair
+            keepTogether(pair)
+        }
+        wakePair()
     }
 
     func unsplit() {
