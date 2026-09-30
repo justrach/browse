@@ -11,6 +11,8 @@ in [ROADMAP.md](ROADMAP.md).
 
 ## Unreleased
 
+## 1.4.1 — 1 October 2026
+
 ### Fixed
 
 - Settings switches expose their name and state to keyboard navigation and accessibility. Enabling Codegraff offers Open beside page; missing installations link directly to setup. Switching it off closes either chat mode and prevents late page reads or startup work from reviving it.
