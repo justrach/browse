@@ -1,17 +1,14 @@
 import SwiftUI
 
-/// The first time. Seven short pages over the window, in the app's own
-/// language: what this is, signing in to Codegraff, what to bring over, how
-/// to hold it, whether Google suggests as you type, what Codegraff does on a
-/// page, and whether links from other apps should come here. Nothing is
-/// asked twice, and every page can be skipped.
+/// Five optional steps, with a first question ready to edit at the end.
+/// Preferences take effect as they are chosen; leaving setup never sends a prompt.
 struct WelcomePanel: View {
     @ObservedObject var browser: Browser
     @ObservedObject var prefs: Preferences
 
     /// A test run can open on another page (the welcome.start setting), for
     /// pictures of it.
-    @State private var page = Store.testing ? Store.settings.integer(forKey: "welcome.start") : 0
+    @State private var page = Store.testing ? min(4, max(0, Store.settings.integer(forKey: "welcome.start"))) : 0
     @State private var forward = true
 
     // Bringing things over. Nil until one is picked, which means the first:
@@ -35,63 +32,125 @@ struct WelcomePanel: View {
     @State private var asked = false
     @State private var remindShortcuts = false
 
-    private let pages = 7
+    private static let steps = ["Welcome", "Codegraff", "Import", "Your browser", "Ready"]
+    private let pages = Self.steps.count
 
     var body: some View {
         ZStack {
             Palette.ground.ignoresSafeArea()
-
-            VStack(spacing: 0) {
-                Spacer(minLength: 0)
-                ZStack {
-                    switch page {
-                    case 0: welcome
-                    case 1: account
-                    case 2: bring
-                    case 3: hold
-                    case 4: suggest
-                    case 5: codegraff
-                    default: links
+            VStack(spacing: 24) {
+                progress
+                GeometryReader { geometry in
+                    ScrollView {
+                        VStack(spacing: 0) {
+                            Spacer(minLength: 24)
+                            Group {
+                                switch page {
+                                case 0: welcome
+                                case 1: account
+                                case 2: bring
+                                case 3: hold
+                                default: links
+                                }
+                            }
+                            .frame(maxWidth: 560)
+                            .padding(.vertical, 12)
+                            Spacer(minLength: 24)
+                        }
+                        .frame(maxWidth: .infinity)
+                        .frame(minHeight: geometry.size.height)
                     }
+                    .scrollIndicators(.automatic)
+                    .id(page)
+                    .transition(.asymmetric(
+                        insertion: .offset(x: forward ? 20 : -20).combined(with: .opacity),
+                        removal: .opacity
+                    ))
                 }
-                .frame(maxWidth: 520)
-                .id(page)
-                .transition(.asymmetric(
-                    insertion: .offset(x: forward ? 40 : -40).combined(with: .opacity),
-                    removal: .offset(x: forward ? -40 : 40).combined(with: .opacity)
-                ))
-                Spacer(minLength: 0)
                 foot
             }
-            .padding(40)
+            .frame(maxWidth: 700)
+            .padding(.horizontal, 28)
+            .padding(.top, 32)
+            .padding(.bottom, 24)
         }
         .animation(Motion.glide, value: page)
         .transition(.opacity)
     }
 
-    // MARK: - the pages
-
-    private var welcome: some View {
-        VStack(spacing: 22) {
-            Plate(size: 72)
-            VStack(spacing: 10) {
-                Text("browse")
-                    .font(.system(size: 34, weight: .medium))
-                    .foregroundStyle(Palette.ink)
-                Text("A browser with nothing in the way. Four megabytes, the engine already in your Mac, and as little around the page as we could manage.")
-                    .font(.system(size: 14.5))
+    private var progress: some View {
+        VStack(alignment: .leading, spacing: 20) {
+            HStack(spacing: 10) {
+                BrandMark().frame(width: 26, height: 26)
+                Text("Make yourself at home")
+                    .font(.system(size: 12.5, weight: .medium))
                     .foregroundStyle(Palette.muted)
-                    .multilineTextAlignment(.center)
-                    .lineSpacing(3)
-                    .frame(maxWidth: 400)
+                Spacer()
+                Text("\(page + 1) of \(pages)")
+                    .font(.system(size: 12, design: .rounded))
+                    .foregroundStyle(Palette.muted)
+                    .accessibilityLabel("Step \(page + 1) of \(pages): \(Self.steps[page])")
+            }
+            HStack(spacing: 8) {
+                ForEach(Self.steps.indices, id: \.self) { index in
+                    Button {
+                        forward = index > page
+                        page = index
+                    } label: {
+                        VStack(alignment: .leading, spacing: 8) {
+                            Capsule()
+                                .fill(index <= page ? Palette.accent : Palette.wash)
+                                .frame(height: 3)
+                            Text(Self.steps[index])
+                                .font(.system(size: 11.5, weight: index == page ? .medium : .regular))
+                                .foregroundStyle(index == page ? Palette.ink : Palette.muted)
+                        }
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                        .contentShape(Rectangle())
+                    }
+                    .buttonStyle(.plain)
+                    .disabled(bringing)
+                    .accessibilityLabel("Step \(index + 1): \(Self.steps[index])")
+                    .accessibilityAddTraits(index == page ? .isSelected : [])
+                }
             }
         }
     }
 
+    // MARK: - the pages
+
+    private var welcome: some View {
+        VStack(alignment: .leading, spacing: 24) {
+            heading("More room for the web.", "A quiet Mac browser with Codegraff beside your pages. Read, ask a question, and follow the evidence without losing your place.")
+            WelcomeResearchPreview()
+            HStack(alignment: .top, spacing: 24) {
+                welcomeKey("⌘L", "Go somewhere")
+                welcomeKey("⌘;", "Open Codegraff")
+                welcomeKey(".", "Ask beside a page")
+            }
+            Text("Set up what matters to you. Every step is optional, and you can revisit this tour from the Browse menu › Welcome.")
+                .font(.system(size: 12))
+                .foregroundStyle(Palette.muted)
+                .fixedSize(horizontal: false, vertical: true)
+        }
+    }
+
+    private func welcomeKey(_ keys: String, _ title: String) -> some View {
+        VStack(alignment: .leading, spacing: 6) {
+            Text(keys)
+                .font(.system(size: 15, weight: .medium, design: .rounded))
+                .foregroundStyle(Palette.ink)
+            Text(title)
+                .font(.system(size: 11.5))
+                .foregroundStyle(Palette.muted)
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+    }
+
     private var account: some View {
         VStack(alignment: .leading, spacing: 22) {
-            heading("Sign in with Codegraff.", "One account keeps your bookmarks, history and themes the same on every Mac, sealed so only your Macs can read them — and lets Codegraff work beside the page. Skip it if you like; it's in Settings whenever you want it.")
-            AccountCard(browser: browser, inline: true)
+            heading("A research companion, when you want one.", "Ask about a page, compare sources, or work through a bigger question. You choose the model and reasoning effort in the chat.")
+            WelcomeAgentSetup(browser: browser, prefs: prefs, leaveSetup: { finish() })
         }
     }
 
@@ -174,7 +233,7 @@ struct WelcomePanel: View {
 
     private var hold: some View {
         VStack(alignment: .leading, spacing: 22) {
-            heading("Two ways to hold it.", "Titles across the top, or down the side. The grey slides to the tab you pick either way, and you can change your mind with ⇧⌘S.")
+            heading("Make it feel like yours.", "Choose where your tabs live. Change the layout any time with ⇧⌘S, and find these choices again in Settings.")
             HStack(spacing: 12) {
                 Way(title: "Tab strip", sidebar: false, chosen: !prefs.sidebar, glyph: prefs.glyph) {
                     withAnimation(Motion.glide) { prefs.sidebar = false }
@@ -189,270 +248,96 @@ struct WelcomePanel: View {
                     .foregroundStyle(Palette.muted)
                 Segmented(options: Glyph.allCases.map { ($0, $0.title) }, selection: $prefs.glyph)
             }
-        }
-    }
-
-    /// Google's suggestions under the address field: off until asked for,
-    /// since what's typed goes to Google before Return. The field drawn
-    /// above the switch shows what the switch changes.
-    private var suggest: some View {
-        VStack(alignment: .leading, spacing: 22) {
-            heading("Suggestions as you type.", "The address field can ask Google what people search for while you're still typing, as Chrome and Safari do. What you type then goes to Google before you press Return — never an address, and never from a private tab.")
-            SuggestDemo(on: prefs.googleSuggestions && prefs.engine == .google)
-            Choice("Google search suggestions",
-                   prefs.engine == .google
-                       ? "Change your mind in Settings › General"
-                       : "Only while Google is the search engine; yours is \(prefs.engine.name(custom: prefs.customEngine))",
-                   on: $prefs.googleSuggestions)
-        }
-    }
-
-    /// The address field, drawn: it types a few searches by itself, with
-    /// Google's rows under them while the switch is on. Nothing is sent
-    /// anywhere; the rows are written here.
-    private struct SuggestDemo: View {
-        let on: Bool
-        @State private var typed = ""
-        @State private var which = 0
-
-        private static let searches: [(words: String, said: [String])] = [
-            ("where to eat", ["where to eat near me", "where to eat tonight", "where to eat in tokyo"]),
-            ("how long to boil an egg", ["how long to boil an egg soft", "how long to boil an egg for ramen", "how long to boil an egg in the microwave"]),
-            ("weather this weekend", ["weather this weekend near me", "weather this weekend for hiking", "weather this weekend in london"]),
-        ]
-
-        /// Google's rows for what's typed so far.
-        private var said: [String] {
-            let start = typed.lowercased()
-            guard on, start.count >= 2 else { return [] }
-            return Self.searches[which].said.filter { $0.hasPrefix(start) && $0 != start }
-        }
-
-        var body: some View {
-            VStack(spacing: 8) {
-                HStack(spacing: 1) {
-                    Text(typed)
-                        .font(.system(size: 14.5))
-                        .foregroundStyle(Palette.ink)
-                    Rectangle()
-                        .fill(Palette.accent)
-                        .frame(width: 1.5, height: 17)
-                    Spacer(minLength: 0)
-                }
-                .padding(.horizontal, 18)
-                .frame(height: 44)
-                .background(Palette.ground, in: RoundedRectangle(cornerRadius: 12, style: .continuous))
-                .overlay(RoundedRectangle(cornerRadius: 12, style: .continuous).strokeBorder(Palette.hairline, lineWidth: 1))
-
-                if !typed.isEmpty {
-                    VStack(spacing: 0) {
-                        ForEach(said, id: \.self) { words in
-                            row("magnifyingglass", phrase(words))
-                                .transition(.opacity)
-                        }
-                        row("magnifyingglass", Text(typed), note: "Google")
-                        row("sparkle", Text(typed), note: "Ask Codegraff", keys: "⌘↩")
-                    }
-                    .padding(5)
-                    .background(Palette.ground, in: RoundedRectangle(cornerRadius: 12, style: .continuous))
-                    .overlay(RoundedRectangle(cornerRadius: 12, style: .continuous).strokeBorder(Palette.hairline, lineWidth: 1))
-                }
-            }
-            .shadow(color: .black.opacity(0.06), radius: 16, y: 5)
-            .animation(Motion.quick, value: said)
-            // Room for every row, so the switch below never moves.
-            .frame(height: 236, alignment: .top)
-            .allowsHitTesting(false)
-            .task { await play() }
-        }
-
-        /// Words typed plain, what Google adds in bold, as the real list has it.
-        private func phrase(_ words: String) -> Text {
-            guard words.count > typed.count else { return Text(words) }
-            let split = words.index(words.startIndex, offsetBy: typed.count)
-            return Text(words[..<split]).foregroundStyle(Palette.ink.opacity(0.72))
-                + Text(words[split...]).fontWeight(.semibold)
-        }
-
-        private func row(_ icon: String, _ words: Text, note: String? = nil, keys: String? = nil) -> some View {
-            HStack(spacing: 10) {
-                Image(systemName: icon)
-                    .font(.system(size: 10, weight: .medium))
-                    .foregroundStyle(Palette.muted)
-                    .frame(width: 14)
-                words
-                    .font(.system(size: 13))
-                    .foregroundStyle(Palette.ink)
-                    .lineLimit(1)
-                if let note {
-                    Text(note)
-                        .font(.system(size: 12))
-                        .foregroundStyle(Palette.muted)
-                }
-                Spacer(minLength: 0)
-                if let keys {
-                    Text(keys)
-                        .font(.system(size: 11, design: .rounded))
-                        .foregroundStyle(Palette.muted.opacity(0.8))
-                }
-            }
-            .padding(.horizontal, 12)
-            .padding(.vertical, 8)
-        }
-
-        /// A key at a time, a pause to read, and the next search. With
-        /// Reduce Motion on, one search, typed out and still.
-        private func play() async {
-            if Motion.reduced {
-                typed = Self.searches[0].words
-                return
-            }
-            while !Task.isCancelled {
-                let words = Self.searches[which].words
-                for count in 1...words.count {
-                    typed = String(words.prefix(count))
-                    guard (try? await Task.sleep(nanoseconds: 80_000_000)) != nil else { return }
-                }
-                guard (try? await Task.sleep(nanoseconds: 2_600_000_000)) != nil else { return }
-                typed = ""
-                guard (try? await Task.sleep(nanoseconds: 500_000_000)) != nil else { return }
-                which = (which + 1) % Self.searches.count
-            }
-        }
-    }
-
-    /// Codegraff at work on the page you're on, shown once so it's known:
-    /// the form pill as it looks on a page, and a line each for the rest.
-    private var codegraff: some View {
-        VStack(alignment: .leading, spacing: 22) {
-            heading("Codegraff, on the page you're on.", "Beside the page when you want it, out of the way when you don't. On a page it doesn't submit, pay or send anything unless you ask it to.")
-            // The pill as a page with a form shows it, drawn, not pressable.
-            HStack(spacing: 10) {
-                HStack(spacing: 7) {
-                    Image(systemName: "sparkle")
-                        .font(.system(size: 11, weight: .semibold))
-                    Text("Fill in with Codegraff")
-                        .font(.system(size: 12.5, weight: .medium))
-                }
-                .foregroundStyle(Palette.onAccent)
-                .padding(.horizontal, 13)
-                .frame(height: 32)
-                .background(Capsule().fill(Palette.accent))
-                .shadow(color: .black.opacity(0.15), radius: 8, y: 2)
-                Text("appears on a page with a form")
-                    .font(.system(size: 12.5))
-                    .foregroundStyle(Palette.muted)
-            }
-            VStack(alignment: .leading, spacing: 16) {
-                Feature(icon: "sparkle", title: "Fills in forms",
-                        line: "One click and it fills what it knows, asks for the rest in one question, and leaves submitting to you. ⌥⌘F does the same for the page in front.")
-                Feature(icon: "pin", title: "One tab, one agent",
-                        line: "Right-click a tab › Ask Codegraff About This Tab: a chat pinned to it, working there and nowhere else.")
-                Feature(icon: "text.line.first.and.arrowtriangle.forward", title: "Keep typing while it works",
-                        line: "What you send meanwhile waits in a queue above the box and goes in turn; any of it can go now instead.")
-                Feature(icon: "wand.and.stars", title: "Tidy a page",
-                        line: "View › Tidy This Page takes off the cookie bars and pop-ups the ad blocker let through.")
-            }
-            if CodegraffAccount.key() == nil {
-                Text("These need a Codegraff sign-in, a page back.")
-                    .font(.system(size: 12))
-                    .foregroundStyle(Palette.faint)
-            }
-        }
-    }
-
-    private struct Feature: View {
-        let icon: String
-        let title: String
-        let line: String
-
-        var body: some View {
-            HStack(alignment: .top, spacing: 12) {
-                Image(systemName: icon)
-                    .font(.system(size: 12, weight: .medium))
-                    .foregroundStyle(Palette.ink)
-                    .frame(width: 28, height: 28)
-                    .background(Palette.ink.opacity(0.05), in: RoundedRectangle(cornerRadius: 7, style: .continuous))
-                VStack(alignment: .leading, spacing: 2) {
-                    Text(title)
-                        .font(.system(size: 13.5, weight: .medium))
-                        .foregroundStyle(Palette.ink)
-                    Text(line)
-                        .font(.system(size: 12.5))
-                        .foregroundStyle(Palette.muted)
-                        .lineSpacing(1.5)
-                        .fixedSize(horizontal: false, vertical: true)
-                }
-            }
+            Divider()
+            Choice("Google search suggestions", "Optional · sends search words to Google as you type", on: $prefs.googleSuggestions)
+            Text(prefs.engine == .google
+                 ? "When enabled, search words go to Google before you press Return. Addresses and searches in private tabs are never sent for suggestions."
+                 : "Suggestions work only with Google. Your search engine is \(prefs.engine.name(custom: prefs.customEngine)). Addresses and private searches are never sent for suggestions.")
+                .font(.system(size: 12))
+                .foregroundStyle(Palette.muted)
+                .fixedSize(horizontal: false, vertical: true)
         }
     }
 
     private var links: some View {
         VStack(alignment: .leading, spacing: 22) {
-            heading("Links from other apps.", "A click in Mail, in Slack, in a PDF — macOS sends it to whichever browser is the default. It can be this one.")
-            HStack(spacing: 12) {
-                if isDefault {
-                    HStack(spacing: 8) {
-                        Image(systemName: "checkmark")
-                            .font(.system(size: 11, weight: .medium))
-                        Text("browse is the default browser")
-                    }
-                    .font(.system(size: 13))
-                    .foregroundStyle(Palette.ink)
-                } else {
-                    Big("Make browse the default", filled: true) {
-                        asked = true
-                        Links.becomeDefault { _ in isDefault = Links.isDefault }
-                    }
-                    if asked, !isDefault {
-                        Text("macOS asks in its own dialog")
-                            .font(.system(size: 13))
-                            .foregroundStyle(Palette.faint)
+            heading("You're ready.", prefs.usesAgent
+                    ? "Open a page with ⌘L. Press . while reading to ask about it, or use ⌘; for a conversation with more room."
+                    : "Open a page with ⌘L. Your browser is ready; Codegraff is available whenever you want to enable it in Settings › Agent.")
+            if prefs.usesAgent {
+                VStack(alignment: .leading, spacing: 12) {
+                    Text("Try your first research question")
+                        .font(.system(size: 14, weight: .medium))
+                        .foregroundStyle(Palette.ink)
+                    Text("“Help me research a topic. Ask me what I want to learn, then help me compare reliable sources.”")
+                        .font(.system(size: 13))
+                        .foregroundStyle(Palette.muted)
+                        .fixedSize(horizontal: false, vertical: true)
+                    Big("Open a draft in Codegraff", filled: true) { finish(openAgent: true) }
+                    Text("You can edit the question, choose a model, and send when you're ready. An existing draft is kept.")
+                        .font(.system(size: 11.5))
+                        .foregroundStyle(Palette.muted)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+                .padding(18)
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .background(Palette.wash, in: RoundedRectangle(cornerRadius: 16))
+            }
+            HStack(alignment: .top, spacing: 12) {
+                Image(systemName: isDefault ? "checkmark.circle" : "link")
+                    .foregroundStyle(Palette.muted)
+                    .padding(.top, 2)
+                VStack(alignment: .leading, spacing: 8) {
+                    Text(isDefault ? "Browse is your default browser" : "Open links here, too")
+                        .font(.system(size: 13.5, weight: .medium))
+                        .foregroundStyle(Palette.ink)
+                    if !isDefault {
+                        Text("Choose Browse for links from Mail, messages and other apps. macOS will ask you to confirm.")
+                            .font(.system(size: 12))
+                            .foregroundStyle(Palette.muted)
+                            .fixedSize(horizontal: false, vertical: true)
+                        Big("Make Browse the default") {
+                            asked = true
+                            Links.becomeDefault { _ in isDefault = Links.isDefault }
+                        }
+                        if asked {
+                            Text("Finish in the macOS dialog, or carry on without changing it.")
+                                .font(.system(size: 11.5))
+                                .foregroundStyle(Palette.muted)
+                        }
                     }
                 }
             }
-            .animation(Motion.settle, value: isDefault)
-
-            VStack(alignment: .leading, spacing: 9) {
-                Text("A few useful keys")
-                    .font(.system(size: 11, weight: .medium))
-                    .foregroundStyle(Palette.faint)
-                    .textCase(.uppercase)
-                    .tracking(0.6)
-                    .padding(.top, 6)
-                LazyVGrid(columns: [GridItem(.flexible()), GridItem(.flexible())], alignment: .leading, spacing: 9) {
-                    ForEach(Shortcuts.first) { ShortcutLine(shortcut: $0) }
-                }
-                Text("The full guide is in Help › Keyboard Shortcuts.")
-                    .font(.system(size: 11.5))
-                    .foregroundStyle(Palette.faint)
+            Divider()
+            HStack(spacing: 24) {
+                welcomeKey("⌘T", "New tab")
+                welcomeKey("⌘K", "Find an open tab")
+                welcomeKey("⌘,", "Settings")
             }
-            Choice("Remind me of shortcuts later", "Once, after you open a page", on: $remindShortcuts)
+            Choice("Remind me of shortcuts later", "Once, after you open a page · full guide in Help", on: $remindShortcuts)
         }
     }
 
     // MARK: - the bottom edge
 
     private var foot: some View {
-        HStack(spacing: 14) {
-            HStack(spacing: 6) {
-                ForEach(0..<pages, id: \.self) { i in
-                    Circle()
-                        .fill(i == page ? Palette.ink : Palette.faint.opacity(0.6))
-                        .frame(width: 6, height: 6)
-                }
-            }
-            Spacer()
+        HStack(spacing: 16) {
+            Button("Set up later") { finish() }
+                .buttonStyle(.plain)
+                .font(.system(size: 12.5))
+                .foregroundStyle(Palette.muted)
+                .help("Finish setup now; reopen it from Browse › Welcome")
+            Spacer(minLength: 8)
             if page > 0 {
                 Button("Back") { forward = false; page -= 1 }
                     .buttonStyle(.plain)
                     .font(.system(size: 13))
                     .foregroundStyle(Palette.muted)
             }
-            if page < pages - 1 {
-                Button("Skip") { finish() }
+            if page > 0, page < pages - 1 {
+                Button("Skip this step") { forward = true; page += 1 }
                     .buttonStyle(.plain)
-                    .font(.system(size: 13))
+                    .font(.system(size: 12.5))
                     .foregroundStyle(Palette.muted)
             }
             Big(page < pages - 1 ? "Continue" : "Start browsing", filled: true) {
@@ -460,7 +345,7 @@ struct WelcomePanel: View {
             }
             .keyboardShortcut(.defaultAction)
         }
-        .frame(maxWidth: 520)
+        .disabled(bringing)
     }
 
     // MARK: - doing
@@ -520,10 +405,16 @@ struct WelcomePanel: View {
         }
     }
 
-    private func finish() {
+    private func finish(openAgent: Bool = false) {
         if remindShortcuts { browser.requestShortcutReminder() }
         prefs.welcomed = true
         withAnimation(Motion.settle) { browser.welcoming = false }
+        if openAgent {
+            if browser.agent.draft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                browser.agent.draft = "Help me research a topic. Ask me what I want to learn, then help me compare reliable sources."
+            }
+            if browser.talkOnStage { browser.focusAgent() } else { browser.takeStage() }
+        }
     }
 
     private func heading(_ title: String, _ line: String) -> some View {
@@ -540,14 +431,6 @@ struct WelcomePanel: View {
     }
 
     // MARK: - pieces
-
-    /// The Codegraff artwork at the size the page wants.
-    private struct Plate: View {
-        let size: CGFloat
-        var body: some View {
-            BrandMark().frame(width: size, height: size)
-        }
-    }
 
     private struct Big: View {
         let title: String
@@ -594,7 +477,10 @@ struct WelcomePanel: View {
                     Text(detail).font(.system(size: 11.5)).foregroundStyle(Palette.faint)
                 }
                 Spacer()
-                Switch(on: $on)
+                Toggle(title, isOn: $on)
+                    .toggleStyle(.switch)
+                    .labelsHidden()
+                    .accessibilityLabel(title)
             }
         }
     }
