@@ -261,7 +261,9 @@ struct WelcomePanel: View {
 
     private var links: some View {
         VStack(alignment: .leading, spacing: 22) {
-            heading("You're ready.", "Open a page with ⌘L. Press . while reading to ask about it, or use ⌘; for a conversation with more room.")
+            heading("You're ready.", prefs.usesAgent
+                    ? "Open a page with ⌘L. Press . while reading to ask about it, or use ⌘; for a conversation with more room."
+                    : "Open a page with ⌘L. Your browser is ready; Codegraff is available whenever you want to enable it in Settings › Agent.")
             if prefs.usesAgent {
                 VStack(alignment: .leading, spacing: 12) {
                     Text("Try your first research question")
