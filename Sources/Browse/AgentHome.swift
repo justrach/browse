@@ -430,6 +430,10 @@ struct AgentNotice: View {
                 words("Codegraff isn't on this Mac", "Search runs the `graff` command it installs. Get it, or show Search where yours is in Settings › Agent.")
                 HStack(spacing: 6) {
                     Pill("Get Codegraff", filled: true) { browser.open(Agent.download, foreground: true) }
+                    Pill("Settings…") {
+                        Store.settings.set("agent", forKey: "settings.page")
+                        browser.tuning = true
+                    }
                     Pill("Try again") { agent.restart() }
                 }
             case .signedOut:

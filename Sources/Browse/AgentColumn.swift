@@ -929,22 +929,44 @@ struct AgentPage: View {
     @State private var looked = false
 
     var body: some View {
-        AccountCard(browser: browser)
         Card {
             Line(
                 "Codegraff",
-                "The Ask tab at the head of the row, with your chats, and a column beside the page. Codegraff reads the page you're on, fills in forms, and works on your Mac with all its tools — commands, file edits, codedb — without stopping to ask. ⌘; shows and hides Codegraff; ⌘↩ in the address field asks it"
+                "Ask beside a page with . while reading. ⌘; opens or closes chat; ⌘↩ asks from the address field."
             ) {
-                Switch(on: Binding(
-                    get: { prefs.usesAgent },
-                    set: { on in
-                        prefs.usesAgent = on
-                        if !on {
-                            browser.consulting = false
-                            agent.shutDown()
+                Switch(on: $prefs.usesAgent)
+            }
+            if prefs.usesAgent {
+                Text("Codegraff can read pages, fill forms, run commands and edit files on your Mac without asking before each action. Send only the work you want it to do.")
+                    .font(.system(size: 11.5))
+                    .foregroundStyle(Palette.muted)
+                    .fixedSize(horizontal: false, vertical: true)
+                    .padding(.horizontal, 14)
+                    .padding(.bottom, 12)
+                Rule()
+                Line("Start a conversation", "Review the included page, write a question, then press Return to send.") {
+                    Pill("Open beside page", filled: true) {
+                        browser.tuning = false
+                        browser.talkToColumn()
+                    }
+                }
+            }
+        }
+        AccountCard(browser: browser)
+        Card {
+            Line("graff", location) {
+                HStack(spacing: 6) {
+                    if looked, found == nil {
+                        Pill("Get Codegraff", filled: true) {
+                            browser.tuning = false
+                            browser.open(Agent.download, foreground: true)
                         }
                     }
-                ))
+                    if !prefs.agentPath.isEmpty {
+                        Pill("Look for it") { use("") }
+                    }
+                    Pill("Choose…") { choose() }
+                }
             }
             Rule()
             Line("Ask about selected text", "Right-click a passage and choose Ask Codegraff about Selection. Review the excerpt and its source before sending") {
@@ -977,15 +999,6 @@ struct AgentPage: View {
                     get: { prefs.agentJev },
                     set: { prefs.agentJev = $0 }
                 ))
-            }
-            Rule()
-            Line("graff", location) {
-                HStack(spacing: 6) {
-                    if !prefs.agentPath.isEmpty {
-                        Pill("Look for it") { use("") }
-                    }
-                    Pill("Choose…") { choose() }
-                }
             }
             Rule()
             Line("Other accounts", "graff login, in Terminal — Codex, Kimi and the other providers graff knows") {

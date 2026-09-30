@@ -257,6 +257,9 @@ final class Agent: ObservableObject {
     private var generalDraft = Draft(text: "", withPage: true)
     private var draftTab: UUID?
     private var separatesDrafts = false
+    /// A stopped conversation must not be revived by a page read or a
+    /// graff lookup that finishes after shutdown (or a later restart).
+    private var generation = UUID()
     enum Outcome: Equatable { case finished, stopped, interrupted(String) }
     @Published private(set) var outcome: Outcome?
     /// Whether the page you are on goes with the next message.
@@ -395,6 +398,7 @@ final class Agent: ObservableObject {
     }
 
     var canSend: Bool {
+        guard prefs.usesAgent else { return false }
         guard !draft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { return false }
         if asking?.isQuestion == true { return true }
         switch phase {
@@ -409,6 +413,7 @@ final class Agent: ObservableObject {
 
     /// The column opened: start graff if it isn't already.
     func wake() {
+        guard prefs.usesAgent else { return }
         lastActive = Date()
         if phase == .asleep { start() }
     }
@@ -466,6 +471,7 @@ final class Agent: ObservableObject {
 
     /// Turned off in Settings, or about to be started afresh.
     func shutDown() {
+        generation = UUID()
         let dying = pipe
         pipe = nil
         dying?.stop()
@@ -587,7 +593,9 @@ final class Agent: ObservableObject {
     }
 
     private func start() {
+        guard prefs.usesAgent else { return }
         phase = .starting
+        let generation = self.generation
         let custom = prefs.agentPath
         Task {
             // The browser's own tools first, so the file that tells graff
@@ -597,9 +605,10 @@ final class Agent: ObservableObject {
             if !(await AgentTools.shared.start()) {
                 AgentTools.withdraw()
             }
+            guard self.generation == generation, prefs.usesAgent else { return }
             Agent.leaveKuriOut()
             let found = await Agent.locate(custom: custom)
-            guard phase == .starting, pipe == nil else { return }
+            guard self.generation == generation, prefs.usesAgent, phase == .starting, pipe == nil else { return }
             guard let found else {
                 phase = .missing
                 return
@@ -647,7 +656,7 @@ final class Agent: ObservableObject {
     /// there is one, a new one otherwise. The first request that needs
     /// someone signed in — a graff with nobody signed in says so here.
     private func open() {
-        let params: [String: Any] = ["cwd": Agent.folder.path, "mcpServers": [Any]()]
+        let params: [String: Any] = ["cwd": Agent.folder.path, "mcpServers": AgentTools.shared.acpServers]
         if let carried = resuming {
             resuming = nil
             replaying = true
@@ -855,6 +864,7 @@ final class Agent: ObservableObject {
     /// prompt, with the page as an embedded resource — graff's way of taking
     /// a document along with the words.
     func send(page tab: Tab?) {
+        guard prefs.usesAgent else { return }
         let tab = pinned ?? tab
         let text = draft.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !text.isEmpty else { return }
@@ -886,6 +896,7 @@ final class Agent: ObservableObject {
     }
 
     private func submit(_ text: String, page tab: Tab?, passage: AgentPassage? = nil) {
+        let generation = self.generation
         let pageTitle = tab.flatMap { tab -> String? in
             guard !tab.isBlank else { return nil }
             return tab.title.isEmpty ? (tab.address?.host() ?? "This page") : tab.title
@@ -899,6 +910,7 @@ final class Agent: ObservableObject {
         Task {
             var page: (address: String, title: String, text: String, tab: String)?
             if let tab { page = await Agent.read(tab) }
+            guard self.generation == generation, prefs.usesAgent else { return }
             let blocks = Agent.blocks(text, page: page, passage: passage, only: self.pinned != nil && tab === self.pinned)
             switch phase {
             case .ready, .working:

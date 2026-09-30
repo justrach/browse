@@ -641,20 +641,14 @@ struct Segmented<Option: Hashable>: View {
 /// On or off, in ink rather than in blue.
 struct Switch: View {
     @Binding var on: Bool
+    @Environment(\.settingName) private var name
 
     var body: some View {
-        Capsule()
-            .fill(on ? Palette.accent : Palette.faint)
-            .frame(width: 30, height: 18)
-            .overlay(alignment: on ? .trailing : .leading) {
-                Circle()
-                    .fill(Palette.ground)
-                    .shadow(color: .black.opacity(0.18), radius: 1.5, y: 1)
-                    .padding(2)
-            }
-            .contentShape(Capsule())
-            .onTapGesture { withAnimation(Motion.settle) { on.toggle() } }
-            .animation(Motion.settle, value: on)
+        Toggle(name, isOn: $on)
+            .toggleStyle(.switch)
+            .labelsHidden()
+            .controlSize(.mini)
+            .tint(Palette.accent)
     }
 }
 

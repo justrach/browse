@@ -581,6 +581,7 @@ final class Bench {
                     "passage": browser.agent.passage.map { ["text": $0.text, "title": $0.title, "url": $0.url.absoluteString] } ?? [:],
                     "openPages": AgentTools.shared.openPages.map { ["id": $0.id, "title": $0.title, "url": $0.url.absoluteString] },
                     "connected": browser.agent.started,
+                    "enabled": browser.prefs.usesAgent,
                     "queue": browser.agent.queue.count,
                     "entries": browser.agent.entries.count,
                     "feedback": browser.agentFeedback != nil,
@@ -1684,6 +1685,7 @@ final class Bench {
             if request["reconnect"] as? Bool == true, Store.testing { browser.agent.reconnect() }
             // Words for Codegraff, as ⌘↩ in the address field sends them.
             if let words = request["ask"] as? String, Store.testing { browser.ask(words) }
+            if let on = request["agentenabled"] as? Bool, Store.testing { browser.prefs.usesAgent = on }
             // One of the chats so far back on screen, by its place on the
             // Ask tab's page (0 the newest) — or none, for the page itself.
             if let which = request["chat"] as? String {
@@ -1705,6 +1707,8 @@ final class Bench {
                 if request["signin"] as? Bool == true {
                     CodegraffAccount.shared.signIn(show: { browser.open($0, foreground: true) }, done: { browser.signedIn() })
                 }
+                if request["signincancel"] as? Bool == true { CodegraffAccount.shared.cancel() }
+                if request["signout"] as? Bool == true { Task { await CodegraffAccount.shared.signOut() } }
                 if let url = (request["forget"] as? String).flatMap(URL.init(string:)) {
                     browser.history.forget(Address.pretty(url).lowercased())
                 }
