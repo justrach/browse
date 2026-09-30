@@ -21,6 +21,7 @@ enum Shortcuts {
     ]
 
     static let pages: [Shortcut] = [
+        Shortcut(keys: ".", what: "Ask beside the page, while reading (Codegraff enabled)"),
         Shortcut(keys: "⌘[", what: "Back"),
         Shortcut(keys: "⌘]", what: "Forward"),
         Shortcut(keys: "⌘R", what: "Reload page"),

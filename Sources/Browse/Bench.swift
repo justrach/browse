@@ -571,6 +571,24 @@ final class Bench {
                 ]
             }
             if let window = Links.window { out["lights"] = Bench.lights(of: window) }
+            if Store.testing {
+                out["agent"] = [
+                    "shown": browser.consulting && browser.prefs.usesAgent,
+                    "full": browser.agentFull,
+                    "phase": browser.agent.phase.words,
+                    "taskState": browser.agent.taskState.words,
+                    "draft": browser.agent.draft,
+                    "passage": browser.agent.passage.map { ["text": $0.text, "title": $0.title, "url": $0.url.absoluteString] } ?? [:],
+                    "openPages": AgentTools.shared.openPages.map { ["id": $0.id, "title": $0.title, "url": $0.url.absoluteString] },
+                    "connected": browser.agent.started,
+                    "queue": browser.agent.queue.count,
+                    "entries": browser.agent.entries.count,
+                    "feedback": browser.agentFeedback != nil,
+                    "pendingTools": browser.agent.entries.filter {
+                        $0.kind == .tool && ["pending", "in_progress"].contains($0.status)
+                    }.count,
+                ] as [String: Any]
+            }
             out["keysQuieted"] = PageView.quieted
             // Settings › General › Web Inspector, as each page's WebKit has it.
             let asked = NSSelectorFromString("_developerExtrasEnabled")
@@ -941,6 +959,28 @@ final class Bench {
                 }
             }
 
+        case "agent-context":
+            guard Store.testing else { answer(["error": "agent-context only works on a --test run"]); return }
+            switch request["action"] as? String {
+            case "selection":
+                guard let tab = browser.active, let web = tab.built else { answer(["error": "no active page"]); return }
+                web.evaluateJavaScript(PageView.selected, in: nil, in: .defaultClient) { result in
+                    browser.askAboutSelection((try? result.get()) as? String ?? "", from: tab)
+                    answer(["attached": browser.agent.passage != nil])
+                }
+                return
+            case "remove": browser.agent.passage = nil
+            case "send": browser.agent.send(page: browser.agent.withPage && !browser.agentFull ? browser.active : nil)
+            case "pin": browser.agent.pin(request["on"] as? Bool == true ? browser.active : nil)
+            case "inspect":
+                if let id = request["id"] as? String { AgentTools.shared.inspectPage(id) }
+            default: break
+            }
+            if let words = request["draft"] as? String { browser.agent.draft = words }
+            if let on = request["withPage"] as? Bool { browser.agent.withPage = on }
+            if let on = request["enabled"] as? Bool { browser.prefs.agentSelection = on }
+            answer(["ok": true])
+
         case "acp":
             // A turn built from ACP updates by hand: `ask` starts one, each
             // update goes in through the door graff's do, `done` ends it.
@@ -1245,7 +1285,14 @@ final class Bench {
             // started hidden, so nothing shows on anybody's screen. For the
             // images on the site.
             guard Store.testing else { answer(["error": "picture only works on a --test run"]); return }
-            guard let window = Links.window, let frame = window.contentView?.superview,
+            // A sheet or popover has its own window; `probe` gives its number.
+            let pictured: NSWindow?
+            if let number = request["window"] as? Int {
+                pictured = NSApp.windows.first { $0.windowNumber == number }
+            } else {
+                pictured = Links.window
+            }
+            guard let window = pictured, let frame = window.contentView?.superview,
                   let path = request["path"] as? String, !path.isEmpty
             else { answer(["error": "picture needs a path"]); return }
             func pages(in view: NSView) -> [WKWebView] {
@@ -1629,8 +1676,10 @@ final class Bench {
                 browser.consulting = on
             }
             if let on = request["agentfull"] as? Bool { browser.agentFull = on }
+            if request["agentfeedback"] as? Bool == false, Store.testing { browser.agentFeedback = nil }
             // graff put to rest now, as ten quiet minutes would (Agent.rest).
             if request["rest"] as? Bool == true { browser.agent.rest() }
+            if request["reconnect"] as? Bool == true, Store.testing { browser.agent.reconnect() }
             // Words for Codegraff, as ⌘↩ in the address field sends them.
             if let words = request["ask"] as? String, Store.testing { browser.ask(words) }
             // One of the chats so far back on screen, by its place on the
@@ -1689,7 +1738,7 @@ final class Bench {
 
         default:
             answer(["error": "unknown command “\(verb)”", "commands": [
-                "tabs", "open", "go", "close", "wait", "sleep", "tidy", "shield", "sources", "acp", "select", "text", "eval", "click", "type", "submit", "shot", "probe", "key", "resize", "hit", "film", "window", "pages", "picture", "place", "field", "bookmark", "import", "menu", "keyeq", "fill", "middle", "pull", "space", "strip", "column", "fold", "consent", "site", "little", "ui",
+                "tabs", "open", "go", "close", "wait", "sleep", "tidy", "shield", "sources", "acp", "agent-context", "select", "text", "eval", "click", "type", "submit", "shot", "probe", "key", "resize", "hit", "film", "window", "pages", "picture", "place", "field", "bookmark", "import", "menu", "keyeq", "fill", "middle", "pull", "space", "strip", "column", "fold", "consent", "site", "little", "ui",
             ]])
         }
     }

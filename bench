@@ -8,6 +8,7 @@
     ./bench sleep ID                   put a tab to sleep now, or say what keeps it awake
     ./bench tidy ID                    Tidy This Page: what Jev was asked about, its odds, what went
     ./bench acp ask TEXT | JSON | done a turn built from ACP updates by hand, to draw it — --test runs only
+    ./bench agent-context selection|remove|send|pin|unpin|inspect ID   test run: capture selected text, manage context, inspect an agent page
     ./bench sources                    what an import can see of each other browser: folder, access, profiles
     ./bench shield [on|off]            the ad blocker, for pages loaded from now on — --test runs only
     ./bench select ID                  bring a tab to the front — --test runs only
@@ -309,14 +310,21 @@ def main(argv):
         request["dx"] = float(args[0])
         if len(args) > 1: request["steps"] = int(args[1])
         if len(args) > 2: request["ms"] = float(args[2])
+    elif verb == "agent-context":
+        if len(args) == 2 and args[0] == "inspect": request["action"], request["id"] = "inspect", args[1]
+        elif len(args) == 1 and args[0] in ("selection", "remove", "send", "pin", "unpin"):
+            request["action"] = "pin" if args[0] == "unpin" else args[0]
+            if args[0] in ("pin", "unpin"): request["on"] = args[0] == "pin"
+        else: sys.exit("usage: bench agent-context selection|remove|send|pin|unpin|inspect ID")
     elif verb == "window":
         pass
     elif verb == "pages":
         if len(args) != 1 or args[0] not in ("on", "off"): sys.exit("usage: bench pages on|off")
         request["on"] = args[0] == "on"
     elif verb == "picture":
-        if len(args) != 1: sys.exit("usage: bench picture PATH")
+        if len(args) not in (1, 2): sys.exit("usage: bench picture PATH [WINDOW_NUMBER]")
         request["path"] = os.path.abspath(args[0])
+        if len(args) == 2: request["window"] = int(args[1])
     elif verb == "film":
         if len(args) not in (2, 3, 4) or args[0] not in ("peek", "unpeek", "fold", "none"):
             sys.exit("usage: bench film peek|unpeek|fold|none PATH [FRAMES] [EVERY]")

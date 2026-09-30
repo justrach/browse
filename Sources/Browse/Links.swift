@@ -215,16 +215,16 @@ final class Links: NSObject, NSApplicationDelegate {
     }
 
     /// ⌘⇧F, the Help menu, and the About page all come here: a draft, in
-    /// Mail, that already knows what build this is. The person still reads
-    /// it and presses send themselves — nothing here sends anything.
-    static func writeFeedback() {
+    /// GitHub, that already knows what build this is. The person still reads
+    /// it and submits it themselves — nothing here sends anything.
+    static func writeFeedback(title: String = "browse feedback", body: String = "") {
         var text = URLComponents()
         text.scheme = "https"
         text.host = "github.com"
         text.path = "/justrach/browse/issues/new"
         text.queryItems = [
-            URLQueryItem(name: "title", value: "browse feedback"),
-            URLQueryItem(name: "body", value: "\n\n—\nbrowse \(Updater.version), build \(Updater.build), macOS \(ProcessInfo.processInfo.operatingSystemVersionString)"),
+            URLQueryItem(name: "title", value: title),
+            URLQueryItem(name: "body", value: body + "\n\n—\nbrowse \(Updater.version), build \(Updater.build), macOS \(ProcessInfo.processInfo.operatingSystemVersionString)"),
         ]
         guard let url = text.url else { return }
         NSWorkspace.shared.open(url)

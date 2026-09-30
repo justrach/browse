@@ -399,6 +399,8 @@ final class Tab: ObservableObject, Identifiable {
     var onImageMenu: ((Tab, URL) -> Void)?
     var searchName: (() -> String?)?
     var onSearch: ((Tab, String) -> Void)?
+    var canAskSelection: (() -> Bool)?
+    var onAskSelection: ((Tab, String) -> Void)?
     /// "Add to Search" was pressed on the Chrome Web Store page this tab shows.
     var onStoreAdd: ((Tab) -> Void)?
     /// The middle button was let go over a link. The browser opens it in a
@@ -523,6 +525,11 @@ final class Tab: ObservableObject, Identifiable {
         web.onSearch = { [weak self] text in
             guard let self else { return }
             self.onSearch?(self, text)
+        }
+        web.canAskSelection = { [weak self] in self?.canAskSelection?() == true }
+        web.onAskSelection = { [weak self] text in
+            guard let self else { return }
+            self.onAskSelection?(self, text)
         }
         web.holdForFirstFrame()
         // Pages follow the appearance of the window they are drawn in, and the
@@ -1190,6 +1197,8 @@ final class Tab: ObservableObject, Identifiable {
         web.onFocus = nil
         web.searchName = nil
         web.onSearch = nil
+        web.canAskSelection = nil
+        web.onAskSelection = nil
         web.stopLoading()
         web.navigationDelegate = nil
         web.uiDelegate = nil
@@ -1330,16 +1339,27 @@ final class PageView: WKWebView {
         if let item = menu.items.first(where: { $0.identifier?.rawValue == "WKMenuItemIdentifierOpenLinkInNewWindow" }) {
             item.title = "Open Link in New Tab"
         }
-        if let item = menu.items.first(where: { $0.identifier?.rawValue == "WKMenuItemIdentifierSearchWeb" }),
-           let name = searchName?() {
+        if let item = menu.items.first(where: { $0.identifier?.rawValue == "WKMenuItemIdentifierSearchWeb" }) {
             webSearch = (item.target, item.action)
             selection = nil
-            evaluateJavaScript(PageView.selected, in: nil, in: .defaultClient) { [weak self] result in
-                self?.selection = (try? result.get()) as? String ?? ""
+            selectionURL = url
+            let source = url
+            let ask = NSMenuItem(title: "Ask Codegraff about Selection", action: #selector(askSelection(_:)), keyEquivalent: "")
+            ask.target = self
+            ask.isEnabled = false
+            if canAskSelection?() == true {
+                menu.insertItem(ask, at: (menu.index(of: item) + 1))
             }
-            item.title = "Search with \(name)"
-            item.target = self
-            item.action = #selector(searchSelection(_:))
+            evaluateJavaScript(PageView.selected, in: nil, in: .defaultClient) { [weak self] result in
+                guard self?.url == source else { return }
+                self?.selection = (try? result.get()) as? String ?? ""
+                ask.isEnabled = self?.selection?.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty == false
+            }
+            if let name = searchName?() {
+                item.title = "Search with \(name)"
+                item.target = self
+                item.action = #selector(searchSelection(_:))
+            }
         }
         guard #available(macOS 15.4, *),
               let tab = Extensions.shared.browser?.tabs.first(where: { $0.built === self })
@@ -1352,7 +1372,15 @@ final class PageView: WKWebView {
 
     var searchName: (() -> String?)?
     var onSearch: ((String) -> Void)?
+    var canAskSelection: (() -> Bool)?
+    var onAskSelection: ((String) -> Void)?
     private var selection: String?
+    private var selectionURL: URL?
+
+    @objc private func askSelection(_ item: NSMenuItem) {
+        guard canAskSelection?() == true, url == selectionURL, let selection else { return }
+        onAskSelection?(selection)
+    }
 
     /// The words selected where the right-click was, read when the menu
     /// opens. The selection of a text field is its own, not the page's, so a

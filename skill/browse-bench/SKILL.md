@@ -88,6 +88,10 @@ id=$(./bench --test open https://example.com)
 
 `probe` prints the window as JSON: panels (`settings`, `welcome`, `passwords`, `history`, `downloads`, `bookmarks`), whether the address field is open, modal title, `look`, `appearance`, the key window, every window's frame, and traffic-light positions. Use it for chrome. `shot` cannot see chrome.
 
+`picture PATH [WINDOW_NUMBER]` draws the whole window on a test world. With a window number from `probe`, it can also draw a feedback sheet or popover. Use `hit X Y post` for native text fields: AppKit needs the press and release in its event queue to complete text-selection tracking.
+
+`agent-context selection|remove|send|pin|unpin|inspect ID` exercises agent context on a test world. `selection` uses the page selection reader and prepares the same reviewed draft as the context menu; enable **Settings › Agent › Ask about selected text** first. `send` sends the draft to that world's graff, so use an offline mock for automated checks. The test-only `probe.agent` includes task state, draft, excerpt metadata, and open agent pages. Never use these commands on the installed browser.
+
 `ui KEY VALUE` changes chrome and answers `{"ok": true}`. On a test world unless they asked for it on theirs.
 
 | Key | Value |

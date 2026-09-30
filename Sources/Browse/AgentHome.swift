@@ -1,8 +1,8 @@
 import SwiftUI
 
 /// Codegraff's page, where the Ask tab opens before anything has been said:
-/// the mark, one field that either asks or goes somewhere — Tab switches
-/// which — and the chats so far, a card each, to pick one back up.
+/// a place to start a task and return to a conversation. It uses the same
+/// composer as the column, so model choices and multiline drafts stay put.
 ///
 /// The address field on an empty tab and ⌘L are untouched by any of this;
 /// this is the agent's own page, a tab of its own.
@@ -10,6 +10,8 @@ struct AgentHome: View {
     @ObservedObject var browser: Browser
     @ObservedObject var agent: Agent
     @ObservedObject var chats: Chats
+
+    var typing: FocusState<Bool>.Binding
 
     enum Mode { case search, ask }
 
@@ -22,10 +24,11 @@ struct AgentHome: View {
     @State private var shake: CGFloat = 0
     @FocusState private var focused: Bool
 
-    init(browser: Browser, agent: Agent) {
+    init(browser: Browser, agent: Agent, typing: FocusState<Bool>.Binding) {
         self.browser = browser
         self.agent = agent
         self.chats = agent.chats
+        self.typing = typing
     }
 
     /// As wide as the field and the row of cards under it get.
@@ -35,18 +38,41 @@ struct AgentHome: View {
         GeometryReader { geo in
             ScrollView {
                 VStack(spacing: 0) {
-                    Spacer(minLength: 56)
+                    Spacer(minLength: 32)
                     BrandMark()
-                        .frame(width: 64, height: 64)
-                        .padding(.bottom, 40)
-                    field
-                        .frame(maxWidth: Self.measure - 120)
+                        .frame(width: 44, height: 44)
+                        .padding(.bottom, 20)
+                    Text("What would you like to explore?")
+                        .font(.system(size: 27, weight: .medium))
+                        .foregroundStyle(Palette.ink)
+                        .multilineTextAlignment(.center)
+                    Text("Research an idea, compare sources, or pick up where you left off.")
+                        .font(.system(size: 13.5))
+                        .foregroundStyle(Palette.muted)
+                        .multilineTextAlignment(.center)
+                        .padding(.top, 8)
+                        .padding(.bottom, 24)
+                    Text("On a page, press . to ask beside it.")
+                        .font(.system(size: 11.5))
+                        .foregroundStyle(Palette.muted)
+                        .padding(.bottom, 14)
+                    switcher
+                        .padding(.bottom, 12)
+                    if mode == .ask {
+                        AgentComposer(browser: browser, agent: agent, full: true, switchToSearch: { mode = .search; focused = true }, typing: typing)
+                            .frame(maxWidth: Metrics.chat)
+                        AgentStarters(agent: agent, focus: browser.focusAgent)
+                            .frame(maxWidth: Metrics.chat)
+                    } else {
+                        field
+                            .frame(maxWidth: Metrics.chat)
+                    }
                     if mode == .ask {
                         AgentNotice(browser: browser, agent: agent)
                             .frame(maxWidth: Self.measure - 120, alignment: .leading)
                             .padding(.top, 14)
                     }
-                    Spacer(minLength: 56)
+                    Spacer(minLength: 36)
                     recent
                         .frame(maxWidth: Self.measure)
                         .padding(.bottom, 28)
@@ -59,7 +85,6 @@ struct AgentHome: View {
         }
         .background(Palette.ground)
         .modifier(ChatRenamer(chats: chats, chat: $renaming))
-        .onAppear { DispatchQueue.main.async { focused = true } }
         .animation(Motion.settle, value: everything)
         .animation(Motion.quick, value: mode)
     }
@@ -76,7 +101,8 @@ struct AgentHome: View {
                 .focused($focused)
                 .onSubmit(go)
                 .onKeyPress(.tab) {
-                    mode = mode == .ask ? .search : .ask
+                    mode = .ask
+                    browser.focusAgent()
                     return .handled
                 }
             HStack(spacing: 6) {
@@ -91,7 +117,6 @@ struct AgentHome: View {
                     .foregroundStyle(Palette.muted)
             }
             .fixedSize()
-            switcher
         }
         .padding(.leading, 20)
         .padding(.trailing, 8)
@@ -119,7 +144,7 @@ struct AgentHome: View {
     private func segment(_ title: String, _ which: Mode) -> some View {
         Button {
             mode = which
-            focused = true
+            if which == .search { focused = true } else { browser.focusAgent() }
         } label: {
             Text(title)
                 .font(.system(size: 13, weight: mode == which ? .medium : .regular))
@@ -173,7 +198,7 @@ struct AgentHome: View {
                     .background(Palette.wash, in: RoundedRectangle(cornerRadius: 9, style: .continuous))
                 Spacer(minLength: 0)
                 // Past a row of them, a way to find one.
-                if chats.all.count > 3 {
+                if !chats.all.isEmpty {
                     HStack(spacing: 6) {
                         Image(systemName: "magnifyingglass")
                             .font(.system(size: 11))
@@ -189,7 +214,7 @@ struct AgentHome: View {
                     .background(Palette.hover, in: RoundedRectangle(cornerRadius: 9, style: .continuous))
                     .overlay(RoundedRectangle(cornerRadius: 9, style: .continuous).strokeBorder(Palette.hairline, lineWidth: 1))
                 }
-                if chats.all.count > 3, looking.isEmpty {
+                if chats.all.count > 4, looking.isEmpty {
                     Button { everything.toggle() } label: {
                         HStack(spacing: 4) {
                             Text(everything ? "Fewer" : "All Chats")
@@ -210,17 +235,18 @@ struct AgentHome: View {
                     .padding(.vertical, 20)
             } else {
                 let found = chats.ordered.filter { $0.mentions(looking) }
-                let shown = everything || !looking.isEmpty ? found : Array(found.prefix(3))
+                let shown = everything || !looking.isEmpty ? found : Array(found.prefix(4))
                 if shown.isEmpty {
                     Text("No chat mentions “\(looking)”.")
                         .font(.system(size: 12.5))
                         .foregroundStyle(Palette.muted)
                         .padding(.vertical, 20)
                 }
-                LazyVGrid(columns: Array(repeating: GridItem(.flexible(), spacing: 16, alignment: .top), count: 3), spacing: 16) {
+                VStack(spacing: 4) {
                     ForEach(shown) { chat in
-                        ChatCard(chat: chat) {
+                        ChatRow(chat: chat) {
                             agent.resume(chat)
+                            browser.focusAgent()
                         }
                         .contextMenu { ChatMenu(chat: chat, agent: agent) { renaming = chat } }
                     }
@@ -230,58 +256,45 @@ struct AgentHome: View {
     }
 }
 
-/// One conversation: when, what it was about, and how it ended — the reply
-/// it got, or what went wrong.
-private struct ChatCard: View {
+/// The same compact conversation row on the Ask page and in its history.
+private struct ChatRow: View {
     let chat: Chat
     let open: () -> Void
-
     @State private var hovering = false
 
     private static let ago: RelativeDateTimeFormatter = {
         let formatter = RelativeDateTimeFormatter()
-        formatter.unitsStyle = .full
+        formatter.unitsStyle = .abbreviated
         return formatter
     }()
 
     var body: some View {
         Button(action: open) {
-            VStack(alignment: .leading, spacing: 6) {
-                HStack(spacing: 5) {
-                    if chat.isPinned {
-                        Image(systemName: "pin.fill")
-                            .font(.system(size: 9))
-                    }
-                    Text(abs(chat.updated.timeIntervalSinceNow) < 60 ? "Just now" : Self.ago.localizedString(for: chat.updated, relativeTo: Date()))
-                }
-                .font(.system(size: 11.5))
-                .foregroundStyle(Palette.muted)
-                Text(chat.title.isEmpty ? "Untitled" : chat.title)
-                    .font(.system(size: 14, weight: .semibold))
-                    .foregroundStyle(Palette.ink)
-                    .lineLimit(1)
-                    .truncationMode(.tail)
-                if let failed = chat.failed {
-                    trouble(failed)
-                        .padding(.top, 6)
-                } else {
-                    Text(Agent.rich(Self.flat(chat.gist)))
-                        .font(.system(size: 12.5))
-                        .foregroundStyle(Palette.ink.opacity(0.62))
-                        .lineSpacing(2)
-                        .multilineTextAlignment(.leading)
-                        .frame(maxWidth: .infinity, alignment: .topLeading)
-                        // Links in the gist are for the chat, not the card.
+            HStack(alignment: .top, spacing: 12) {
+                Image(systemName: chat.isPinned ? "pin.fill" : "bubble.left")
+                    .font(.system(size: 12))
+                    .foregroundStyle(Palette.muted)
+                    .frame(width: 20, height: 20)
+                VStack(alignment: .leading, spacing: 5) {
+                    Text(chat.title.isEmpty ? "Untitled" : chat.title)
+                        .font(.system(size: 13, weight: .medium))
+                        .foregroundStyle(Palette.ink)
+                        .lineLimit(1)
+                    Text(Agent.rich(chat.failed ?? Self.preview(chat.gist)))
+                        .font(.system(size: 12))
+                        .foregroundStyle(chat.failed == nil ? Palette.muted : .red.opacity(0.85))
+                        .lineLimit(1)
                         .allowsHitTesting(false)
                 }
-                Spacer(minLength: 0)
+                .frame(maxWidth: .infinity, alignment: .leading)
+                Text(abs(chat.updated.timeIntervalSinceNow) < 60 ? "Now" : Self.ago.localizedString(for: chat.updated, relativeTo: Date()))
+                    .font(.system(size: 10.5))
+                    .foregroundStyle(Palette.faint)
+                    .fixedSize()
             }
-            .padding(16)
-            .frame(maxWidth: .infinity, minHeight: 200, maxHeight: 200, alignment: .topLeading)
-            .clipped()
-            .background(hovering ? Palette.wash : Palette.hover, in: RoundedRectangle(cornerRadius: 16, style: .continuous))
-            .overlay(RoundedRectangle(cornerRadius: 16, style: .continuous).strokeBorder(Palette.hairline, lineWidth: 1))
-            .contentShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
+            .padding(12)
+            .background(hovering ? Palette.wash : .clear, in: RoundedRectangle(cornerRadius: 12))
+            .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
         .onHover { hovering = $0 }
@@ -289,40 +302,117 @@ private struct ChatCard: View {
         .help(chat.title)
     }
 
-    private func trouble(_ why: String) -> some View {
-        HStack(alignment: .firstTextBaseline, spacing: 8) {
-            Image(systemName: "exclamationmark.triangle.fill")
-                .font(.system(size: 11))
-            VStack(alignment: .leading, spacing: 3) {
-                Text("Codegraff couldn't finish this")
-                    .font(.system(size: 12.5, weight: .medium))
-                Text(why)
-                    .font(.system(size: 12))
-                    .opacity(0.8)
-                    .lineLimit(3)
-            }
-        }
-        .foregroundStyle(Color.red.opacity(0.85))
-        .padding(12)
-        .frame(maxWidth: .infinity, alignment: .leading)
-        .background(Color.red.opacity(0.08), in: RoundedRectangle(cornerRadius: 12, style: .continuous))
-        .overlay(RoundedRectangle(cornerRadius: 12, style: .continuous).strokeBorder(Color.red.opacity(0.25), lineWidth: 1))
+    private static func preview(_ text: String) -> String {
+        text.split(whereSeparator: \.isNewline).map { line in
+            var words = line.trimmingCharacters(in: .whitespaces)
+            while words.hasPrefix("#") { words.removeFirst() }
+            return words.trimmingCharacters(in: .whitespaces)
+        }.joined(separator: " ")
+    }
+}
+
+/// Starting points fill a draft, leaving the question editable before Send.
+struct AgentStarters: View {
+    @ObservedObject var agent: Agent
+    var page: Tab? = nil
+    var compact = false
+    var focus: () -> Void
+
+    private var hasPage: Bool { page?.isBlank == false }
+    private var prompts: [(String, String, String)] {
+        hasPage ? [
+            ("Summarize this page", "doc.text", "Summarize this page and highlight its key takeaways."),
+            ("Check a claim", "checkmark.shield", "Help me check a claim on this page. Ask which claim, then look for independent sources."),
+            ("Find related sources", "text.magnifyingglass", "Find useful sources related to this page and explain what each adds.")
+        ] : [
+            ("Research a topic", "text.magnifyingglass", "Help me research a topic. Ask what I want to explore, then gather and compare sources."),
+            ("Compare sources", "doc.on.doc", "Help me compare sources. Ask what I am comparing and which criteria matter."),
+            ("Explore an idea", "sparkles", "Help me explore an idea. Ask what I have in mind and what I want to understand.")
+        ]
     }
 
-    /// A reply's lines run together for a card: its bullets become a run of
-    /// clauses, its headings plain words.
-    private static func flat(_ text: String) -> String {
-        text.split(whereSeparator: \.isNewline)
-            .map { line -> String in
-                var line = line.trimmingCharacters(in: .whitespaces)
-                while line.hasPrefix("#") { line.removeFirst() }
-                if line.hasPrefix("- ") || line.hasPrefix("* ") || line.hasPrefix("• ") { line = "· " + line.dropFirst(2) }
-                return line.trimmingCharacters(in: .whitespaces)
+    var body: some View {
+        if compact {
+            VStack(alignment: .leading, spacing: 8) { buttons }
+        } else {
+            ViewThatFits(in: .horizontal) {
+                HStack(spacing: 8) { buttons }
+                    .fixedSize(horizontal: true, vertical: false)
+                VStack(alignment: .leading, spacing: 8) { buttons }
             }
-            .filter { !$0.isEmpty && !$0.hasPrefix("```") }
-            .joined(separator: " ")
-            // A reply that opens with a list shouldn't open with its dot.
-            .replacingOccurrences(of: #"^· "#, with: "", options: .regularExpression)
+        }
+    }
+
+    private var buttons: some View {
+        ForEach(prompts, id: \.0) { title, icon, prompt in
+            Button { agent.draft = prompt; focus() } label: {
+                Label(title, systemImage: icon)
+                    .font(.system(size: 11.5))
+                    .foregroundStyle(Palette.muted)
+                    .padding(.horizontal, 12)
+                    .padding(.vertical, 9)
+                    .background(Palette.hover, in: RoundedRectangle(cornerRadius: 10))
+                    .overlay(RoundedRectangle(cornerRadius: 10).strokeBorder(Palette.hairline, lineWidth: 1))
+                    .contentShape(Rectangle())
+            }
+            .buttonStyle(.plain)
+        }
+    }
+}
+
+/// Chats stay reachable without leaving the page or widening the column.
+struct AgentHistoryButton: View {
+    @ObservedObject var agent: Agent
+    @ObservedObject private var chats: Chats
+    let focus: () -> Void
+    @State private var open = false
+    @State private var looking = ""
+    @State private var renaming: Chat?
+
+    init(agent: Agent, focus: @escaping () -> Void) {
+        self.focus = focus
+        self.agent = agent
+        self.chats = agent.chats
+    }
+
+    var body: some View {
+        Door(icon: "clock.arrow.circlepath", help: "Recent conversations") { open.toggle() }
+            .accessibilityLabel("Recent conversations")
+            .popover(isPresented: $open, arrowEdge: .bottom) {
+                VStack(alignment: .leading, spacing: 12) {
+                    Text("Conversations")
+                        .font(.system(size: 14, weight: .semibold))
+                        .foregroundStyle(Palette.ink)
+                    TextField("Search conversations", text: $looking)
+                        .textFieldStyle(.plain)
+                        .font(.system(size: 12.5))
+                        .padding(10)
+                        .background(Palette.wash, in: RoundedRectangle(cornerRadius: 9))
+                    ScrollView {
+                        LazyVStack(spacing: 4) {
+                            let found = chats.ordered.filter { $0.mentions(looking) }
+                            if found.isEmpty {
+                                Text(chats.all.isEmpty ? "Your conversations will appear here." : "No conversations found.")
+                                    .font(.system(size: 12))
+                                    .foregroundStyle(Palette.muted)
+                                    .padding(.vertical, 24)
+                            }
+                            ForEach(found) { chat in
+                                ChatRow(chat: chat) {
+                                    agent.resume(chat)
+                                    open = false
+                                    focus()
+                                }
+                                .contextMenu { ChatMenu(chat: chat, agent: agent) { renaming = chat } }
+                            }
+                        }
+                    }
+                }
+                .padding(16)
+                .frame(width: 340, height: 420)
+                .background(Palette.ground)
+                .modifier(ChatRenamer(chats: chats, chat: $renaming))
+            }
     }
 }
 
@@ -342,14 +432,14 @@ struct AgentNotice: View {
                     Pill("Try again") { agent.restart() }
                 }
             case .signedOut:
-                words("Sign in to Codegraff", "`graff login` opens in Terminal. Come back here once it says you're in.")
+                words("Sign in to Codegraff", "Approve this Mac on codegraff.com. The page opens here, and sign-in finishes automatically.")
                 HStack(spacing: 6) {
-                    Pill("Sign in…", filled: true) { agent.signIn() }
+                    Pill("Sign in on the web", filled: true) { agent.signIn() }
                     Pill("I've signed in") { agent.restart() }
                 }
             case .broken(let why):
                 words("Codegraff stopped", why)
-                Pill("Start it again", filled: true) { agent.restart() }
+                Pill("Reconnect", filled: true) { agent.reconnect() }
             default:
                 EmptyView()
             }

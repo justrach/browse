@@ -11,6 +11,21 @@ in [ROADMAP.md](ROADMAP.md).
 
 ## Unreleased
 
+### Changed
+
+- Page context shows the title and domain with include, exclude and pin controls. Settings › Agent can add Ask Codegraff to selected text's context menu; excerpts are reviewed before sending and keep their original source across tab changes and queued messages. Conversations show actionable task states and a collapsible list of agent pages that opens only when requested.
+- Model controls show provider logos beside the selected model and in the picker, with appearance-aware marks and a Claude accent matching Harness. Custom providers use their initial.
+- Codegraff's expanded view and side column share a multiline composer, with model and reasoning controls on the Ask page too. Recent conversations can be searched from either header; the Ask page lists them in compact rows, and research starters leave an editable draft. Long model names scroll without moving Send or Stop out of reach.
+- The side composer folds down while reading. Page context says whether it will be included; conversation options explains the research workflow and opens a reviewed feedback draft, also available with `/feedback`.
+- The agent column shares the browser's surface, with a soft input fill and quieter source links instead of an inset panel and stacked outlines. Its compact header keeps the status beside the name and softens the edge of scrolling replies. The permanent divider is gone; a small resize handle appears on hover.
+- Pressing `.` while reading opens the enabled Codegraff agent beside the page; text fields keep punctuation. Ask, the empty conversation and the shortcut guide explain it. Live activity shows recent actions, running tools and task progress, with Details for the full activity and Result for tool output.
+
+### Fixed
+
+- Codegraff's sign-in notice describes its web approval flow instead of telling people the button opens Terminal.
+- Reconnecting Codegraff restores the conversation instead of starting an empty session, and holds queued messages for an explicit next send. Conversation options offers recovery when a run stops responding.
+- Agent replies and composer layout changes leave keyboard focus where it was. Opening the agent, choosing a starter or starting a conversation still focuses its input.
+
 ## 1.2.2 — 29 September 2026
 
 ### Changed
