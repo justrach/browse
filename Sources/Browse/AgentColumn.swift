@@ -155,7 +155,7 @@ struct AgentColumn: View {
             ) {
                 if full { browser.talkToColumn() } else { browser.takeStage() }
             }
-            Door(icon: "xmark", help: "Close   ⇧⌘A") { browser.toggleAgent() }
+            Door(icon: "xmark", help: "Close   ⌘;") { browser.toggleAgent() }
         }
         .padding(.horizontal, full ? 20 : 18)
         .frame(height: full ? 56 : 44)
@@ -923,7 +923,7 @@ struct AgentPage: View {
         Card {
             Line(
                 "Codegraff",
-                "The Ask tab at the head of the row, with your chats, and a column beside the page. Codegraff reads the page you're on, fills in forms, and works on your Mac with all its tools — commands, file edits, codedb — without stopping to ask. ⇧⌘A shows and hides the column; ⌘↩ in the address field asks it"
+                "The Ask tab at the head of the row, with your chats, and a column beside the page. Codegraff reads the page you're on, fills in forms, and works on your Mac with all its tools — commands, file edits, codedb — without stopping to ask. ⌘; shows and hides Codegraff; ⌘↩ in the address field asks it"
             ) {
                 Switch(on: Binding(
                     get: { prefs.usesAgent },

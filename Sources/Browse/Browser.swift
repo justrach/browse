@@ -113,7 +113,7 @@ final class Browser: NSObject, ObservableObject {
     /// in front (see AskTab in TabBar.swift).
     var talkOnStage: Bool { consulting && agentFull && prefs.usesAgent }
 
-    /// ⇧⌘A. Codegraff over the whole tab, or — if it is up, on the stage or
+    /// ⌘;. Codegraff over the whole tab, or — if it is up, on the stage or
     /// down the side — gone again. Settings › Agent turns it off for good.
     func toggleAgent() {
         if !prefs.usesAgent { prefs.usesAgent = true }
