@@ -11,6 +11,10 @@ in [ROADMAP.md](ROADMAP.md).
 
 ## Unreleased
 
+### Changed
+
+- A five-step welcome tour introduces page-to-chat research, shows Codegraff installation and sign-in choices, and explains ⌘; and the period shortcut. Steps can be skipped individually or revisited, compact windows scroll, and the final screen can open a first research question as an editable draft without sending it.
+
 ## 1.3.2 — 30 September 2026
 
 ### Changed
