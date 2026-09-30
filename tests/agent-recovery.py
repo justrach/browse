@@ -376,6 +376,13 @@ def run_checks():
             until(lambda: ask("probe")["agent"]["taskState"] == "Finished")
             assert ask("probe")["agent"]["draft"] == "Tab two follow-up"
             checks.append("A pending agent question keeps its answer field across tab switches, then restores the tab draft")
+            ask("select", id=tab)
+            ask("agent-context", draft="Pinned tab question", action="pin", on=True)
+            ask("select", id=other_tab)
+            ask("ui", chat="none")
+            until(lambda: ask("probe")["agent"]["phase"] == "")
+            assert ask("probe")["agent"]["draft"] == "Tab two follow-up"
+            checks.append("Starting a new chat releases the old pin and restores the current tab draft")
             for check in checks:
                 print("PASS", check)
         finally:

@@ -497,6 +497,7 @@ final class Agent: ObservableObject {
         lost = nil
         resuming = nil
         restart()
+        moveDraft(to: AgentTools.shared.browser?.active)
     }
 
     /// A conversation from before, back on screen, and graff picking it up
@@ -520,6 +521,7 @@ final class Agent: ObservableObject {
         lost = chat.session == nil ? Agent.transcript(chat.entries) : nil
         resuming = chat.session
         start()
+        moveDraft(to: AgentTools.shared.browser?.active)
     }
 
     /// The conversation on screen, saved with the others.
