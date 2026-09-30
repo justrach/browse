@@ -11,6 +11,8 @@ in [ROADMAP.md](ROADMAP.md).
 
 ## Unreleased
 
+## 1.3.1 — 30 September 2026
+
 ### Changed
 
 - Refreshed the bundled EasyList and EasyPrivacy rules for blocking ads and trackers.
