@@ -28,7 +28,7 @@ The tabs and the page are the whole window. **⌘L** to go somewhere, **⌘K** t
 
 ## Codegraff, beside the page
 
-Ask about the page you're reading with **⇧⌘A**, or type a question in the address field and press **⌘↩**. Codegraff answers in a column beside the site, and can fill in a form for you to check — it doesn't submit, pay or send anything unless you ask.
+Open Codegraff with **⌘;**, or press **.** while reading to ask beside the page. You can also type a question in the address field and press **⌘↩**. Codegraff can fill in a form for you to check — it doesn't submit, pay or send anything unless you ask.
 
 ![Codegraff's column beside a form](docs/screenshots/column-rounded-light.png)
 

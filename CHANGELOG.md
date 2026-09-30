@@ -11,6 +11,10 @@ in [ROADMAP.md](ROADMAP.md).
 
 ## Unreleased
 
+### Changed
+
+- Command–semicolon (⌘;) shows and hides Codegraff, replacing Shift–Command–A. The menu, close-button hint and keyboard shortcut guide use the new key.
+
 ## 1.3.1 — 30 September 2026
 
 ### Changed
