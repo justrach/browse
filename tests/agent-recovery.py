@@ -334,6 +334,48 @@ def run_checks():
             ask("ui", chat="none")
             assert not ask("probe")["agent"]["openPages"]
             checks.append("Agent page navigation updates the list without taking focus; close and new-chat actions clear it")
+            # Draft separation is opt-in; excerpts and context choices travel
+            # with the unsent words, without creating an ACP prompt.
+            ask("select", id=tab)
+            ask("agent-context", action="pin", on=False, drafts=True, draft="Page one question", withPage=False)
+            ask("eval", id=tab, js=select_passage)
+            ask("agent-context", action="selection")
+            passage = ask("probe")["agent"]["passage"]
+            before = log.read_text().count('"session/prompt"')
+            ask("select", id=other_tab)
+            state = ask("probe")["agent"]
+            assert state["draft"] == "" and not state["passage"], state
+            ask("agent-context", draft="Page two question")
+            ask("select", id=tab)
+            state = ask("probe")["agent"]
+            assert state["draft"] == "Page one question" and state["passage"] == passage, state
+            ask("agent-context", prepare="Research instructions")
+            assert ask("probe")["agent"]["draft"] == "Page one question\n\nResearch instructions"
+            assert log.read_text().count('"session/prompt"') == before
+            checks.append("Opt-in tab drafts restore words and excerpts; task preparation appends without prompting")
+            ask("agent-context", action="pin", on=True)
+            ask("select", id=other_tab)
+            assert ask("probe")["agent"]["draft"].startswith("Page one question")
+            ask("agent-context", action="pin", on=False)
+            assert ask("probe")["agent"]["draft"] == "Page two question"
+            ask("agent-context", drafts=False)
+            ask("select", id=tab)
+            assert ask("probe")["agent"]["draft"] == "Page two question"
+            checks.append("Pinned chat keeps its draft; unpin restores the current tab and disabling preserves current words")
+            ask("agent-context", drafts=True, draft="Tab one follow-up")
+            ask("select", id=other_tab)
+            ask("agent-context", draft="Tab two follow-up")
+            ask("select", id=tab)
+            ask("ui", ask="QUESTION")
+            until(lambda: ask("probe")["agent"]["taskState"] == "Needs your answer")
+            ask("select", id=other_tab)
+            ask("agent-context", prepare="Do not put a task into an answer")
+            assert ask("probe")["agent"]["draft"] == ""
+            ask("agent-context", draft="Use the original source")
+            ask("agent-context", action="send")
+            until(lambda: ask("probe")["agent"]["taskState"] == "Finished")
+            assert ask("probe")["agent"]["draft"] == "Tab two follow-up"
+            checks.append("A pending agent question keeps its answer field across tab switches, then restores the tab draft")
             for check in checks:
                 print("PASS", check)
         finally:

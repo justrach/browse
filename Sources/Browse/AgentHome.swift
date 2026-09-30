@@ -345,7 +345,7 @@ struct AgentStarters: View {
 
     private var buttons: some View {
         ForEach(prompts, id: \.0) { title, icon, prompt in
-            Button { agent.draft = prompt; focus() } label: {
+            Button { agent.prepareDraft(prompt); focus() } label: {
                 Label(title, systemImage: icon)
                     .font(.system(size: 11.5))
                     .foregroundStyle(Palette.muted)
@@ -356,6 +356,7 @@ struct AgentStarters: View {
                     .contentShape(Rectangle())
             }
             .buttonStyle(.plain)
+            .disabled(agent.asking?.isQuestion == true)
         }
     }
 }

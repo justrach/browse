@@ -979,6 +979,8 @@ final class Bench {
             if let words = request["draft"] as? String { browser.agent.draft = words }
             if let on = request["withPage"] as? Bool { browser.agent.withPage = on }
             if let on = request["enabled"] as? Bool { browser.prefs.agentSelection = on }
+            if let on = request["drafts"] as? Bool { browser.prefs.agentDrafts = on }
+            if let words = request["prepare"] as? String { browser.agent.prepareDraft(words) }
             answer(["ok": true])
 
         case "acp":

@@ -245,6 +245,18 @@ final class Agent: ObservableObject {
     @Published private(set) var effort: Effort?
     @Published var draft = ""
     @Published var passage: AgentPassage?
+    lazy var tasks = AgentTasks()
+    /// Unsent words and excerpts stay in memory, including on private tabs.
+    /// They are never added to history or written to a draft file.
+    private struct Draft {
+        var text: String
+        var passage: AgentPassage?
+        var withPage: Bool
+    }
+    private var drafts: [UUID: Draft] = [:]
+    private var generalDraft = Draft(text: "", withPage: true)
+    private var draftTab: UUID?
+    private var separatesDrafts = false
     enum Outcome: Equatable { case finished, stopped, interrupted(String) }
     @Published private(set) var outcome: Outcome?
     /// Whether the page you are on goes with the next message.
@@ -311,7 +323,40 @@ final class Agent: ObservableObject {
     /// agent on that tab alone.
     @Published private(set) var pinned: Tab?
 
-    func pin(_ tab: Tab?) { pinned = tab }
+    func pin(_ tab: Tab?) {
+        pinned = tab
+        if separatesDrafts, let tab { draftTab = tab.id }
+        if tab == nil { moveDraft(to: AgentTools.shared.browser?.active) }
+    }
+
+    /// Starters and saved tasks leave any words already typed intact.
+    func prepareDraft(_ text: String) {
+        guard asking?.isQuestion != true else { return }
+        draft = draft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ? text : draft + "\n\n" + text
+    }
+
+    func separateDrafts(_ on: Bool, page: Tab?) {
+        separatesDrafts = on
+        drafts = [:]
+        generalDraft = Draft(text: "", withPage: true)
+        draftTab = (pinned ?? page)?.id
+    }
+
+    func moveDraft(to tab: Tab?) {
+        guard separatesDrafts, pinned == nil, asking?.isQuestion != true, draftTab != tab?.id else { return }
+        let before = Draft(text: draft, passage: passage, withPage: withPage)
+        if let draftTab { drafts[draftTab] = before } else { generalDraft = before }
+        let next = tab.flatMap { drafts[$0.id] } ?? (tab == nil ? generalDraft : Draft(text: "", withPage: true))
+        draftTab = tab?.id
+        draft = next.text
+        passage = next.passage
+        withPage = next.withPage
+    }
+
+    func forgetDraft(_ id: UUID) {
+        if pinned?.id == id { pin(nil) }
+        drafts[id] = nil
+    }
     /// Stopped by hand: the queue waits for the next thing sent rather than
     /// going on its own — a stop means stop. Send now clears it.
     private var queueHeld = false
@@ -991,6 +1036,7 @@ final class Agent: ObservableObject {
     /// or graff's turn waits for ever.
     private func respond(_ ask: Ask, text: String?) {
         asking = nil
+        moveDraft(to: AgentTools.shared.browser?.active)
         guard let session else { return }
         notify("session/answer", ["sessionId": session, "text": text ?? "", "cancelled": text == nil])
     }
