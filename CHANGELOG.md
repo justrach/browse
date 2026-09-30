@@ -14,6 +14,7 @@ in [ROADMAP.md](ROADMAP.md).
 ### Changed
 
 - Command–semicolon (⌘;) shows and hides Codegraff, replacing Shift–Command–A. The menu, close-button hint and keyboard shortcut guide use the new key.
+- Refreshed the bundled EasyList and EasyPrivacy rules for blocking ads and trackers.
 
 ## 1.3.1 — 30 September 2026
 
