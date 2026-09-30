@@ -11,6 +11,8 @@ in [ROADMAP.md](ROADMAP.md).
 
 ## Unreleased
 
+## 1.4.0 — 1 October 2026
+
 ### Changed
 
 - Settings › Agent can enable a local task library with editable research examples, search, save and edit controls, and drafts that stay with their tab and selected excerpt. Task choices and research starters preserve existing draft text and never send it. The chat header has a visible usage guide with current shortcuts, page context and follow-up instructions.

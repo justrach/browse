@@ -1,3 +1,5 @@
+A clearer five-step welcome tour gets you from setup to a first research draft. Codegraff now offers an optional local task library, drafts that stay with their tabs, and a visible guide to shortcuts, context and follow-ups. Saved instructions are reviewed before sending, and existing draft text is kept.
+
 Command-semicolon (⌘;) now opens and closes Codegraff, including while typing. The menu, hints and shortcut guide show the new key. Refreshed the bundled rules for blocking ads and trackers.
 
 Codegraff now shares a calmer chat beside your pages and in the expanded conversation. See which page is attached, pin or exclude it, and review selected passages before sending. Follow reported actions, sources and task progress, inspect agent pages when you choose, and see when the agent needs an answer or approval. Provider logos make model choices easier to recognise. Reconnect restores the conversation and holds queued follow-ups for your next send; reviewed problem reports are available in the chat and through /feedback. Includes refreshed ad and tracker blocking rules.
