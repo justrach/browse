@@ -13,6 +13,8 @@ in [ROADMAP.md](ROADMAP.md).
 
 ### Changed
 
+- Refreshed the bundled EasyList and EasyPrivacy rules for blocking ads and trackers.
+
 - Page context shows the title and domain with include, exclude and pin controls. Settings › Agent can add Ask Codegraff to selected text's context menu; excerpts are reviewed before sending and keep their original source across tab changes and queued messages. Conversations show actionable task states and a collapsible list of agent pages that opens only when requested.
 - Model controls show provider logos beside the selected model and in the picker, with appearance-aware marks and a Claude accent matching Harness. Custom providers use their initial.
 - Codegraff's expanded view and side column share a multiline composer, with model and reasoning controls on the Ask page too. Recent conversations can be searched from either header; the Ask page lists them in compact rows, and research starters leave an editable draft. Long model names scroll without moving Send or Stop out of reach.
