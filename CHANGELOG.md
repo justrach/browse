@@ -34,6 +34,10 @@ in [ROADMAP.md](ROADMAP.md).
 - Reconnecting Codegraff restores the conversation instead of starting an empty session, and holds queued messages for an explicit next send. Conversation options offers recovery when a run stops responding.
 - Agent replies and composer layout changes leave keyboard focus where it was. Opening the agent, choosing a starter or starting a conversation still focuses its input.
 
+## 1.3.0 — 30 September 2026
+
+Tagged but not published. These changes shipped in 1.3.1.
+
 ## 1.2.2 — 29 September 2026
 
 ### Changed
