@@ -69,6 +69,7 @@ final class Agent: ObservableObject {
         var act = ""
         /// The page that went with something you said.
         var page: String?
+        var passage: AgentPassage?
         /// A tool call typed as Harness types it: Run, Read, Edit… with its
         /// one line of detail (see AgentSteps.swift).
         var step: Step?
@@ -243,6 +244,9 @@ final class Agent: ObservableObject {
     @Published private(set) var model: Model?
     @Published private(set) var effort: Effort?
     @Published var draft = ""
+    @Published var passage: AgentPassage?
+    enum Outcome: Equatable { case finished, stopped, interrupted(String) }
+    @Published private(set) var outcome: Outcome?
     /// Whether the page you are on goes with the next message.
     @Published var withPage = true
 
@@ -296,6 +300,7 @@ final class Agent: ObservableObject {
         var text: String
         /// The tab to send along, read when the message goes, not now.
         var tab: Tab?
+        var passage: AgentPassage?
     }
     @Published private(set) var queue: [Queued] = []
 
@@ -398,6 +403,22 @@ final class Agent: ObservableObject {
         start()
     }
 
+    /// Recovery is not a new conversation. Carry the session across the
+    /// new process, with the visible transcript as fallback if it was lost.
+    /// Nothing queued is replayed until the person sends another message.
+    func reconnect() {
+        let carried = session ?? chats.all.first(where: { $0.id == chatID })?.session
+        keep()
+        queueHeld = true
+        shutDown()
+        settle(false)
+        resuming = carried
+        lost = carried == nil ? Agent.transcript(entries) : nil
+        stumble = nil
+        outcome = .stopped
+        start()
+    }
+
     /// Turned off in Settings, or about to be started afresh.
     func shutDown() {
         let dying = pipe
@@ -417,9 +438,12 @@ final class Agent: ObservableObject {
     /// new conversation is a new graff.
     func startOver() {
         keep()
+        AgentTools.shared.dropPages()
         entries = []
         chatID = nil
         pinned = nil
+        passage = nil
+        outcome = nil
         queue = []
         queueHeld = false
         named = nil
@@ -436,10 +460,13 @@ final class Agent: ObservableObject {
     func resume(_ chat: Chat) {
         guard chat.id != chatID else { return }
         keep()
+        AgentTools.shared.dropPages()
         shutDown()
         entries = chat.entries
         chatID = chat.id
         pinned = nil
+        passage = nil
+        outcome = chat.failed.map(Outcome.interrupted)
         queue = []
         queueHeld = false
         named = nil
@@ -784,40 +811,48 @@ final class Agent: ObservableObject {
         let tab = pinned ?? tab
         let text = draft.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !text.isEmpty else { return }
+        if let details = AgentFeedbackDraft.command(text), let browser = AgentTools.shared.browser {
+            draft = ""
+            browser.reportAgentProblem(details)
+            return
+        }
         if let asking, asking.isQuestion {
             draft = ""
             entries.append(Entry(kind: .you, text: text))
             respond(asking, text: text)
             return
         }
-        guard Agent.wire([["type": "text", "text": text]]) < Agent.longestLine else {
+        guard Agent.wire((passage?.blocks ?? []) + [["type": "text", "text": text]]) < Agent.longestLine - (passage == nil ? 0 : 16_000) else {
             entries.append(Entry(kind: .note, text: "That's too long to send in one message"))
             return
         }
         draft = ""
+        let excerpt = passage
+        passage = nil
         // Mid-turn, it waits its turn.
         if phase == .working || prompting {
-            queue.append(Queued(text: text, tab: tab))
+            queue.append(Queued(text: text, tab: tab, passage: excerpt))
             return
         }
         queueHeld = false
-        submit(text, page: tab)
+        submit(text, page: tab, passage: excerpt)
     }
 
-    private func submit(_ text: String, page tab: Tab?) {
+    private func submit(_ text: String, page tab: Tab?, passage: AgentPassage? = nil) {
         let pageTitle = tab.flatMap { tab -> String? in
             guard !tab.isBlank else { return nil }
             return tab.title.isEmpty ? (tab.address?.host() ?? "This page") : tab.title
         }
         lastActive = Date()
         if chatID == nil { chatID = UUID() }
-        entries.append(Entry(kind: .you, text: text, page: pageTitle))
+        entries.append(Entry(kind: .you, text: text, page: pageTitle, passage: passage))
+        outcome = nil
         keep()
         if phase == .ready { phase = .working }
         Task {
             var page: (address: String, title: String, text: String, tab: String)?
             if let tab { page = await Agent.read(tab) }
-            let blocks = Agent.blocks(text, page: page, only: self.pinned != nil && tab === self.pinned)
+            let blocks = Agent.blocks(text, page: page, passage: passage, only: self.pinned != nil && tab === self.pinned)
             switch phase {
             case .ready, .working:
                 prompt(blocks)
@@ -861,8 +896,10 @@ final class Agent: ObservableObject {
                 }
                 self.settle(reason == "end_turn")
                 self.stumble = nil
+                self.outcome = reason == "end_turn" ? .finished : .stopped
             case .failure(let failure):
                 self.settle(false)
+                if failure.code != -1 { self.outcome = .interrupted(failure.message) }
                 self.queueHeld = !self.queue.isEmpty
                 if Agent.wantsSignIn(failure) {
                     self.phase = .signedOut
@@ -884,7 +921,7 @@ final class Agent: ObservableObject {
     private func sendQueued() {
         guard !queueHeld, !prompting, asking == nil, phase == .ready, !queue.isEmpty else { return }
         let first = queue.removeFirst()
-        submit(first.text, page: first.tab)
+        submit(first.text, page: first.tab, passage: first.passage)
     }
 
     /// Harness's Send now: this one goes next, and the turn under way is
@@ -906,8 +943,13 @@ final class Agent: ObservableObject {
     /// is there.
     func edit(_ id: Queued.ID) {
         guard let index = queue.firstIndex(where: { $0.id == id }) else { return }
+        if let held = queue[index].passage, let passage, held != passage {
+            entries.append(Entry(kind: .note, text: "Remove the selected text in your draft before editing this queued message"))
+            return
+        }
         let item = queue.remove(at: index)
         draft = draft.isEmpty ? item.text : item.text + "\n" + draft
+        if let excerpt = item.passage { passage = excerpt }
     }
 
     func unqueue(_ id: Queued.ID) {
@@ -1099,6 +1141,7 @@ final class Agent: ObservableObject {
     func rehearse(asking: String) {
         guard Store.testing else { return }
         entries.append(Entry(kind: .you, text: asking))
+        outcome = nil
         before = phase
         phase = .working
     }
@@ -1123,6 +1166,7 @@ final class Agent: ObservableObject {
         guard Store.testing, let was = before else { return }
         before = nil
         if phase == .working, !prompting { phase = was }
+        outcome = .finished
     }
 
     private var before: Phase?
@@ -1326,9 +1370,10 @@ final class Agent: ObservableObject {
 
     /// The prompt: the page, cut to whatever room the words leave in one
     /// line, then the words.
-    private static func blocks(_ text: String, page: (address: String, title: String, text: String, tab: String)?, only: Bool = false) -> [[String: Any]] {
+    private static func blocks(_ text: String, page: (address: String, title: String, text: String, tab: String)?, passage: AgentPassage? = nil, only: Bool = false) -> [[String: Any]] {
         let words: [String: Any] = ["type": "text", "text": text]
-        guard let page else { return [words] }
+        let excerpt = passage?.blocks ?? []
+        guard let page else { return excerpt + [words] }
         // A conversation pinned to the tab: that tab and nothing else.
         let lead = only
             ? "Work only in my browser tab \(page.tab): pass page \"\(page.tab)\" to every browser tool, act on it rather than opening pages of your own, and don't submit a form or go past a step that pays, sends or signs up until I say so. Here it is now:"
@@ -1341,8 +1386,7 @@ final class Agent: ObservableObject {
                     "mimeType": "text/plain",
                     "text": body,
                 ]],
-                words,
-            ]
+            ] + excerpt + [words]
         }
         let whole = page.title.isEmpty ? page.text : "\(page.title)\n\n\(page.text)"
         var body = whole
@@ -1356,7 +1400,7 @@ final class Agent: ObservableObject {
             body = String(body.prefix(max(0, keep)))
             size = wire(with(body + "\n…"))
         }
-        if body.isEmpty { return [words] }
+        if body.isEmpty { return excerpt + [words] }
         return with(body.count < whole.count ? body + "\n…" : body)
     }
 

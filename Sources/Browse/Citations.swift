@@ -127,29 +127,45 @@ struct SourcesRow: View {
     @Environment(\.openURL) private var openURL
 
     var body: some View {
-        ScrollView(.horizontal, showsIndicators: false) {
-            HStack(spacing: 6) {
+        VStack(alignment: .leading, spacing: 8) {
+            Rectangle().fill(Palette.hairline.opacity(0.5)).frame(height: 1)
+            Text("Sources · \(sources.count)")
+                .font(.system(size: size * 0.8, weight: .medium))
+                .foregroundStyle(Palette.muted)
+            LazyVGrid(columns: [GridItem(.adaptive(minimum: 130), alignment: .leading)], alignment: .leading, spacing: 6) {
                 ForEach(sources) { source in
                     Button { openURL(source.url) } label: {
                         HStack(spacing: 6) {
                             Text("\(source.number)")
                                 .font(.system(size: size * 0.7, weight: .semibold))
-                                .foregroundStyle(Palette.onAccent)
+                                .foregroundStyle(Palette.muted)
                                 .frame(minWidth: size * 1.15, minHeight: size * 1.15)
-                                .background(Palette.accent, in: Circle())
-                            Text(source.title)
-                                .font(.system(size: size * 0.86))
-                                .foregroundStyle(Palette.ink)
-                                .lineLimit(1)
+                                .background(Palette.wash, in: Circle())
+                            VStack(alignment: .leading, spacing: 2) {
+                                Text(source.title)
+                                    .font(.system(size: size * 0.86))
+                                    .foregroundStyle(Palette.ink)
+                                    .lineLimit(1)
+                                if source.title != source.host {
+                                    Text(source.host)
+                                        .font(.system(size: size * 0.75))
+                                        .foregroundStyle(Palette.muted)
+                                        .lineLimit(1)
+                                }
+                            }
+                            Spacer(minLength: 0)
+                            Image(systemName: "arrow.up.right")
+                                .font(.system(size: 8))
+                                .foregroundStyle(Palette.muted)
                         }
-                        .padding(.leading, 4)
-                        .padding(.trailing, 10)
-                        .padding(.vertical, 4)
-                        .background(Palette.wash, in: Capsule())
-                        .contentShape(Capsule())
+                        .padding(.horizontal, 8)
+                        .frame(height: 38)
+                        .background(Palette.ink.opacity(0.025), in: RoundedRectangle(cornerRadius: 8))
+                        .contentShape(Rectangle())
                     }
                     .buttonStyle(.plain)
                     .help(source.url.absoluteString)
+                    .accessibilityLabel("Source \(source.number): \(source.title), \(source.host)")
                 }
             }
         }

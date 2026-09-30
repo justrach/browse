@@ -19,6 +19,9 @@ struct AgentColumn: View {
     var full = false
 
     @FocusState private var typing: Bool
+    @State private var confirmingReconnect = false
+    @State private var showingGuide = false
+
     /// The width the column had when the edge was picked up.
     @State private var grabbed: CGFloat?
     @State private var onEdge = false
@@ -26,23 +29,18 @@ struct AgentColumn: View {
     var body: some View {
         VStack(spacing: 0) {
             if full && agent.entries.isEmpty {
-                // Nothing said yet, and the whole page to say it on:
-                // Codegraff's own page, with the chats so far.
-                AgentHome(browser: browser, agent: agent)
+                head
+                AgentHome(browser: browser, agent: agent, typing: $typing)
             } else if full {
+                head
                 conversation
             } else {
-                insetConversation
+                conversation
             }
         }
         .frame(width: full ? nil : prefs.agentWidth)
         .frame(maxWidth: full ? .infinity : nil, maxHeight: .infinity)
-        .background(full ? Palette.ground : Palette.wash)
-        .overlay(alignment: .leading) {
-            if !full {
-                Rectangle().fill(Palette.hairline).frame(width: 1)
-            }
-        }
+        .background(Palette.ground)
         .overlay(alignment: .leading) { if !full { edge } }
         .animation(Motion.settle, value: agent.asking?.id)
         // A link in what graff said opens here, as a tab, not in whichever
@@ -54,21 +52,41 @@ struct AgentColumn: View {
         })
         .onAppear {
             agent.wake()
-            DispatchQueue.main.async { typing = true }
+            focusInput()
         }
-        // From Codegraff's page into the talk: the field at the foot takes
-        // the keyboard for what comes next.
-        .onChange(of: agent.entries.isEmpty) { _, empty in
-            if !empty { DispatchQueue.main.async { typing = true } }
+        .onChange(of: browser.agentFocusRequest) { _, _ in focusInput() }
+        .sheet(item: $browser.agentFeedback) { draft in
+            AgentFeedbackView(draft: draft)
+        }
+        .alert("Reconnect Codegraff?", isPresented: $confirmingReconnect) {
+            Button("Reconnect") { agent.reconnect() }
+            Button("Cancel", role: .cancel) {}
+        } message: {
+            Text("This stops the current run and restores this conversation. Queued messages wait until you send another message. Browser actions already taken stay in place.")
+        }
+    }
+
+    private func focusInput() {
+        guard browser.takeAgentFocus() else { return }
+        let request = browser.agentFocusRequest
+        DispatchQueue.main.async {
+            guard browser.consulting, !browser.editing, browser.agentFocusRequest == request else { return }
+            typing = true
         }
     }
 
     private var conversation: some View {
         VStack(spacing: 0) {
-            head
             if !full {
-                Rectangle().fill(Palette.hairline).frame(height: 1)
+                head
             }
+            measure(
+                VStack(spacing: 0) {
+                    AgentTaskStateView(agent: agent, focus: browser.focusAgent)
+                    AgentPagesView()
+                }
+                .padding(.horizontal, full ? 20 : 18)
+            )
             said
             if let ask = agent.asking {
                 measure(
@@ -78,117 +96,76 @@ struct AgentColumn: View {
                 )
                 .transition(.move(edge: .bottom).combined(with: .opacity))
             }
-            measure(foot)
+            measure(AgentComposer(browser: browser, agent: agent, full: full, typing: $typing))
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
-    }
-
-    /// Leave the resize edge at the true column boundary while the talk sits
-    /// inside the column as one surface.
-    private var insetConversation: some View {
-        let shape = RoundedRectangle(cornerRadius: 18, style: .continuous)
-        return conversation
-            .background(Palette.ground, in: shape)
-            .clipShape(shape)
-            .overlay(shape.strokeBorder(Palette.hairline, lineWidth: 1))
-            .padding(6)
     }
 
     // MARK: - the head
 
     private var head: some View {
         HStack(spacing: 8) {
-            if full {
-                // The talk as a page: a new one first, then what this one is
-                // about, as a chat's own page has it.
-                Door(icon: "square.and.pencil", help: "New chat") { agent.startOver() }
-                Text(agent.title)
-                    .font(.system(size: 13.5, weight: .medium))
-                    .foregroundStyle(Palette.ink)
-                    .lineLimit(1)
-                    .truncationMode(.tail)
-            } else {
-                Circle()
-                    .fill(light)
-                    .frame(width: 6, height: 6)
-                Text("Codegraff")
-                    .font(.system(size: 13, weight: .semibold))
-                    .foregroundStyle(Palette.ink)
+            VStack(alignment: .leading, spacing: 3) {
+                HStack(spacing: 6) {
+                    Text("Codegraff")
+                        .font(.system(size: 12.5, weight: full ? .semibold : .medium))
+                        .foregroundStyle(Palette.ink)
+                        .lineLimit(1)
+                    if !full {
+                        Circle().fill(light).frame(width: 5, height: 5)
+                            .accessibilityLabel(status)
+                    }
+                }
+                if full || agent.asking != nil || !agent.phase.words.isEmpty {
+                    HStack(spacing: 5) {
+                        if full { Circle().fill(light).frame(width: 5, height: 5) }
+                        Text(status)
+                            .font(.system(size: 10.5))
+                            .foregroundStyle(Palette.muted)
+                            .lineLimit(1)
+                    }
+                }
             }
-            // Working says how long under the question; the head says only
-            // what is in the way.
-            if !agent.phase.words.isEmpty, agent.phase != .working {
-                Text(agent.phase.words)
-                    .font(.system(size: 11.5))
-                    .foregroundStyle(Palette.muted)
-                    .lineLimit(1)
-            }
+            .help(agent.entries.isEmpty ? status : "\(agent.title) — \(status)")
             Spacer(minLength: 0)
-            if !full {
-                Door(icon: "square.and.pencil", help: "New conversation") { agent.startOver() }
-                    .disabled(agent.entries.isEmpty)
+            AgentHistoryButton(agent: agent, focus: browser.focusAgent)
+            Door(icon: "square.and.pencil", help: "New conversation") { agent.startOver(); browser.focusAgent() }
+                .disabled(agent.entries.isEmpty && agent.draft.isEmpty)
+            Menu {
+                Button("How to use Codegraff…") { showingGuide = true }
+                Button("Report an agent problem…") { browser.reportAgentProblem() }
+                Divider()
+                Button("Reconnect…") { confirmingReconnect = true }
+            } label: {
+                Image(systemName: "ellipsis")
+                    .font(.system(size: 12, weight: .medium))
+                    .foregroundStyle(Palette.muted)
+                    .frame(width: 20, height: 24)
+                    .contentShape(Rectangle())
             }
+            .menuStyle(.button)
+            .buttonStyle(.plain)
+            .menuIndicator(.hidden)
+            .help("Conversation options")
+            .accessibilityLabel("Conversation options")
+            .popover(isPresented: $showingGuide, arrowEdge: .bottom) { AgentGuide() }
             Door(
                 icon: full ? "sidebar.right" : "arrow.up.left.and.arrow.down.right",
-                help: full ? "Beside the page" : "Fill the window"
+                help: full ? "Beside the page" : "Expand conversation"
             ) {
                 if full { browser.talkToColumn() } else { browser.takeStage() }
             }
             Door(icon: "xmark", help: "Close   ⇧⌘A") { browser.toggleAgent() }
         }
-        .padding(.leading, full ? 10 : 14)
-        .padding(.trailing, 8)
-        .frame(height: 44)
+        .padding(.horizontal, full ? 20 : 18)
+        .frame(height: full ? 56 : 44)
     }
 
-    /// Under the field: the model it is on and how hard it thinks, each a
-    /// menu of what graff offers — the models its keys reach, the levels
-    /// that model takes (as Harness asks graff for them).
-    @ViewBuilder
-    private var choices: some View {
-        HStack(spacing: 12) {
-            if let current = agent.model {
-                ModelPicker(agent: agent, current: current)
-                    .help("The model Codegraff uses — changing it carries the conversation over")
-            }
-            if let effort = agent.effort {
-                Menu {
-                    ForEach(effort.levels, id: \.value) { level in
-                        Button {
-                            agent.choose(effort: level.value)
-                        } label: {
-                            if level.value == effort.current {
-                                Label(level.name, systemImage: "checkmark")
-                            } else {
-                                Text(level.name)
-                            }
-                        }
-                    }
-                } label: {
-                    HStack(spacing: 4) {
-                        Image(systemName: "brain")
-                            .font(.system(size: 9.5))
-                        Text(effort.currentName)
-                        Image(systemName: "chevron.down")
-                            .font(.system(size: 7.5, weight: .semibold))
-                    }
-                    .font(.system(size: 11.5))
-                    .foregroundStyle(Palette.muted)
-                    .contentShape(Rectangle())
-                }
-                // Drawn as given, the same as the model's menu beside it —
-                // a borderless menu sets its own size and ink.
-                .menuStyle(.button)
-                .buttonStyle(.plain)
-                .menuIndicator(.hidden)
-                .help("How hard it thinks before it answers")
-            }
-        }
-        .font(.system(size: 11.5))
-        .foregroundStyle(Palette.muted)
-        .menuStyle(.borderlessButton)
-        .fixedSize()
-        .disabled(agent.phase == .working)
+    private var status: String {
+        if agent.taskState != .idle { return agent.taskState.words }
+        if !agent.phase.words.isEmpty { return agent.phase.words }
+        if !full { return "Ready to help" }
+        return agent.entries.isEmpty ? "Research and tasks" : agent.title
     }
 
     private var light: Color {
@@ -226,16 +203,28 @@ struct AgentColumn: View {
                             // and waiting for it to be.
                             live: turn.id == turns.last?.id && (agent.phase == .working
                                 || (agent.phase == .starting && turn.you != nil && turn.answer.isEmpty)),
-                            full: full
-                        ) { url in browser.open(url, foreground: true) }
+                            full: full,
+                            waiting: agent.asking.map { $0.isQuestion ? "Waiting for your answer…" : "Waiting for your approval…" },
+                            visit: { url in browser.open(url, foreground: true) },
+                            feedback: { browser.reportAgentProblem(kind: .answer) }
+                        )
                     }
                 }
-                .padding(.horizontal, full ? 20 : 14)
-                .padding(.vertical, 12)
+                .padding(.horizontal, full ? 20 : 18)
+                .padding(.vertical, 18)
             )
         }
         .defaultScrollAnchor(.bottom)
         .frame(maxHeight: .infinity)
+        .mask {
+            VStack(spacing: 0) {
+                if !full {
+                    LinearGradient(colors: [.clear, .black], startPoint: .top, endPoint: .bottom)
+                        .frame(height: 12)
+                }
+                Rectangle()
+            }
+        }
     }
 
     /// "Today 7:44 PM", or the day it was, over a conversation on the stage.
@@ -255,154 +244,26 @@ struct AgentColumn: View {
             case .missing, .signedOut, .broken:
                 AgentNotice(browser: browser, agent: agent)
             default:
-                Text("Ask about the page you're on, have it fill in a form, or give Codegraff something to do on your Mac. It runs commands and edits files without stopping to ask.")
+                Image(systemName: "sparkles")
+                    .font(.system(size: 22, weight: .light))
+                    .foregroundStyle(Palette.accent)
+                    .padding(.bottom, 6)
+                Text(browser.active?.isBlank == false ? "Explore this page" : "Start a conversation")
+                    .font(.system(size: 18, weight: .medium))
+                    .foregroundStyle(Palette.ink)
+                Text("Ask a question, check a claim, or follow an idea. Choose what goes with your message below.")
                     .font(.system(size: 12.5))
                     .foregroundStyle(Palette.muted)
                     .fixedSize(horizontal: false, vertical: true)
+                AgentStarters(agent: agent, page: browser.active, compact: true, focus: browser.focusAgent)
+                    .padding(.top, 8)
+                Text("Press . while reading to open Codegraff here.")
+                    .font(.system(size: 11))
+                    .foregroundStyle(Palette.muted)
+                    .padding(.top, 8)
             }
         }
-        .padding(.top, 6)
-    }
-
-    // MARK: - the foot
-
-    private var foot: some View {
-        VStack(alignment: .leading, spacing: 8) {
-            // On the stage the page is out of sight, so it doesn't go along.
-            if let pinned = agent.pinned {
-                pinnedChip(pinned)
-            } else if !full, let tab = browser.active, !tab.isBlank, agent.asking?.isQuestion != true {
-                pageChip(tab)
-            }
-            // What was typed while it worked, in the order it will go.
-            if !agent.queue.isEmpty {
-                QueuePanel(agent: agent, full: full)
-                    .transition(.move(edge: .bottom).combined(with: .opacity))
-            }
-            // One box: the words, and under them in the same box what
-            // they go to — the model, how hard it thinks — and the button.
-            VStack(alignment: .leading, spacing: full ? 10 : 8) {
-                ZStack(alignment: .topLeading) {
-                    if agent.draft.isEmpty {
-                        Text(prompt)
-                            .foregroundStyle(Palette.muted.opacity(0.75))
-                            .allowsHitTesting(false)
-                    }
-                    TextField("", text: $agent.draft, axis: .vertical)
-                        .textFieldStyle(.plain)
-                        .foregroundStyle(Palette.ink)
-                        .lineLimit(1...8)
-                        .focused($typing)
-                        .onSubmit(send)
-                }
-                .font(.system(size: full ? 14.5 : 13.5))
-                .frame(minHeight: full ? nil : 38, alignment: .topLeading)
-                HStack(alignment: .center, spacing: 8) {
-                    choices
-                    Spacer(minLength: 0)
-                    if agent.phase == .working, agent.asking?.isQuestion != true {
-                        round(icon: "stop.fill", help: "Stop", live: agent.draft.isEmpty) { agent.stop() }
-                        // Something typed: it joins the queue.
-                        if !agent.draft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
-                            round(icon: "arrow.up", help: "Queue   ↩", live: true) { send() }
-                                .transition(.scale.combined(with: .opacity))
-                        }
-                    } else {
-                        round(icon: "arrow.up", help: "Send   ↩", live: agent.canSend) { send() }
-                            .disabled(!agent.canSend)
-                    }
-                }
-            }
-            .padding(.leading, full ? 16 : 12)
-            .padding(.trailing, full ? 10 : 8)
-            .padding(.top, full ? 13 : 12)
-            .padding(.bottom, 9)
-            .background(Palette.ground, in: RoundedRectangle(cornerRadius: full ? 20 : 19, style: .continuous))
-            .overlay(
-                RoundedRectangle(cornerRadius: full ? 20 : 19, style: .continuous)
-                    .strokeBorder(typing ? Palette.accent.opacity(0.45) : Palette.hairline, lineWidth: 1)
-            )
-            .shadow(color: .black.opacity(0.06), radius: 10, y: 3)
-            .animation(Motion.quick, value: typing)
-            .onTapGesture { typing = true }
-        }
-        .animation(Motion.settle, value: agent.queue.map(\.id))
-        .padding(.horizontal, full ? 12 : 8)
-        .padding(.top, 4)
-        .padding(.bottom, 12)
-    }
-
-    private var prompt: String {
-        if agent.asking?.isQuestion == true { return "Answer Codegraff" }
-        return agent.phase == .working ? "Codegraff is working. Type to queue a message" : "Ask Codegraff"
-    }
-
-    /// The tab this conversation is pinned to: every message goes with it,
-    /// and Codegraff works in it alone. The cross lets it go.
-    private func pinnedChip(_ tab: Tab) -> some View {
-        HStack(spacing: 6) {
-            Image(systemName: "pin.fill")
-                .font(.system(size: 9, weight: .medium))
-            Text(tab.title.isEmpty ? (tab.address?.host() ?? "This tab") : tab.title)
-                .lineLimit(1)
-            Button { agent.pin(nil) } label: {
-                Image(systemName: "xmark")
-                    .font(.system(size: 8, weight: .semibold))
-                    .frame(width: 14, height: 14)
-                    .contentShape(Rectangle())
-            }
-            .buttonStyle(.plain)
-            .help("Unpin: Codegraff goes back to the page in front")
-        }
-        .font(.system(size: 11.5))
-        .foregroundStyle(Palette.ink)
-        .padding(.leading, 9)
-        .padding(.trailing, 5)
-        .padding(.vertical, 4)
-        .background(Capsule().fill(Palette.accent.opacity(0.1)))
-        .overlay(Capsule().strokeBorder(Palette.accent.opacity(0.35), lineWidth: 1))
-        .help("Codegraff works in this tab alone")
-    }
-
-    /// The page that goes with the next message; a click leaves it behind.
-    private func pageChip(_ tab: Tab) -> some View {
-        Button { agent.withPage.toggle() } label: {
-            HStack(spacing: 6) {
-                Image(systemName: agent.withPage ? "doc.text" : "doc")
-                    .font(.system(size: 10, weight: .medium))
-                Text(tab.title.isEmpty ? (tab.address?.host() ?? "This page") : tab.title)
-                    .lineLimit(1)
-                    .strikethrough(!agent.withPage)
-            }
-            .font(.system(size: 11.5))
-            .foregroundStyle(agent.withPage ? Palette.ink : Palette.muted)
-            .padding(.horizontal, 9)
-            .padding(.vertical, 4)
-            .background(Capsule().strokeBorder(Palette.hairline, lineWidth: 1))
-            .contentShape(Capsule())
-        }
-        .buttonStyle(.plain)
-        .help(agent.withPage ? "This page goes with your message. Click to leave it out" : "Click to send this page with your message")
-    }
-
-    /// The send (or stop) button: the accent once there's something to
-    /// send, a quiet grey until then.
-    private func round(icon: String, help: String, live: Bool, act: @escaping () -> Void) -> some View {
-        Button(action: act) {
-            Image(systemName: icon)
-                .font(.system(size: 11.5, weight: .bold))
-                .foregroundStyle(live ? Palette.onAccent : Palette.muted)
-                .frame(width: 28, height: 28)
-                .background(live ? Palette.accent : Palette.wash, in: Circle())
-        }
-        .buttonStyle(.plain)
-        .animation(Motion.quick, value: live)
-        .help(help)
-    }
-
-    private func send() {
-        guard agent.canSend else { return }
-        agent.send(page: agent.withPage && !full ? browser.active : nil)
+        .padding(.top, 28)
     }
 
     /// Everything the talk draws is held to one measure and centred on the
@@ -416,9 +277,10 @@ struct AgentColumn: View {
     /// The column's edge: pulled left to widen it, double-clicked to put it
     /// back, as the sidebar's is.
     private var edge: some View {
-        Rectangle()
+        Capsule()
             .fill(Palette.ink.opacity(onEdge || grabbed != nil ? 0.18 : 0))
-            .frame(width: onEdge || grabbed != nil ? 2 : 1)
+            .frame(width: 2, height: 32)
+            .frame(maxHeight: .infinity)
             .frame(width: 9)
             .contentShape(Rectangle())
             .onHover { over in
@@ -447,14 +309,15 @@ struct AgentColumn: View {
 /// one section per provider, the one you are on first and the long routers
 /// last. Nested menus built from the first word of each name were a heap
 /// once OpenRouter's "anthropic/…" names came in.
-private struct ModelPicker: View {
+struct ModelPicker: View {
     @ObservedObject var agent: Agent
     let current: Agent.Model
     @State private var open = false
 
     var body: some View {
         Button { open.toggle() } label: {
-            HStack(spacing: 3) {
+            HStack(spacing: 5) {
+                ProviderMark(provider: current.provider, size: 13)
                 Text(current.label)
                 Image(systemName: "chevron.down")
                     .font(.system(size: 7.5, weight: .semibold))
@@ -462,6 +325,7 @@ private struct ModelPicker: View {
             .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
+        .accessibilityLabel("Model: \(current.label), \(Agent.Model.said(current.provider))")
         .popover(isPresented: $open, arrowEdge: .top) {
             ModelList(agent: agent, current: current) { open = false }
         }
@@ -581,7 +445,12 @@ private struct ModelList: View {
                                     .buttonStyle(.plain)
                                 }
                             } header: {
-                                Text(section.title)
+                                HStack(spacing: 6) {
+                                    if section.id != "recent" {
+                                        ProviderMark(provider: section.id, size: 12)
+                                    }
+                                    Text(section.title)
+                                }
                                     .font(.system(size: 11, weight: .semibold))
                                     .foregroundStyle(Palette.muted)
                                     .frame(maxWidth: .infinity, alignment: .leading)
@@ -630,6 +499,8 @@ private struct ModelList: View {
                     .background(Palette.wash, in: Capsule())
             }
             Spacer(minLength: 8)
+            ProviderMark(provider: model.provider, size: 13)
+                .help(Agent.Model.said(model.provider))
             if let maker = model.maker {
                 Text(maker)
                     .font(.system(size: 11))
@@ -649,6 +520,8 @@ private struct ModelList: View {
         .background(RoundedRectangle(cornerRadius: 7, style: .continuous).fill(lit ? Palette.hover : .clear))
         .padding(.horizontal, 4)
         .contentShape(Rectangle())
+        .accessibilityElement(children: .combine)
+        .accessibilityValue(Agent.Model.said(model.provider))
     }
 
     private func choose(_ model: Agent.Model) {
@@ -659,7 +532,7 @@ private struct ModelList: View {
 
 /// The pages graff read in a row, on one card: each its icon, title and
 /// site, and a click away from being a tab of yours.
-private struct PagesCard: View {
+struct PagesCard: View {
     let pages: [Agent.Entry]
     let open: (URL) -> Void
 
@@ -756,34 +629,26 @@ private struct Turn: Identifiable {
     var ended: Date? { (work + answer).map(\.until).max() }
 }
 
-/// A turn drawn: the question, the work as one line — "Working for 7s" over
-/// the step it is on while it works, "Worked for 58s" once it is done, that
-/// opens to show every step — and the answer with its copy and time.
+/// A turn's question, reported activity and answer. Live work remains
+/// visible; completed work folds away so the answer has room to be read.
 private struct TurnView: View {
     let turn: Turn
     let live: Bool
     let full: Bool
+    let waiting: String?
     let visit: (URL) -> Void
 
-    /// Opened by hand. Closed otherwise: while it works, only the step it
-    /// is on shows, and each gives way to the next.
-    @State private var unfolded = false
     @State private var copied = false
+    let feedback: () -> Void
 
     var body: some View {
         VStack(alignment: .leading, spacing: full ? 12 : 10) {
             if let you = turn.you {
                 EntryRow(entry: you, full: full, visit: visit)
             }
-            if !turn.work.isEmpty || (live && turn.answer.isEmpty) {
-                VStack(alignment: .leading, spacing: 6) {
-                    fold
-                    if unfolded, !turn.work.isEmpty {
-                        steps
-                    } else if live, turn.answer.isEmpty {
-                        now
-                    }
-                }
+            if turn.work.contains(where: { $0.kind != .thought }) || live {
+                AgentActivity(entries: turn.work, started: turn.started, ended: turn.ended,
+                              live: live, responding: !turn.answer.isEmpty, full: full, visit: visit, waiting: live ? waiting : nil)
             }
             ForEach(turn.answer) { entry in
                 EntryRow(entry: entry, full: full, visit: visit)
@@ -792,107 +657,7 @@ private struct TurnView: View {
                 foot(reply)
             }
         }
-        .animation(Motion.settle, value: unfolded)
         .animation(Motion.settle, value: live)
-    }
-
-    /// Every step, in order, down a hairline.
-    private var steps: some View {
-        VStack(alignment: .leading, spacing: 6) {
-            ForEach(Agent.grouped(turn.work), id: \.first?.id) { run in
-                if run.first?.kind == .page {
-                    PagesCard(pages: run, open: visit)
-                } else if let entry = run.first {
-                    EntryRow(entry: entry, full: full, visit: visit)
-                }
-            }
-        }
-        .padding(.leading, 12)
-        .overlay(alignment: .leading) {
-            Rectangle().fill(Palette.hairline).frame(width: 1).padding(.leading, 4)
-        }
-        .transition(.opacity)
-    }
-
-    /// The one step it is on, under the line that says how long.
-    private var now: some View {
-        let last = Agent.grouped(turn.work).last
-        let icon: String
-        let words: String
-        if let run = last, run.first?.kind == .page {
-            let hosts = run.compactMap { URL(string: $0.key)?.host()?.replacingOccurrences(of: "www.", with: "") }
-            icon = "globe"
-            words = (run.count == 1 ? "Read a page" : "Read \(run.count) pages") + (hosts.isEmpty ? "" : " · " + Array(Set(hosts)).sorted().prefix(3).joined(separator: ", "))
-        } else if let entry = last?.first, entry.kind == .tool {
-            let step = entry.step ?? Steps.fallback(entry)
-            icon = step.symbol
-            words = step.shown.isEmpty ? step.label : step.label + "  " + step.shown
-        } else if let entry = last?.first, entry.kind == .plan {
-            let items = entry.todo ?? []
-            icon = "checklist"
-            words = "Todo  \(items.filter(\.done).count)/\(items.count) done"
-        } else {
-            icon = "sparkle"
-            words = "Thinking"
-        }
-        return HStack(spacing: 7) {
-            Image(systemName: icon)
-                .font(.system(size: 10, weight: .medium))
-                .frame(width: 14)
-            Text(words)
-                .lineLimit(1)
-                .truncationMode(.tail)
-        }
-        .font(.system(size: full ? 12.5 : 12))
-        .foregroundStyle(Palette.muted)
-        .padding(.leading, 2)
-        .id(words)
-        .transition(.opacity)
-        .animation(Motion.quick, value: words)
-    }
-
-    private var fold: some View {
-        Button { if !turn.work.isEmpty { unfolded.toggle() } } label: {
-            HStack(spacing: 6) {
-                // The disclosure first, in its small box, as Harness puts it.
-                if !turn.work.isEmpty, !live {
-                    Image(systemName: unfolded ? "chevron.down" : "chevron.right")
-                        .font(.system(size: 7.5, weight: .semibold))
-                        .frame(width: 16, height: 16)
-                        .background(Palette.ink.opacity(0.05), in: RoundedRectangle(cornerRadius: 4, style: .continuous))
-                }
-                if live {
-                    Ring(size: 9)
-                    TimelineView(.periodic(from: .now, by: 1)) { context in
-                        Text("Working for " + Self.span(from: turn.started, to: context.date))
-                            .monospacedDigit()
-                    }
-                } else {
-                    // What it did, as Harness says it — "Ran 2 commands ·
-                    // read 3 pages" — and how long, quieter.
-                    let summary = Steps.summary(turn.work)
-                    let took = turn.started.flatMap { start in turn.ended.map { Self.span(from: start, to: $0) } }
-                    if summary.isEmpty {
-                        Text(took.map { "Worked for " + $0 } ?? "Worked")
-                    } else {
-                        // One line, as Harness keeps it; the rest is a click away.
-                        Text(summary)
-                            .lineLimit(1)
-                            .truncationMode(.tail)
-                        if let took { Text(took).foregroundStyle(Palette.faint).monospacedDigit().fixedSize() }
-                    }
-                }
-                if !turn.work.isEmpty, live {
-                    Image(systemName: unfolded ? "chevron.down" : "chevron.right")
-                        .font(.system(size: 8.5, weight: .semibold))
-                }
-            }
-            .font(.system(size: full ? 13 : 12))
-            .foregroundStyle(Palette.muted)
-            .contentShape(Rectangle())
-        }
-        .buttonStyle(.plain)
-        .help(unfolded ? "Hide the steps" : "Show each step")
     }
 
     /// Copy, and when it was said.
@@ -912,32 +677,39 @@ private struct TurnView: View {
             }
             .buttonStyle(.plain)
             .help("Copy")
-            // As Harness stamps a turn: "Aug 8, 5:31 AM".
-            Text(reply.until.formatted(.dateTime.month(.abbreviated).day()) + ", "
-                + reply.until.formatted(date: .omitted, time: .shortened))
-                .font(.system(size: 11.5))
+            Button(action: feedback) {
+                Image(systemName: "flag")
+                    .font(.system(size: 11))
+                    .frame(width: 20, height: 20)
+                    .contentShape(Rectangle())
+            }
+            .buttonStyle(.plain)
+            .help("Report a problem with this answer")
+            .accessibilityLabel("Report a problem with this answer")
+            Spacer(minLength: 0)
+            // A short stamp leaves the answer's actions easy to find.
+            Text(reply.until.formatted(date: Calendar.current.isDateInToday(reply.until) ? .omitted : .abbreviated, time: .shortened))
+                .font(.system(size: 10.5))
         }
         .foregroundStyle(Palette.muted)
+        .padding(.top, 3)
     }
 
-    /// "58s", "2m 5s".
-    private static func span(from start: Date?, to end: Date) -> String {
-        let seconds = max(0, Int(end.timeIntervalSince(start ?? end).rounded()))
-        return seconds < 60 ? "\(seconds)s" : "\(seconds / 60)m \(seconds % 60)s"
-    }
+
 }
 
 /// One thing said, by you or by it, or one thing it did.
-private struct EntryRow: View {
+struct EntryRow: View {
     let entry: Agent.Entry
     /// On the stage, where the words are set larger.
     var full = false
+    var live = false
     let visit: (URL) -> Void
-    @State private var open = false
 
-    init(entry: Agent.Entry, full: Bool = false, visit: @escaping (URL) -> Void) {
+    init(entry: Agent.Entry, full: Bool = false, live: Bool = false, visit: @escaping (URL) -> Void) {
         self.entry = entry
         self.full = full
+        self.live = live
         self.visit = visit
     }
 
@@ -951,39 +723,29 @@ private struct EntryRow: View {
                         .foregroundStyle(Palette.muted)
                         .lineLimit(1)
                 }
+                if let passage = entry.passage {
+                    AgentPassageCard(passage: passage, visit: visit)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                }
                 Text(entry.text)
                     .font(.system(size: full ? 14.5 : 13))
                     .foregroundStyle(Palette.ink)
                     .textSelection(.enabled)
                     .padding(.horizontal, full ? 15 : 11)
                     .padding(.vertical, full ? 9 : 7)
-                    .background(Palette.wash, in: RoundedRectangle(cornerRadius: full ? 18 : 12, style: .continuous))
+                    .background(full ? Palette.wash : Palette.ink.opacity(0.035), in: RoundedRectangle(cornerRadius: full ? 18 : 14, style: .continuous))
             }
             .frame(maxWidth: .infinity, alignment: .trailing)
             .padding(.leading, full ? 80 : 28)
         case .reply:
             ReplyText(text: entry.text, size: full ? 14.5 : 13)
         case .thought:
-            Button { open.toggle() } label: {
-                HStack(alignment: .firstTextBaseline, spacing: 7) {
-                    Image(systemName: "sparkle")
-                        .font(.system(size: 10, weight: .medium))
-                        .frame(width: 14)
-                    Text(open ? entry.text : "Thinking")
-                        .font(.system(size: 12))
-                        .italic(open)
-                        .multilineTextAlignment(.leading)
-                        .fixedSize(horizontal: false, vertical: true)
-                }
-                .foregroundStyle(Palette.muted)
-                .contentShape(Rectangle())
-            }
-            .buttonStyle(.plain)
+            EmptyView()
         case .tool:
             // A card of its own, as Harness draws a step (AgentCards.swift).
             StepCard(entry: entry, visit: visit)
         case .plan:
-            TodoCard(items: entry.todo ?? [])
+            TodoCard(items: entry.todo ?? [], expanded: live)
         case .note:
             Text(entry.text)
                 .font(.system(size: 11.5))
@@ -1173,6 +935,10 @@ struct AgentPage: View {
                         }
                     }
                 ))
+            }
+            Rule()
+            Line("Ask about selected text", "Right-click a passage and choose Ask Codegraff about Selection. Review the excerpt and its source before sending") {
+                Switch(on: $prefs.agentSelection)
             }
             Rule()
             Line(

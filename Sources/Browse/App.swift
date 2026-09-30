@@ -939,6 +939,17 @@ struct ContentView: View {
         let flags = event.modifierFlags.intersection(.deviceIndependentFlagsMask)
         let key = event.charactersIgnoringModifiers?.lowercased() ?? ""
 
+        // A period while reading opens the enabled agent beside the page.
+        // Editors, including those in cross-origin frames, keep punctuation.
+        if event.characters == ".", flags.isDisjoint(with: [.command, .option, .control, .shift]),
+           !event.isARepeat, browser.prefs.usesAgent, !browser.editing, browser.editingTab == nil,
+           event.window?.firstResponder is PageView,
+           event.window?.firstResponder === browser.active?.built,
+           browser.active?.immersed != true, !caretIn(event) {
+            browser.talkToColumn()
+            return true
+        }
+
         // Escape puts the page back. On a blank tab there is no page to put
         // back, so it belongs to whatever else wants it.
         if event.keyCode == 53 {

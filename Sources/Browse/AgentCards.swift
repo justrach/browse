@@ -23,6 +23,7 @@ struct StepCard: View {
         VStack(alignment: .leading, spacing: 0) {
             Button { if opens { open.toggle() } } label: { head }
                 .buttonStyle(.plain)
+                .help(opens ? (open ? "Hide result" : "Show result") : "\(step.label) \(step.shown) · \(entry.status)")
             if open {
                 Rectangle().fill(Palette.hairline).frame(height: 1)
                 Group {
@@ -79,6 +80,9 @@ struct StepCard: View {
             }
             mark
             if opens {
+                Text(open ? "Hide" : "Result")
+                    .font(.system(size: 10.5))
+                    .foregroundStyle(Palette.muted)
                 Image(systemName: open ? "chevron.down" : "chevron.right")
                     .font(.system(size: 8, weight: .semibold))
                     .foregroundStyle(Palette.muted)
@@ -94,7 +98,12 @@ struct StepCard: View {
     @ViewBuilder
     private var mark: some View {
         switch entry.status {
-        case "completed", "": EmptyView()
+        case "completed":
+            Image(systemName: "checkmark")
+                .font(.system(size: 9, weight: .medium))
+                .foregroundStyle(Palette.muted)
+                .help("Completed")
+        case "": EmptyView()
         case "failed":
             Image(systemName: "exclamationmark.circle.fill")
                 .font(.system(size: 10))
@@ -111,6 +120,11 @@ struct TodoCard: View {
     let items: [TodoItem]
 
     @State private var open = false
+
+    init(items: [TodoItem], expanded: Bool = false) {
+        self.items = items
+        self._open = State(initialValue: expanded)
+    }
 
     var body: some View {
         let done = items.filter(\.done).count
@@ -316,6 +330,13 @@ struct QueuePanel: View {
                     .foregroundStyle(Palette.ink)
                     .lineLimit(1)
                     .truncationMode(.tail)
+                if let passage = item.passage {
+                    Image(systemName: "text.quote")
+                        .font(.system(size: 10))
+                        .foregroundStyle(Palette.muted)
+                        .help("Selected text from \(passage.title)\n\(passage.text)")
+                        .accessibilityLabel("Selected text from \(passage.title)")
+                }
                 Spacer(minLength: 6)
                 HStack(spacing: 2) {
                     action("arrow.up", "Send now: stop the turn under way and send this") { agent.sendNow(item.id) }

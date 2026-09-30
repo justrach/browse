@@ -90,6 +90,24 @@ final class Browser: NSObject, ObservableObject {
     /// The same talk filling the stage instead, as a page of its own (see
     /// AgentColumn.swift): where it opens unless the column is already up.
     @Published var agentFull = false
+    /// Only a deliberate visit to the agent asks for its keyboard. Replies,
+    /// questions and a rebuilt composer must leave the page's focus alone.
+    @Published private(set) var agentFocusRequest = 0
+    private var agentFocusedRequest = 0
+
+    func focusAgent() { agentFocusRequest += 1 }
+
+    func takeAgentFocus() -> Bool {
+        guard consulting, agentFocusedRequest != agentFocusRequest else { return false }
+        agentFocusedRequest = agentFocusRequest
+        return true
+    }
+
+    @Published var agentFeedback: AgentFeedbackDraft?
+
+    func reportAgentProblem(_ details: String = "", kind: AgentFeedbackDraft.Kind = .stalled) {
+        agentFeedback = AgentFeedbackDraft(kind: kind, details: details)
+    }
 
     /// The talk on the stage where a page would be: the Ask tab is the one
     /// in front (see AskTab in TabBar.swift).
@@ -124,6 +142,7 @@ final class Browser: NSObject, ObservableObject {
             consulting = true
             agentFull = true
         }
+        focusAgent()
     }
 
     /// Back to the page, and only the page: a tab picked, ⌘T, or somewhere
@@ -136,9 +155,15 @@ final class Browser: NSObject, ObservableObject {
         }
     }
 
-    /// From the stage's own head: the same talk, down the side of the page.
+    /// From the stage's head or a period on the page: the talk beside it.
     func talkToColumn() {
-        withAnimation(Motion.glide) { agentFull = false }
+        if !prefs.usesAgent { prefs.usesAgent = true }
+        editing = false
+        withAnimation(Motion.glide) {
+            consulting = true
+            agentFull = false
+        }
+        focusAgent()
     }
 
     /// What was typed into the Ask page's field with Search chosen: the
@@ -176,6 +201,7 @@ final class Browser: NSObject, ObservableObject {
         // Codegraff's own page there is none.
         let page = talkOnStage ? nil : active
         if !consulting { takeStage() }
+        else { focusAgent() }
         guard !text.isEmpty else { return }
         agent.draft = text
         // Still busy with the last one: the words wait in its field.
@@ -200,6 +226,7 @@ final class Browser: NSObject, ObservableObject {
             if !agent.entries.isEmpty { agent.startOver() }
             agent.pin(tab)
         }
+        focusAgent()
         guard let task else { return }
         agent.draft = task
         agent.send(page: tab)
@@ -934,6 +961,22 @@ final class Browser: NSObject, ObservableObject {
             Spaces.store(for: space.id).removeData(ofTypes: types, modifiedSince: .distantPast) {}
         }
         announce("Cache cleared")
+    }
+
+    /// The context menu prepares a draft. Selecting text never sends it.
+    func askAboutSelection(_ text: String, from tab: Tab) {
+        guard agent.asking == nil else {
+            announce("Answer Codegraff's question before attaching selected text")
+            return
+        }
+        guard prefs.usesAgent, prefs.agentSelection, tabs.contains(where: { $0 === tab }),
+              let passage = AgentPassage(text: text, from: tab) else { return }
+        select(tab)
+        agent.passage = passage
+        if agent.draft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+            agent.draft = "Explain this passage."
+        }
+        talkToColumn()
     }
 
     /// Signed in to Codegraff just now: whatever needs the sign-in picks it
@@ -2195,6 +2238,10 @@ final class Browser: NSObject, ObservableObject {
             // From a private tab, the search is private too (see open(_:foreground:atEnd:from:)).
             self.open(url, foreground: true, from: tab)
         }
+        tab.canAskSelection = { [weak self] in
+            self?.prefs.usesAgent == true && self?.prefs.agentSelection == true && self?.agent.asking == nil
+        }
+        tab.onAskSelection = { [weak self] tab, text in self?.askAboutSelection(text, from: tab) }
         tab.onStoreAdd = { [weak self] tab in self?.addFromStore(tab) }
         // The middle button on a link opens it beside the tab you are on, as
         // it does in every other browser (see MiddleRelay).

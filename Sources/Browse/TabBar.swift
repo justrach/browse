@@ -334,6 +334,12 @@ struct AskTab: View {
                     Text(title)
                         .font(.system(size: 13, weight: live ? .medium : .regular))
                     Spacer(minLength: 0)
+                    Text(".")
+                        .font(.system(size: 12, weight: .medium, design: .monospaced))
+                        .foregroundStyle(Palette.muted)
+                        .frame(width: 19, height: 19)
+                        .background(Palette.ink.opacity(0.04), in: RoundedRectangle(cornerRadius: 4))
+                        .help("Press . while reading to ask beside the page")
                 }
             }
             // As a row in the column it reads like the tabs under it (Side.swift).
@@ -363,7 +369,7 @@ struct AskTab: View {
         }
         .buttonStyle(.plain)
         .onHover { hovering = $0 }
-        .help(live ? "Back to the page" : "Ask Codegraff")
+        .help(live ? "Back to the page" : "Ask Codegraff · Press . while reading to open beside the page")
         .animation(Motion.quick, value: hovering)
     }
 }

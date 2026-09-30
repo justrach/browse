@@ -21,7 +21,7 @@ import WebKit
 // and nothing but a request carrying the token is answered.
 
 @MainActor
-final class AgentTools {
+final class AgentTools: ObservableObject {
     static let shared = AgentTools()
 
     weak var browser: Browser?
@@ -34,6 +34,13 @@ final class AgentTools {
 
     /// graff's own pages, out of sight, oldest first.
     private var pages: [Sheet] = []
+    struct OpenPage: Identifiable, Equatable {
+        let id: String
+        let title: String
+        let url: URL
+        let loading: Bool
+    }
+    @Published private(set) var openPages: [OpenPage] = []
     private var made = 0
     /// Off every screen: a page wants a window to be drawn and to run at
     /// full speed, and this is it.
@@ -668,14 +675,17 @@ final class AgentTools {
     private func close(_ sheet: Sheet) {
         pages.removeAll { $0 === sheet }
         sheet.drop()
+        publishPages()
     }
 
     /// Each owner keeps its latest few; its oldest goes when another is wanted.
     private func make(reading: Bool, owner: String) -> Sheet {
         made += 1
         let window = room ?? makeRoom()
-        let sheet = Sheet(id: "p\(made)", owner: owner, in: window, bare: reading ? bare : nil)
+        let sheet = Sheet(id: "p\(made)", owner: owner, in: window, reading: reading, bare: reading ? bare : nil)
         pages.append(sheet)
+        sheet.onChange = { [weak self] in self?.publishPages() }
+        publishPages()
         while pages.filter({ $0.owner == owner }).count > AgentTools.most, let oldest = pages.first(where: { $0.owner == owner }) {
             close(oldest)
         }
@@ -688,6 +698,27 @@ final class AgentTools {
         if let sheet = sheet as? Sheet, sheet.owner != AgentTools.graff { return }
         guard let url = sheet.web.url else { return }
         browser?.agent.saw(url, title: label ?? sheet.title)
+        publishPages()
+    }
+
+    private func publishPages() {
+        let current = pages.filter { $0.owner == AgentTools.graff && !$0.reading }.compactMap { sheet -> OpenPage? in
+            guard let url = sheet.web.url else { return nil }
+            return OpenPage(id: sheet.id, title: sheet.title, url: url, loading: sheet.web.isLoading)
+        }
+        if openPages != current { openPages = current }
+    }
+
+    /// A deliberate UI action opens a copy, using the browser's sign-ins.
+    /// Metadata updates never select a tab or move keyboard focus.
+    func inspectPage(_ id: String) {
+        guard let browser, let page = openPages.first(where: { $0.id == id }) else { return }
+        browser.agentFull = false
+        if let tab = browser.tabs.first(where: { $0.address == page.url }) {
+            browser.select(tab)
+        } else {
+            browser.open(page.url, foreground: true, atEnd: true)
+        }
     }
 
     private func makeRoom() -> NSWindow {
@@ -1097,10 +1128,14 @@ private final class Sheet: Target {
     /// Whose it is: graff, a connected app, or one session of one.
     let owner: String
     let web: WKWebView
+    let reading: Bool
+    var onChange: (() -> Void)?
+    private var observations: [NSKeyValueObservation] = []
 
-    init(id: String, owner: String, in room: NSWindow, bare: WKContentRuleList?) {
+    init(id: String, owner: String, in room: NSWindow, reading: Bool, bare: WKContentRuleList?) {
         self.id = id
         self.owner = owner
+        self.reading = reading
         let config = WKWebViewConfiguration()
         config.websiteDataStore = Store.websites
         config.applicationNameForUserAgent = Web.userAgentName
@@ -1114,6 +1149,11 @@ private final class Sheet: Target {
         web = WKWebView(frame: room.contentView?.bounds ?? NSRect(x: 0, y: 0, width: 1280, height: 900), configuration: config)
         web.autoresizingMask = [.width, .height]
         room.contentView?.addSubview(web)
+        observations = [
+            web.observe(\.url, options: [.new]) { [weak self] _, _ in MainActor.assumeIsolated { self?.onChange?() } },
+            web.observe(\.title, options: [.new]) { [weak self] _, _ in MainActor.assumeIsolated { self?.onChange?() } },
+            web.observe(\.isLoading, options: [.new]) { [weak self] _, _ in MainActor.assumeIsolated { self?.onChange?() } },
+        ]
     }
 
     var title: String { web.title?.isEmpty == false ? web.title ?? "" : (web.url?.host() ?? id) }
@@ -1127,6 +1167,9 @@ private final class Sheet: Target {
     }
 
     func drop() {
+        onChange = nil
+        observations.forEach { $0.invalidate() }
+        observations = []
         web.stopLoading()
         web.removeFromSuperview()
     }

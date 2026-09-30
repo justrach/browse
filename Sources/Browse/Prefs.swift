@@ -275,6 +275,9 @@ final class Preferences: ObservableObject {
     @Published var agentJev: Bool {
         didSet { store.set(agentJev, forKey: "agent.jev") }
     }
+    @Published var agentSelection: Bool {
+        didSet { store.set(agentSelection, forKey: "agent.selection") }
+    }
     /// Where `graff` is, when it isn't anywhere Search already looks.
     @Published var agentPath: String {
         didSet { store.set(agentPath, forKey: "agent.path") }
@@ -370,6 +373,7 @@ final class Preferences: ObservableObject {
         // Before anything is drawn, so nothing is drawn twice.
         Themes.start(chosenTheme)
         agentJev = store.object(forKey: "agent.jev") as? Bool ?? true
+        agentSelection = store.object(forKey: "agent.selection") as? Bool ?? false
         sync = store.bool(forKey: "sync.on")
         syncPasswords = store.bool(forKey: "sync.passwords")
         agentPath = store.string(forKey: "agent.path") ?? ""
