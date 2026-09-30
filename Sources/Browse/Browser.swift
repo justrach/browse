@@ -1447,6 +1447,17 @@ final class Browser: NSObject, ObservableObject {
     /// read where they are used.
     private func follow() {
         followStore()
+        // Every way of switching Codegraff off has the same result, even
+        // when its view is gone or a startup is still finding graff.
+        prefs.$usesAgent
+            .removeDuplicates()
+            .sink { [weak self] on in
+                guard let self, !on else { return }
+                consulting = false
+                agentFull = false
+                agent.shutDown()
+            }
+            .store(in: &bag)
         prefs.$agentDrafts
             .sink { [weak self] on in
                 guard let self else { return }

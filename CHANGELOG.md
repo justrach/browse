@@ -11,6 +11,12 @@ in [ROADMAP.md](ROADMAP.md).
 
 ## Unreleased
 
+### Fixed
+
+- Settings switches expose their name and state to keyboard navigation and accessibility. Enabling Codegraff offers Open beside page; missing installations link directly to setup. Switching it off closes either chat mode and prevents late page reads or startup work from reviving it.
+- Cancelled web sign-ins cannot overwrite a newer attempt. Signing out stops Codegraff and sync, as the confirmation describes.
+- Codegraff sessions receive the browser's MCP server directly over ACP, including restored sessions, so page tools are available without depending only on background config discovery.
+
 ## 1.4.0 — 1 October 2026
 
 ### Changed
