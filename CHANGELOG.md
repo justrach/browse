@@ -11,6 +11,8 @@ in [ROADMAP.md](ROADMAP.md).
 
 ## Unreleased
 
+## 1.3.0 — 30 September 2026
+
 ### Changed
 
 - Page context shows the title and domain with include, exclude and pin controls. Settings › Agent can add Ask Codegraff to selected text's context menu; excerpts are reviewed before sending and keep their original source across tab changes and queued messages. Conversations show actionable task states and a collapsible list of agent pages that opens only when requested.

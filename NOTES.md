@@ -1,3 +1,5 @@
+Codegraff now shares a calmer chat beside your pages and in the expanded conversation. See which page is attached, pin or exclude it, and review selected passages before sending. Follow reported actions, sources and task progress, inspect agent pages when you choose, and see when the agent needs an answer or approval. Provider logos make model choices easier to recognise. Reconnect restores the conversation and holds queued follow-ups for your next send; reviewed problem reports are available in the chat and through /feedback. Includes refreshed ad and tracker blocking rules.
+
 A simpler icon, the same as the website's: two pages and the sun between them.
 
 Onboarding shows what Google's suggestions as you type look like, and asks before turning them on. Google's suggestion rows wear its icon, and a new Mac fetches it once instead of showing a magnifying glass.
