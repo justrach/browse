@@ -119,6 +119,7 @@ struct WelcomeAgentSetup: View {
                     tip("doc.text", "Review the context", "The title above your question shows the page included. Exclude it, or pin it while changing tabs.")
                     tip("list.bullet", "See what's happening", "Reported activity and results show the work. Open agent pages when you want to inspect them.")
                     tip("text.cursor", "Send when you're ready", "Draft a follow-up while it works. Nothing is sent until you choose Send.")
+                    tip("square.stack", "Make it yours", "Settings › Agent can enable reusable tasks and a draft per tab. The question-mark button in chat explains the controls whenever you need it.")
                   }
                   .padding(.top, 12)
                 }

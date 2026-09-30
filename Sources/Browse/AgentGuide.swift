@@ -5,14 +5,20 @@ struct AgentGuide: View {
     var body: some View {
         ScrollView {
           VStack(alignment: .leading, spacing: 18) {
-            Text("A research companion")
+            Text("Get started with Codegraff")
                 .font(.system(size: 17, weight: .semibold))
+            Text("Open a page → press . → ask a question → press Return. Use ⌘; to open or close the expanded conversation.")
+                .font(.system(size: 13)).fixedSize(horizontal: false, vertical: true)
             step("doc.text", "Choose the context", "Press . while reading. The page title and domain above the input show what will be included. Use × to exclude it, + to include it, or the pin to keep that page attached as you change tabs.")
             step("text.quote", "Ask about a passage", "Enable “Ask about selected text” in Settings › Agent. Right-click a passage, review the selected-text preview and its source, then send. Remove the page context to send just the excerpt.")
             step("arrow.up.right.square", "Follow the activity", "The status row shows when Codegraff is working, needs an answer, or has finished. Choose “Details” for all activity and a tool's “Result” for its output. Expand “Agent pages” to inspect pages it has open.")
             step("bubble.left.and.bubble.right", "Follow the thread", "Ask a follow-up, or type while it works to queue a message. Stop pauses queued messages too.")
+            step("square.stack", "Use a task again", "Turn on Task library in Settings › Agent. Open the library button in chat, choose an example or save your own instructions, then add them to your draft. Existing words stay there. Edit the question and choose its context before sending.")
+            step("rectangle.on.rectangle", "Keep your place", "Settings › Agent can keep a draft per tab. Questions and selected excerpts return when you switch back. A pinned conversation keeps its draft as you browse. These unsent drafts stay in memory until the tab closes or Browse quits.")
             Divider()
             step("arrow.up.left.and.arrow.down.right", "Room for a bigger task", "Expand the conversation for research across sources. The side column includes the page in front; the expanded view sends your words alone. Pinned pages stay attached in either view.")
+            Text("Codegraff can use browser tools and work on your Mac. Say what result you want and what it should leave for your review; a task prompt is guidance, not a permission setting.")
+                .font(.system(size: 12)).foregroundStyle(Palette.muted).fixedSize(horizontal: false, vertical: true)
             Text("Interrupted work offers Reconnect. Continue prepares a follow-up for you to send. Conversation options has Report a problem; you can also type /feedback followed by a description.")
                 .font(.system(size: 12))
                 .foregroundStyle(Palette.muted)

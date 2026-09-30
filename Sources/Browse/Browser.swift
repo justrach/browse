@@ -13,6 +13,7 @@ final class Browser: NSObject, ObservableObject {
         didSet {
             guard oldValue != activeID else { return }
             activeHue = active?.hue
+            if prefs.agentDrafts { agent.moveDraft(to: active) }
             guess()
             // Another tab picked, opened or come to the front while the talk
             // fills the stage is a page wanted: the stage goes back to it.
@@ -1446,6 +1447,12 @@ final class Browser: NSObject, ObservableObject {
     /// read where they are used.
     private func follow() {
         followStore()
+        prefs.$agentDrafts
+            .sink { [weak self] on in
+                guard let self else { return }
+                agent.separateDrafts(on, page: active)
+            }
+            .store(in: &bag)
         // Spaces turned off: back to the first, whose tabs are the ones there
         // were before (see Spaces.swift).
         prefs.$usesSpaces
@@ -1780,6 +1787,7 @@ final class Browser: NSObject, ObservableObject {
                 adopt(fresh)
                 tabs = [fresh]
                 activeID = fresh.id
+                if prefs.agentDrafts { agent.forgetDraft(tab.id) }
                 typed = ""
             }
             return
@@ -1796,6 +1804,7 @@ final class Browser: NSObject, ObservableObject {
             // instead of sitting there blank until a manual reload.
             select(partner ?? tabs[min(index, tabs.count - 1)])
         }
+        if prefs.agentDrafts { agent.forgetDraft(tab.id) }
         rememberSession()
     }
 

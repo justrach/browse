@@ -278,6 +278,12 @@ final class Preferences: ObservableObject {
     @Published var agentSelection: Bool {
         didSet { store.set(agentSelection, forKey: "agent.selection") }
     }
+    @Published var agentTasks: Bool {
+        didSet { store.set(agentTasks, forKey: "agent.tasks") }
+    }
+    @Published var agentDrafts: Bool {
+        didSet { store.set(agentDrafts, forKey: "agent.drafts") }
+    }
     /// Where `graff` is, when it isn't anywhere Search already looks.
     @Published var agentPath: String {
         didSet { store.set(agentPath, forKey: "agent.path") }
@@ -374,6 +380,8 @@ final class Preferences: ObservableObject {
         Themes.start(chosenTheme)
         agentJev = store.object(forKey: "agent.jev") as? Bool ?? true
         agentSelection = store.object(forKey: "agent.selection") as? Bool ?? false
+        agentTasks = store.bool(forKey: "agent.tasks")
+        agentDrafts = store.bool(forKey: "agent.drafts")
         sync = store.bool(forKey: "sync.on")
         syncPasswords = store.bool(forKey: "sync.passwords")
         agentPath = store.string(forKey: "agent.path") ?? ""

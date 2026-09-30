@@ -21,6 +21,7 @@ struct AgentColumn: View {
     @FocusState private var typing: Bool
     @State private var confirmingReconnect = false
     @State private var showingGuide = false
+    @State private var showingTasks = false
 
     /// The width the column had when the edge was picked up.
     @State private var grabbed: CGFloat?
@@ -57,6 +58,9 @@ struct AgentColumn: View {
         .onChange(of: browser.agentFocusRequest) { _, _ in focusInput() }
         .sheet(item: $browser.agentFeedback) { draft in
             AgentFeedbackView(draft: draft)
+        }
+        .sheet(isPresented: $showingTasks) {
+            AgentTaskLibrary(agent: agent, tasks: agent.tasks, focus: browser.focusAgent)
         }
         .alert("Reconnect Codegraff?", isPresented: $confirmingReconnect) {
             Button("Reconnect") { agent.reconnect() }
@@ -128,6 +132,10 @@ struct AgentColumn: View {
             }
             .help(agent.entries.isEmpty ? status : "\(agent.title) — \(status)")
             Spacer(minLength: 0)
+            if prefs.agentTasks {
+                Door(icon: "square.stack", help: "Task library — saved instructions") { showingTasks = true }
+                    .accessibilityLabel("Task library")
+            }
             AgentHistoryButton(agent: agent, focus: browser.focusAgent)
             Door(icon: "square.and.pencil", help: "New conversation") { agent.startOver(); browser.focusAgent() }
                 .disabled(agent.entries.isEmpty && agent.draft.isEmpty)
@@ -148,7 +156,9 @@ struct AgentColumn: View {
             .menuIndicator(.hidden)
             .help("Conversation options")
             .accessibilityLabel("Conversation options")
-            .popover(isPresented: $showingGuide, arrowEdge: .bottom) { AgentGuide() }
+            Door(icon: "questionmark.circle", help: "How to use Codegraff") { showingGuide = true }
+                .accessibilityLabel("How to use Codegraff")
+                .popover(isPresented: $showingGuide, arrowEdge: .bottom) { AgentGuide() }
             Door(
                 icon: full ? "sidebar.right" : "arrow.up.left.and.arrow.down.right",
                 help: full ? "Beside the page" : "Expand conversation"
@@ -939,6 +949,14 @@ struct AgentPage: View {
             Rule()
             Line("Ask about selected text", "Right-click a passage and choose Ask Codegraff about Selection. Review the excerpt and its source before sending") {
                 Switch(on: $prefs.agentSelection)
+            }
+            Rule()
+            Line("Task library", "Keep reusable instructions on this Mac. The library button in chat adds them to an editable draft; nothing runs until you send") {
+                Switch(on: $prefs.agentTasks)
+            }
+            Rule()
+            Line("Keep a draft per tab", "Switch tabs and return to your unsent question and selected excerpt. Pinned conversations keep their draft. Drafts last until you close the tab or quit Browse") {
+                Switch(on: $prefs.agentDrafts)
             }
             Rule()
             Line(

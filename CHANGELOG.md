@@ -13,6 +13,8 @@ in [ROADMAP.md](ROADMAP.md).
 
 ### Changed
 
+- Settings › Agent can enable a local task library with editable research examples, search, save and edit controls, and drafts that stay with their tab and selected excerpt. Task choices and research starters preserve existing draft text and never send it. The chat header has a visible usage guide with current shortcuts, page context and follow-up instructions.
+- Refreshed the bundled EasyList and EasyPrivacy rules for blocking ads and trackers.
 - A five-step welcome tour introduces page-to-chat research, shows Codegraff installation and sign-in choices, and explains ⌘; and the period shortcut. Steps can be skipped individually or revisited, compact windows scroll, and the final screen can open a first research question as an editable draft without sending it.
 
 ## 1.3.2 — 30 September 2026
