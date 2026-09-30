@@ -244,7 +244,7 @@ final class Preferences: ObservableObject {
         didSet { store.set(usesSpaces, forKey: "spaces") }
     }
     /// Codegraff, over the Agent Client Protocol (see Agent.swift): the Ask
-    /// tab at the head of the row, and the column ⇧⌘A opens beside the page.
+    /// tab at the head of the row, and the conversation ⌘; opens.
     /// On until turned off in Settings › Agent.
     @Published var usesAgent: Bool {
         didSet { store.set(usesAgent, forKey: "agent") }

@@ -100,7 +100,7 @@ struct BrowseApp: App {
                 }
                 Divider()
                 Button(browser.consulting && browser.prefs.usesAgent ? "Hide Codegraff" : "Show Codegraff") { browser.toggleAgent() }
-                    .keyboardShortcut("a", modifiers: [.command, .shift])
+                    .keyboardShortcut(";", modifiers: [.command])
                 Divider()
                 Button("Hide Elements…") { browser.toggleHiding() }
                     .keyboardShortcut("h", modifiers: [.command, .shift])
@@ -899,6 +899,7 @@ struct ContentView: View {
     /// ⌘K is always Search's, on every page: the way to any open page is
     /// the one key that must never be taken (Drice; #238). Slack, X, GitHub
     /// and ChatGPT use it themselves, and given it first they kept it.
+    /// ⌘; belongs to Codegraff too, including while a page editor has focus.
     ///
     /// ⌘← and ⌘→ are Search's too while nothing is being typed: WebKit takes
     /// them to scroll the page sideways and never hands them back, so
@@ -908,6 +909,7 @@ struct ContentView: View {
             || ((key == "[" || key == "]" || key == "{" || key == "}") && shifted)
             || (key == "z" && browser.veiling)
             || (key == "k" && !shifted)
+            || (key == ";" && !shifted)
             || (!shifted && (event.keyCode == 123 || event.keyCode == 124) && !caretIn(event))
         guard !reserved, event.window?.firstResponder is PageView else { return false }
         if let passed = ContentView.passed, PageView.same(passed, event) {
@@ -1141,7 +1143,7 @@ struct ContentView: View {
             browser.pauseMedia()
         case "p" where shifted:
             browser.toggleFloat()
-        case "a" where shifted:
+        case ";" where !shifted:
             browser.toggleAgent()
         case "k" where !shifted:
             // Held down, ⌘K walks the list a step at a time; letting go of ⌘
