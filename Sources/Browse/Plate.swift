@@ -1,5 +1,17 @@
 import SwiftUI
 
+/// A switch keeps its row's name even though the visual label is beside it.
+private struct SettingNameKey: EnvironmentKey {
+    static let defaultValue = "Enabled"
+}
+
+extension EnvironmentValues {
+    var settingName: String {
+        get { self[SettingNameKey.self] }
+        set { self[SettingNameKey.self] = newValue }
+    }
+}
+
 // The pieces every panel is made of, so that Settings, History, Downloads,
 // Passwords and Bookmarks read as one kind of thing: the same plate, the
 // same title with the cross beside it, the same hairline cards with a rule
@@ -128,6 +140,7 @@ struct Line<Control: View>: View {
             }
             Spacer(minLength: 8)
             control()
+                .environment(\.settingName, title)
         }
         .padding(.horizontal, 14)
         .padding(.vertical, 11)

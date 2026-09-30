@@ -144,12 +144,6 @@ struct WelcomeAgentSetup: View {
             installed = found != nil
             looked = true
         }
-        .onChange(of: prefs.usesAgent) { _, on in
-            if !on {
-                browser.consulting = false
-                browser.agent.shutDown()
-            }
-        }
     }
 
     private func tip(_ icon: String, _ title: String, _ detail: String) -> some View {

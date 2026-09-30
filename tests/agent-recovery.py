@@ -31,6 +31,11 @@ def mock_agent():
                 "sessionId": "recovery-test", "update": value}}), flush=True)
 
         if method in ("session/new", "session/load"):
+            if login := os.environ.get("BROWSE_AGENT_REQUIRE_LOGIN"):
+                if not Path(login).exists():
+                    print(json.dumps({"jsonrpc": "2.0", "id": request["id"], "error": {
+                        "code": -32001, "message": "Authentication required — graff login"}}), flush=True)
+                    continue
             result = {"sessionId": "recovery-test", "configOptions": [{
                 "id": "thought_level", "category": "thought_level", "type": "select",
                 "currentValue": "medium", "options": [{"value": "medium", "name": "Medium"}]}]}
@@ -130,6 +135,21 @@ def run_checks():
             ask("ui", agent=True)
             until(lambda: ask("probe")["agent"]["connected"])
             time.sleep(0.5)
+            requests = [json.loads(line) for line in log.read_text().splitlines()]
+            servers = next(r["params"]["mcpServers"] for r in requests if r.get("method") == "session/new")
+            assert len(servers) == 1 and servers[0]["type"] == "http" and servers[0]["name"] == "browse", servers
+            assert servers[0]["url"].startswith("http://127.0.0.1:")
+            assert servers[0]["headers"][0]["name"] == "Authorization"
+            # Prove the ACP descriptor can reach the actual browser tools;
+            # neither its token nor its descriptor is printed by this test.
+            descriptor = servers[0]
+            payload = json.dumps({"jsonrpc": "2.0", "id": 1, "method": "tools/list"}).encode()
+            req = urllib.request.Request(descriptor["url"], data=payload, headers={
+                **{h["name"]: h["value"] for h in descriptor["headers"]}, "Content-Type": "application/json"})
+            with urllib.request.urlopen(req, timeout=10) as response:
+                listed = json.load(response)
+            assert any(t["name"] == "read_pages" for t in listed["result"]["tools"])
+            checks.append("ACP advertises the authenticated browser server and its descriptor lists real page-reading tools")
             assert ask("probe")["keys"] == tab[:8].lower(), "Appearance stole page focus"
             ask("acp", ask="Background turn")
             ask("acp", update={"sessionUpdate": "agent_message_chunk",
@@ -383,6 +403,38 @@ def run_checks():
             until(lambda: ask("probe")["agent"]["phase"] == "")
             assert ask("probe")["agent"]["draft"] == "Tab two follow-up"
             checks.append("Starting a new chat releases the old pin and restores the current tab draft")
+
+            ask("agent-context", drafts=False, draft="Unsent words stay here")
+            ask("ui", agentfull=True, agentenabled=False)
+            state = ask("probe")["agent"]
+            assert not state["enabled"] and not state["shown"] and not state["full"] and not state["connected"], state
+            assert state["draft"] == "Unsent words stay here"
+            before = len(log.read_text().splitlines())
+            ask("agent-context", action="send")
+            time.sleep(0.3)
+            assert len(log.read_text().splitlines()) == before
+            assert ask("probe")["agent"]["draft"] == "Unsent words stay here"
+            # An explicit opening still enables Codegraff again.
+            ask("press", code=41, chars=";", mods=["cmd"])
+            until(lambda: ask("probe")["agent"]["connected"])
+            assert ask("probe")["agent"]["enabled"]
+            ask("agent-context", draft="AFTER RE-ENABLE")
+            ask("agent-context", action="send")
+            until(lambda: ask("probe")["agent"]["taskState"] == "Finished")
+            checks.append("Disabling Codegraff closes both modes, preserves the draft and prevents sends; explicit opening enables it again")
+
+            before = len([r for r in map(json.loads, log.read_text().splitlines()) if r.get("method") == "session/prompt"])
+            # Send and disable in one main-thread action, before the page's
+            # asynchronous preparation can finish. Reopening must not send it.
+            ask("ui", ask="DO NOT SEND AFTER DISABLE", agentenabled=False)
+            time.sleep(0.3)
+            assert not ask("probe")["agent"]["connected"]
+            ask("ui", agent=True)
+            until(lambda: ask("probe")["agent"]["connected"])
+            time.sleep(0.3)
+            after = len([r for r in map(json.loads, log.read_text().splitlines()) if r.get("method") == "session/prompt"])
+            assert after == before, "A late page preparation revived a stopped prompt"
+            checks.append("Late page preparation cannot restart Codegraff or send into a later conversation after disabling it")
             for check in checks:
                 print("PASS", check)
         finally:

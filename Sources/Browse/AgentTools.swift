@@ -73,6 +73,19 @@ final class AgentTools: ObservableObject {
 
     var listeningPort: UInt16? { port }
 
+    /// ACP asks the client for its MCP servers on each new or restored
+    /// session. Pass the browser itself there, as well as in graff's config.
+    /// An empty list leaves tool discovery to graff's background startup.
+    var acpServers: [[String: Any]] {
+        guard let port else { return [] }
+        return [[
+            "type": "http",
+            "name": "browse",
+            "url": "http://127.0.0.1:\(port)/mcp",
+            "headers": [["name": "Authorization", "value": "Bearer \(token)"]],
+        ]]
+    }
+
     /// For a page opened only to be read, then closed (search, read_pages):
     /// no pictures, video or fonts, which are most of what a page fetches
     /// and none of its text. Style sheets stay; they decide what is shown,

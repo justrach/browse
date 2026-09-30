@@ -32,6 +32,7 @@ final class CodegraffAccount: ObservableObject {
     @Published private(set) var email: String?
 
     private var polling: Task<Void, Never>?
+    private var attempt = UUID()
 
     /// The gateway, or SEARCH_LOGIN_URL for a test run.
     static let base = URL(string: ProcessInfo.processInfo.environment["SEARCH_LOGIN_URL"] ?? "https://gateway.codegraff.com")!
@@ -85,10 +86,13 @@ final class CodegraffAccount: ObservableObject {
     /// wait for it to be approved. `done` runs once signed in.
     func signIn(show: @escaping (URL) -> Void, done: (() -> Void)? = nil) {
         polling?.cancel()
+        attempt = UUID()
+        let attempt = self.attempt
         polling = Task {
             do {
                 let label = "browse on \(Host.current().localizedName ?? "a Mac")"
                 let start = try await post("/v1/device/start", ["device_label": label])
+                guard self.attempt == attempt, !Task.isCancelled else { return }
                 guard let device = start["device_code"] as? String,
                       let code = start["user_code"] as? String,
                       let page = (start["verification_uri_complete"] as? String ?? start["verification_uri"] as? String).flatMap(URL.init(string:))
@@ -101,6 +105,7 @@ final class CodegraffAccount: ObservableObject {
                     try await Task.sleep(nanoseconds: UInt64(every) * 1_000_000_000)
                     // A dropped connection is only a missed turn.
                     guard let answer = try? await post("/v1/device/poll", ["device_code": device]) else { continue }
+                    guard self.attempt == attempt, !Task.isCancelled else { return }
                     switch answer["status"] as? String {
                     case "ok":
                         guard let key = answer["api_key"] as? String, key.hasPrefix("cg_sk_") else { throw Trouble("Codegraff's answer had no key in it") }
@@ -116,10 +121,13 @@ final class CodegraffAccount: ObservableObject {
                 }
                 throw Trouble("That code ran out — sign in again")
             } catch is CancellationError {
+                guard self.attempt == attempt else { return }
                 phase = CodegraffAccount.key() == nil ? .signedOut : .signedIn
             } catch let trouble as Trouble {
+                guard self.attempt == attempt else { return }
                 phase = .failed(trouble.why)
             } catch {
+                guard self.attempt == attempt else { return }
                 phase = .failed("Couldn't reach Codegraff")
             }
         }
@@ -136,6 +144,7 @@ final class CodegraffAccount: ObservableObject {
     }
 
     func cancel() {
+        attempt = UUID()
         polling?.cancel()
         polling = nil
         phase = CodegraffAccount.key() == nil ? .signedOut : .signedIn
@@ -144,12 +153,16 @@ final class CodegraffAccount: ObservableObject {
     /// Signed out on this Mac: the key revoked at Codegraff, and its file
     /// gone. graff shares it, so graff is signed out too.
     func signOut() async {
-        if let key = CodegraffAccount.key() {
-            _ = try? await post("/v1/keys/revoke", [:], key: key)
-        }
+        let key = CodegraffAccount.key()
+        cancel()
+        AgentTools.shared.browser?.prefs.usesAgent = false
+        Sync.shared.switchOff()
         try? FileManager.default.removeItem(at: CodegraffAccount.file)
         remember(nil)
         phase = .signedOut
+        if let key {
+            _ = try? await post("/v1/keys/revoke", [:], key: key)
+        }
     }
 
     // MARK: - the wire
