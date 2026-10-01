@@ -22,6 +22,7 @@ struct AgentColumn: View {
     @State private var confirmingReconnect = false
     @State private var showingGuide = false
     @State private var showingTasks = false
+    @State private var showingBrowserChat = false
 
     /// The width the column had when the edge was picked up.
     @State private var grabbed: CGFloat?
@@ -61,6 +62,19 @@ struct AgentColumn: View {
         }
         .sheet(isPresented: $showingTasks) {
             AgentTaskLibrary(agent: agent, tasks: agent.tasks, focus: browser.focusAgent)
+        }
+        .sheet(isPresented: $showingBrowserChat) {
+            VStack(alignment: .leading, spacing: 16) {
+                HStack {
+                    Text("Continue in browser").font(.headline)
+                    Spacer()
+                    Button("Done") { showingBrowserChat = false }.keyboardShortcut(.cancelAction)
+                }
+                AgentBrowserChatCard(chat: agent.browserChat)
+            }
+            .padding(24)
+            .frame(width: 540)
+            .background(Palette.ground)
         }
         .alert("Reconnect Codegraff?", isPresented: $confirmingReconnect) {
             Button("Reconnect") { agent.reconnect() }
@@ -140,6 +154,8 @@ struct AgentColumn: View {
             Door(icon: "square.and.pencil", help: "New conversation") { agent.startOver(); browser.focusAgent() }
                 .disabled(agent.entries.isEmpty && agent.draft.isEmpty)
             Menu {
+                Button("Continue in browser…") { showingBrowserChat = true }
+                Divider()
                 Button("How to use Codegraff…") { showingGuide = true }
                 Button("Report an agent problem…") { browser.reportAgentProblem() }
                 Divider()
@@ -953,6 +969,7 @@ struct AgentPage: View {
             }
         }
         AccountCard(browser: browser)
+        if prefs.usesAgent { AgentBrowserChatCard(chat: agent.browserChat) }
         Card {
             Line("graff", location) {
                 HStack(spacing: 6) {

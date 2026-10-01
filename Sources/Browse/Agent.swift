@@ -246,6 +246,7 @@ final class Agent: ObservableObject {
     @Published var draft = ""
     @Published var passage: AgentPassage?
     lazy var tasks = AgentTasks()
+    lazy var browserChat = AgentBrowserChat(agent: self, prefs: prefs)
     /// Unsent words and excerpts stay in memory, including on private tabs.
     /// They are never added to history or written to a draft file.
     private struct Draft {
@@ -410,6 +411,38 @@ final class Agent: ObservableObject {
     }
 
     // MARK: - starting and stopping
+
+    /// Browser access is tied to one conversation, even before its first turn.
+    func identifyConversation() -> UUID {
+        if let chatID { return chatID }
+        let id = UUID()
+        chatID = id
+        return id
+    }
+
+    /// A second composer must never consume the draft or excerpt on this Mac.
+    /// Pages are only attached from the native composer; browser tools remain
+    /// available when the remote message explicitly asks to use them.
+    func sendFromBrowser(_ text: String) -> Bool {
+        guard prefs.usesAgent, !text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty,
+              text.utf8.count < 40_000 else { return false }
+        switch phase {
+        case .ready, .asleep, .working: break
+        default: return false
+        }
+        if let asking {
+            guard asking.isQuestion else { return false }
+            entries.append(Entry(kind: .you, text: text))
+            respond(asking, text: text, preserveDraft: true)
+        } else if phase == .working || prompting {
+            guard queue.count < 8 else { return false }
+            queue.append(Queued(text: text, tab: nil, passage: nil))
+        } else {
+            queueHeld = false
+            submit(text, page: nil)
+        }
+        return true
+    }
 
     /// The column opened: start graff if it isn't already.
     func wake() {
@@ -1032,7 +1065,7 @@ final class Agent: ObservableObject {
         notify("session/cancel", ["sessionId": session])
     }
 
-    func answer(_ ask: Ask, with option: Ask.Option?) {
+    func answer(_ ask: Ask, with option: Ask.Option?, preserveDraft: Bool = false) {
         guard asking?.id == ask.id else { return }
         switch ask.wants {
         case .permission(let request):
@@ -1042,15 +1075,15 @@ final class Agent: ObservableObject {
             reply(to: request, result: ["outcome": outcome])
         case .question:
             if let option { entries.append(Entry(kind: .you, text: option.name)) }
-            respond(ask, text: option?.name)
+            respond(ask, text: option?.name, preserveDraft: preserveDraft)
         }
     }
 
     /// A question answered in words, or left — `session/answer` either way,
     /// or graff's turn waits for ever.
-    private func respond(_ ask: Ask, text: String?) {
+    private func respond(_ ask: Ask, text: String?, preserveDraft: Bool = false) {
         asking = nil
-        moveDraft(to: AgentTools.shared.browser?.active)
+        if !preserveDraft { moveDraft(to: AgentTools.shared.browser?.active) }
         guard let session else { return }
         notify("session/answer", ["sessionId": session, "text": text ?? "", "cancelled": text == nil])
     }
