@@ -1,3 +1,5 @@
+Continue the same Browse conversation in a browser. Enable Continue in browser from the chat menu, then open the link on another device and sign in to the same Codegraff account. Messages, activity, questions and Stop stay connected to the agent on your Mac.
+
 Codegraff setup now takes you straight into the side chat, with native switches and clearer recovery when graff is missing. Browser tools are connected directly to each chat. Turning Codegraff off stops pending setup work, and web sign-in handles retries, cancellation and sign-out consistently.
 
 A clearer five-step welcome tour gets you from setup to a first research draft. Codegraff now offers an optional local task library, drafts that stay with their tabs, and a visible guide to shortcuts, context and follow-ups. Saved instructions are reviewed before sending, and existing draft text is kept.
