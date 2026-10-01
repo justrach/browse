@@ -11,6 +11,10 @@ in [ROADMAP.md](ROADMAP.md).
 
 ## Unreleased
 
+### Added
+
+- Continue in browser shares the current Codegraff conversation with your signed-in browser or phone through the account relay. It is off until enabled, preserves drafts on the Mac, and disconnects when you turn it off or change conversations. Browse must remain open on an awake Mac.
+
 ## 1.4.1 — 1 October 2026
 
 ### Fixed
