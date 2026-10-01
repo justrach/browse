@@ -11,6 +11,10 @@ in [ROADMAP.md](ROADMAP.md).
 
 ## Unreleased
 
+### Fixed
+
+- Gmail shows the mail again. The ad blocker was applying its hide-anywhere rules to Gmail, Calendar, Drive, Docs, Meet and the other sites EasyList exempts from them, and they could hide parts of those pages, among them the body of an email.
+
 ## 1.5.0 — 1 October 2026
 
 ### Added
