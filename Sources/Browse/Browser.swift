@@ -1065,6 +1065,7 @@ final class Browser: NSObject, ObservableObject {
             WKWebsiteDataTypeDiskCache,
             WKWebsiteDataTypeMemoryCache,
             WKWebsiteDataTypeOfflineWebApplicationCache,
+            WKWebsiteDataTypeFetchCache,
         ]
         for space in spaces {
             Spaces.store(for: space.id).removeData(ofTypes: types, modifiedSince: .distantPast) {}
@@ -1742,6 +1743,7 @@ final class Browser: NSObject, ObservableObject {
                 share: pair == nil ? nil : Double(split?.fraction ?? 0.5)
             )
         )
+        ICloudSync.shared.tabsChanged()
     }
 
     /// Whether a tab goes into the session: not a private one or the
@@ -2557,8 +2559,13 @@ final class Browser: NSObject, ObservableObject {
         if let tab = active, canSuggestGoogle(typed, in: tab.id) {
             list = merge(google: googleStandIn(for: typed), into: list)
         }
+        let remote = ICloudSync.shared.offers(for: typed)
+        if !remote.isEmpty {
+            let existing = Set(list.map(\.url))
+            list.append(contentsOf: remote.filter { !existing.contains($0.url) })
+        }
         offers = list
-        ending = history.completion(for: typed, among: offers.filter { $0.kind != .open && $0.kind != .ask && $0.kind != .google })
+        ending = history.completion(for: typed, among: offers.filter { $0.kind != .open && $0.kind != .ask && $0.kind != .google && $0.kind != .elsewhere })
         // A row that was picked stops being the right row the moment the
         // question changes.
         picked = nil

@@ -264,6 +264,10 @@ struct SettingsPanel: View {
                 Switch(on: $prefs.littleLinks)
             }
             Rule()
+            Line("Handoff", "Offer the active page to your iPhone, iPad, and other Macs on the same Apple Account (never private tabs or isolated spaces)") {
+                Switch(on: $prefs.handoff)
+            }
+            Rule()
             Line("Show where links go", "Point at a link and its address shows at the bottom of the page") {
                 Switch(on: $prefs.showsLinks)
             }

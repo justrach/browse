@@ -628,23 +628,31 @@ final class Tab: ObservableObject, Identifiable {
         return web
     }
 
-    /// Between two fifths and three times, which is as far as a page is worth
-    /// pushing in either direction.
+    /// Between two fifths and three times for web pages, or 20%–600% for PDFs
+    /// (matching WebKit's own PDF plugin zoom bar).
     func magnify(to value: CGFloat) {
-        let wanted = min(3, max(0.4, value))
+        let pdf = showsPDF
+        let wanted = pdf ? min(Tab.pdfZooms.upperBound, max(Tab.pdfZooms.lowerBound, value)) : min(3, max(0.4, value))
         guard abs(wanted - web.pageZoom) > 0.004 else { return }
         web.pageZoom = wanted
         zoom = wanted
-        rememberZoom()
+        if !pdf { rememberZoom() }
         onZoom?(self, wanted)
+    }
+
+    static let pdfZooms: ClosedRange<CGFloat> = 0.2...6
+
+    var showsPDF: Bool {
+        guard let web = built, web.responds(to: NSSelectorFromString("_isDisplayingPDF")) else { return false }
+        return (web.value(forKey: "_isDisplayingPDF") as? Bool) == true
     }
 
     func magnify(by factor: CGFloat) { magnify(to: web.pageZoom * factor) }
 
     /// ⌘0 undoes both kinds of zoom at once — whichever one you reached for —
-    /// back to the size every site starts at.
+    /// back to the size every site starts at (or 100% actual size for PDFs).
     func resetZoom() {
-        magnify(to: Tab.defaultZoom)
+        magnify(to: showsPDF ? 1 : Tab.defaultZoom)
         guard web.magnification != 1 else { return }
         web.magnification = 1
         onZoom?(self, 1)
@@ -888,7 +896,10 @@ final class Tab: ObservableObject, Identifiable {
         picture = nil
         cover = nil
         adoptIcon()
-        web.open(url)
+        Shield.shared.whenReady { [weak self] in
+            guard let self, self.address == url else { return }
+            self.web.open(url)
+        }
     }
 
     /// Brought back from the last session: everything the row needs to draw it,

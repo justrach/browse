@@ -84,6 +84,12 @@ enum Chromium {
         Source(name: "Opera GX", folder: "com.operasoftware.OperaGX", service: "Opera Safe Storage", account: "Opera", app: "Opera GX.app"),
         Source(name: "Helium", folder: "net.imput.helium", service: "Helium Storage Key", account: "Helium", app: "Helium.app"),
         Source(name: "Comet", folder: "Comet", service: "Comet Safe Storage", account: "Comet", app: "Comet.app"),
+        Source(name: "Thorium", folder: "Thorium", service: "Thorium Safe Storage", account: "Thorium", app: "Thorium.app"),
+        Source(name: "Naver Whale", folder: "Naver/Whale", service: "Whale Safe Storage", account: "Whale", app: "Whale.app"),
+        Source(name: "Island", folder: "Island", service: "Island Safe Storage", account: "Island", app: "Island.app"),
+        Source(name: "Sidekick", folder: "Sidekick", service: "Sidekick Safe Storage", account: "Sidekick", app: "Sidekick.app"),
+        Source(name: "Yandex", folder: "Yandex/YandexBrowser", service: "", account: "", app: "Yandex.app"),
+        Source(name: "ChatGPT Atlas", folder: "com.openai.atlas/browser-data/host", service: "", account: "", app: "ChatGPT Atlas.app"),
     ]
 
     /// Where browsers keep their data: ~/Library/Application Support. A test
@@ -780,7 +786,11 @@ enum Mozilla {
                 }
             }
             var seen = Set<String>()
-            return out.filter { seen.insert($0.path).inserted }.sorted { a, b in
+            return out.filter { file in
+                var info = stat()
+                let key = stat(file.path, &info) == 0 ? "\(info.st_dev):\(info.st_ino)" : file.path
+                return seen.insert(key).inserted
+            }.sorted { a, b in
                 let da = (try? a.resourceValues(forKeys: [.contentModificationDateKey]))?.contentModificationDate ?? .distantPast
                 let db = (try? b.resourceValues(forKeys: [.contentModificationDateKey]))?.contentModificationDate ?? .distantPast
                 return da > db
@@ -837,6 +847,10 @@ enum Mozilla {
     static let known: [Source] = [
         Source(name: "Firefox", folders: ["Firefox/Profiles", "Firefox"]),
         Source(name: "Zen", folders: ["zen/Profiles", "Zen/Profiles", "zen", "Zen"]),
+        Source(name: "Floorp", folders: ["Floorp/Profiles", "Floorp"]),
+        Source(name: "LibreWolf", folders: ["librewolf/Profiles", "LibreWolf/Profiles", "librewolf", "LibreWolf"]),
+        Source(name: "Waterfox", folders: ["Waterfox/Profiles", "Waterfox"]),
+        Source(name: "Mullvad Browser", folders: ["MullvadBrowser/Profiles", "MullvadBrowser"]),
     ]
 
     /// Only the Mozilla browsers with a profile to read.

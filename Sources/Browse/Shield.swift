@@ -93,6 +93,33 @@ final class Shield: ObservableObject {
     ]
 
     private var compiling = false
+    private var held: [() -> Void] = []
+    private var settled = false
+
+    /// Runs `load` immediately, or waits up to 1 second once per launch while
+    /// the initial block list compiles so first-launch tabs don't leak ads.
+    func whenReady(_ load: @escaping () -> Void) {
+        guard !settled, compiling, enabled else { return load() }
+        if held.isEmpty {
+            DispatchQueue.main.asyncAfter(deadline: .now() + 1) { [weak self] in
+                MainActor.assumeIsolated { self?.release() }
+            }
+        }
+        held.append(load)
+    }
+
+    private func release() {
+        settled = true
+        let loads = held
+        held = []
+        loads.forEach { $0() }
+    }
+
+    /// Reddit's promoted post elements in its light DOM (feed, comments, sidebar).
+    private static let reddit = [
+        "shreddit-ad-post", "shreddit-comments-page-ad", "shreddit-sidebar-ad",
+        "shreddit-dynamic-ad-link", "comment-tree-ad", ".promotedlink",
+    ]
 
     func compile() {
         guard lists.isEmpty, !compiling else { return }
@@ -112,18 +139,24 @@ final class Shield: ObservableObject {
             "trigger": ["url-filter": ".*"],
             "action": ["type": "css-display-none", "selector": Shield.slots.joined(separator: ", ")],
         ])
+        rules.append([
+            "trigger": ["url-filter": ".*", "if-domain": ["*reddit.com"]],
+            "action": ["type": "css-display-none", "selector": Shield.reddit.joined(separator: ", ")],
+        ])
 
         guard let data = try? JSONSerialization.data(withJSONObject: rules),
               let json = String(data: data, encoding: .utf8)
         else {
             compiling = false
             trouble = "Couldn't build the block list"
+            release()
             return
         }
 
         guard let store = WKContentRuleListStore.default() else {
             compiling = false
             trouble = "WebKit has nowhere to compile it"
+            release()
             return
         }
         store.compileContentRuleList(
@@ -135,9 +168,11 @@ final class Shield: ObservableObject {
                 self.compiling = false
                 guard let compiled else {
                     self.trouble = error?.localizedDescription ?? "Compiling the block list failed"
+                    self.release()
                     return
                 }
                 self.arrived(compiled)
+                self.release()
                 self.bring(store)
             }
         }

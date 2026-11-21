@@ -76,10 +76,13 @@ enum Spaces {
         return [first] + saved.filter { !$0.isFirst }
     }
 
+    static let changed = Notification.Name("browse.spaces.changed")
+
     static func write(_ spaces: [Space]) {
         guard let data = try? JSONEncoder().encode(spaces) else { return }
         try? FileManager.default.createDirectory(at: file.deletingLastPathComponent(), withIntermediateDirectories: true)
         try? data.write(to: file, options: .atomic)
+        NotificationCenter.default.post(name: Spaces.changed, object: nil)
     }
 
     /// The space new tabs are made in: the one on screen.
