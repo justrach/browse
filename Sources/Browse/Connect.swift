@@ -109,6 +109,11 @@ final class Connect: ObservableObject {
         let name: String
         let pages: Int
         let action: String?
+        let url: URL?
+
+        var host: String? {
+            url?.host()?.replacingOccurrences(of: "www.", with: "")
+        }
     }
     @Published private(set) var driving: Driving?
 
@@ -433,9 +438,15 @@ final class Connect: ObservableObject {
 
     /// An app just did something: named over the page, and gone a few
     /// seconds after it stops.
-    func drove(_ caller: Caller, pages: Int, action: String? = nil) {
-        withAnimation(Motion.settle) {
-            driving = Driving(clientID: caller.id, name: caller.name, pages: pages, action: action)
+    func drove(_ caller: Caller, pages: Int, action: String? = nil, url: URL? = nil) {
+        withAnimation(Motion.snappy) {
+            driving = Driving(
+                clientID: caller.id,
+                name: caller.name,
+                pages: pages,
+                action: action,
+                url: url ?? driving?.url
+            )
         }
         quiet?.cancel()
         guard action == nil else { return }
@@ -443,7 +454,13 @@ final class Connect: ObservableObject {
             withAnimation(Motion.settle) { self?.driving = nil }
         }
         quiet = work
-        DispatchQueue.main.asyncAfter(deadline: .now() + 4.5, execute: work)
+        DispatchQueue.main.asyncAfter(deadline: .now() + 6.0, execute: work)
+    }
+
+    /// Open/focus the page the external app is currently working on.
+    func followDriving() {
+        guard let current = driving else { return }
+        AgentTools.shared.followClient(current.clientID, fallbackURL: current.url)
     }
 
     /// Close all pages opened by the currently driving external app and dismiss the pill.
@@ -541,23 +558,15 @@ final class Connect: ObservableObject {
 struct ConnectCard: View {
     @ObservedObject private var connect = Connect.shared
     @State private var copiedKind: String?
+    @State private var showSnippet = false
 
     private var mcpBinary: String {
         let bundled = Bundle.main.bundleURL.appendingPathComponent("Contents/MacOS/browse-mcp").path
         return FileManager.default.isExecutableFile(atPath: bundled) ? bundled : "/Applications/browse.app/Contents/MacOS/browse-mcp"
     }
 
-    private func copy(_ text: String, kind: String) {
-        NSPasteboard.general.clearContents()
-        NSPasteboard.general.setString(text, forType: .string)
-        copiedKind = kind
-        DispatchQueue.main.asyncAfter(deadline: .now() + 2) {
-            if copiedKind == kind { copiedKind = nil }
-        }
-    }
-
-    private func copyJSON() {
-        let json = """
+    private var jsonConfig: String {
+        """
         {
           "mcpServers": {
             "browse": {
@@ -567,16 +576,21 @@ struct ConnectCard: View {
           }
         }
         """
-        copy(json, kind: "json")
     }
 
-    private func copyClaudeCommand() {
-        copy("claude mcp add browse -- \"\(mcpBinary)\" --name \"Claude Code\"", kind: "claude")
+    private func copy(_ text: String, kind: String) {
+        NSPasteboard.general.clearContents()
+        NSPasteboard.general.setString(text, forType: .string)
+        withAnimation(Motion.snappy) { copiedKind = kind }
+        DispatchQueue.main.asyncAfter(deadline: .now() + 2) {
+            if copiedKind == kind { withAnimation(Motion.snappy) { copiedKind = nil } }
+        }
     }
 
-    private func copyCodexCommand() {
-        copy("codex mcp add browse -- \"\(mcpBinary)\" --name \"Codex\"", kind: "codex")
-    }
+    private func copyJSON() { copy(jsonConfig, kind: "json") }
+    private func copyClaudeCommand() { copy("claude mcp add browse -- \"\(mcpBinary)\" --name \"Claude Code\"", kind: "claude") }
+    private func copyCodexCommand() { copy("codex mcp add browse -- \"\(mcpBinary)\" --name \"Codex\"", kind: "codex") }
+    private func copyPairCommand() { copy("\"\(mcpBinary)\" --name \"Coding Agent\" --pair-only", kind: "pair") }
 
     private var statusLine: String {
         let count = connect.clients.count
@@ -587,11 +601,21 @@ struct ConnectCard: View {
         return "Starting local MCP bridge… · \(apps)"
     }
 
+    private func scopeSummary(_ client: Connect.Client) -> String {
+        let tags: [String] = [
+            client.scopes.contains(.read) ? "Read" : nil,
+            client.scopes.contains(.ownPages) ? "Own pages" : nil,
+            client.scopes.contains(.userTabs) ? "Your tabs" : nil,
+            client.scopes.contains(.runJS) ? "JS" : nil,
+        ].compactMap { $0 }
+        return tags.isEmpty ? "No permissions" : tags.joined(separator: " · ")
+    }
+
     var body: some View {
         Card {
             Line(
                 "Connected apps",
-                "Other apps and MCP coding agents on this Mac — Antigravity, Claude Code, Codex, Cursor, Harness — using browse with your sign-ins, only what you allow, every request signed"
+                "Let Antigravity, NanoHarness, Claude Code, Codex or Cursor drive browse with your sign-ins and passkeys — every request signed and scoped"
             ) {
                 Switch(on: Binding(get: { connect.on }, set: { connect.switchOn($0) }))
             }
@@ -604,23 +628,66 @@ struct ConnectCard: View {
                         .foregroundStyle(Palette.muted)
                         .contentTransition(.numericText())
                     Spacer(minLength: 0)
+                    Button {
+                        withAnimation(Motion.snappy) { showSnippet.toggle() }
+                    } label: {
+                        Text(showSnippet ? "Hide config" : "Show config")
+                            .font(.system(size: 11, weight: .medium))
+                            .foregroundStyle(Palette.muted)
+                    }
+                    .buttonStyle(.plain)
                 }
                 .padding(.horizontal, 14)
                 .padding(.vertical, 9)
                 Rule()
-                Line(
-                    "MCP server (stdio)",
-                    "Pairs once with a 6-digit code. Enable “Read and act in your tabs” on a paired client to let it inspect or screenshot your open tabs"
-                ) {
+                VStack(alignment: .leading, spacing: 10) {
+                    HStack(alignment: .center, spacing: 8) {
+                        VStack(alignment: .leading, spacing: 2) {
+                            Text("Quick setup (MCP stdio)")
+                                .font(.system(size: 13))
+                                .foregroundStyle(Palette.ink)
+                            Text("Copy into your agent, then verify the 6-digit code in browse. When an agent hits a passkey sign-in, browse brings the tab into focus automatically.")
+                                .font(.system(size: 11.5))
+                                .foregroundStyle(Palette.muted)
+                                .fixedSize(horizontal: false, vertical: true)
+                        }
+                        Spacer(minLength: 8)
+                    }
                     HStack(spacing: 6) {
-                        Pill(copiedKind == "json" ? "Copied" : "Copy JSON") { copyJSON() }
-                        Pill(copiedKind == "claude" ? "Copied" : "Claude Code") { copyClaudeCommand() }
-                        Pill(copiedKind == "codex" ? "Copied" : "Codex") { copyCodexCommand() }
+                        Pill(copiedKind == "json" ? "✓ Copied JSON" : "Copy JSON", filled: copiedKind == "json") { copyJSON() }
+                        Pill(copiedKind == "claude" ? "✓ Copied" : "Claude Code", filled: copiedKind == "claude") { copyClaudeCommand() }
+                        Pill(copiedKind == "codex" ? "✓ Copied" : "Codex", filled: copiedKind == "codex") { copyCodexCommand() }
+                        Pill(copiedKind == "pair" ? "✓ Copied" : "Pair CLI", filled: copiedKind == "pair") { copyPairCommand() }
+                    }
+                    if showSnippet {
+                        ZStack(alignment: .topTrailing) {
+                            Text(jsonConfig)
+                                .font(.system(size: 11, design: .monospaced))
+                                .foregroundStyle(Palette.ink.opacity(0.85))
+                                .textSelection(.enabled)
+                                .frame(maxWidth: .infinity, alignment: .leading)
+                                .padding(10)
+                                .background(Palette.ink.opacity(0.035), in: RoundedRectangle(cornerRadius: 8, style: .continuous))
+                                .overlay(RoundedRectangle(cornerRadius: 8, style: .continuous).strokeBorder(Palette.hairline, lineWidth: 1))
+                            Button { copyJSON() } label: {
+                                Image(systemName: copiedKind == "json" ? "checkmark" : "doc.on.doc")
+                                    .font(.system(size: 10.5, weight: .medium))
+                                    .foregroundStyle(Palette.muted)
+                                    .frame(width: 24, height: 24)
+                                    .background(Palette.ground.opacity(0.9), in: RoundedRectangle(cornerRadius: 6, style: .continuous))
+                            }
+                            .buttonStyle(TactilePress())
+                            .padding(6)
+                            .help("Copy JSON config")
+                        }
+                        .transition(.opacity.combined(with: .move(edge: .top)))
                     }
                 }
+                .padding(.horizontal, 14)
+                .padding(.vertical, 12)
                 ForEach(connect.clients) { client in
                     Rule()
-                    Line(client.name, used(client)) {
+                    Line(client.name, "\(used(client)) · \(scopeSummary(client))") {
                         Pill("Revoke") { connect.revoke(client.id) }
                     }
                     ForEach(Connect.Scope.allCases) { scope in
@@ -635,7 +702,7 @@ struct ConnectCard: View {
                 }
                 if connect.clients.isEmpty {
                     Rule()
-                    Line("None yet", "Copy the MCP config or CLI command into your agent, or connect from Harness › Settings › Use browse for web tasks") { EmptyView() }
+                    Line("None yet", "Copy a command above, or connect natively in NanoHarness › Settings › Accounts › browse") { EmptyView() }
                 }
             }
         }
@@ -647,24 +714,54 @@ struct ConnectCard: View {
     }
 }
 
-/// Over the page while a connected app is driving: which app, and how many
-/// pages it has open.
+/// Over the page while a connected app is driving: which app, what site/action,
+/// a one-click Follow button to open the live page in a tab, and Stop.
 struct ConnectPill: View {
     @ObservedObject private var connect = Connect.shared
+
+    private func headline(_ driving: Connect.Driving) -> String {
+        if let action = driving.action {
+            let clean = action.hasSuffix("…") ? String(action.dropLast()) : action
+            if let host = driving.host, !host.isEmpty {
+                return "\(driving.name) · \(clean) on \(host)"
+            }
+            return "\(driving.name) · \(action)"
+        }
+        if let host = driving.host, !host.isEmpty {
+            return "\(driving.name) · \(host)"
+        }
+        if driving.pages > 0 {
+            return "\(driving.name) · \(driving.pages) page\(driving.pages == 1 ? "" : "s")"
+        }
+        return "\(driving.name) is using browse"
+    }
 
     var body: some View {
         if let driving = connect.driving {
             HStack(spacing: 8) {
                 PulseDot(color: Palette.accent, size: 6, active: driving.action != nil || driving.pages > 0)
-                VStack(alignment: .leading, spacing: 1) {
-                    Text(driving.action.map { "\(driving.name) · \($0)" }
-                         ?? (driving.pages > 0
-                             ? "\(driving.name) · \(driving.pages) page\(driving.pages == 1 ? "" : "s")"
-                             : "\(driving.name) is using browse"))
-                        .font(.system(size: 12, weight: .medium))
-                        .foregroundStyle(Palette.ink)
-                        .lineLimit(1)
-                        .contentTransition(.numericText())
+                Text(headline(driving))
+                    .font(.system(size: 12, weight: .medium))
+                    .foregroundStyle(Palette.ink)
+                    .lineLimit(1)
+                    .contentTransition(.numericText())
+                if driving.url != nil || driving.pages > 0 {
+                    Button {
+                        connect.followDriving()
+                    } label: {
+                        HStack(spacing: 4) {
+                            Image(systemName: "eye")
+                                .font(.system(size: 9.5, weight: .semibold))
+                            Text("Follow")
+                        }
+                        .font(.system(size: 11, weight: .medium))
+                        .foregroundStyle(Palette.onAccent)
+                        .padding(.horizontal, 9)
+                        .padding(.vertical, 3.5)
+                        .background(Palette.accent, in: Capsule())
+                    }
+                    .buttonStyle(TactilePress())
+                    .help("Open what \(driving.name) is viewing in a tab")
                 }
                 Button {
                     connect.stopDriving()
@@ -673,18 +770,18 @@ struct ConnectPill: View {
                         .font(.system(size: 11, weight: .medium))
                         .foregroundStyle(Palette.muted)
                         .padding(.horizontal, 8)
-                        .padding(.vertical, 3)
+                        .padding(.vertical, 3.5)
                         .background(Palette.wash, in: Capsule())
                 }
                 .buttonStyle(TactilePress())
                 .help("Close pages opened by \(driving.name)")
             }
-            .padding(.leading, 10)
+            .padding(.leading, 11)
             .padding(.trailing, 8)
             .padding(.vertical, 6)
             .background(Palette.ground, in: Capsule())
             .overlay(Capsule().strokeBorder(Palette.hairline, lineWidth: 1))
-            .shadow(color: .black.opacity(0.12), radius: 18, y: 6)
+            .shadow(color: .black.opacity(0.14), radius: 18, y: 6)
             .transition(.asymmetric(
                 insertion: .move(edge: .bottom).combined(with: .opacity).combined(with: .scale(scale: 0.94)),
                 removal: .move(edge: .bottom).combined(with: .opacity)

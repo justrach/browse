@@ -62,13 +62,68 @@ final class AgentTools: ObservableObject {
         return announce()
     }
 
+    private var passkeysWired = false
+    /// Deduplicates auto-opening a focused tab for conditional passkeys per (sheet, rp).
+    private var passkeyFocused: Set<String> = []
+
     /// Only listening, not telling graff: for connected apps (Connect.swift),
     /// which find the server through a file of their own.
     func listening() async -> Bool {
+        wirePasskeys()
         if port != nil { return true }
         if listener == nil { listen() }
         strip()
         return await withCheckedContinuation { waiting.append($0) }
+    }
+
+    private func wirePasskeys() {
+        guard !passkeysWired else { return }
+        passkeysWired = true
+
+        Passkeys.shared.onFocusForCeremony = { [weak self] web, rp in
+            guard let self, let browser = self.browser else { return nil }
+            let isSheet = self.pages.contains { $0.web === web }
+            let tab = browser.tabs.first { $0.built === web }
+            let agentDriving = Connect.shared.driving != nil || browser.agent.phase == .working
+            guard isSheet || (tab != nil && (agentDriving || tab?.id == browser.activeID)) else { return nil }
+            if let tab, tab.id != browser.activeID {
+                browser.select(tab)
+            }
+            guard let window = Links.window ?? NSApp.mainWindow ?? NSApp.windows.first(where: { $0.contentView != nil && !($0 is NSPanel) && !$0.isExcludedFromWindowsMenu }) else {
+                return nil
+            }
+            NSApp.activate(ignoringOtherApps: true)
+            window.makeKeyAndOrderFront(nil)
+            browser.announce("Passkey requested for \(rp)")
+            return window
+        }
+
+        Passkeys.shared.onConditionalAvailable = { [weak self] web, rp, _ in
+            guard let self, let browser = self.browser, !Store.testing else { return }
+            if let sheet = self.pages.first(where: { $0.web === web }), let url = web.url {
+                let key = "\(sheet.id)|\(rp)"
+                guard self.passkeyFocused.insert(key).inserted else { return }
+                NSApp.activate(ignoringOtherApps: true)
+                if let window = Links.window ?? NSApp.mainWindow {
+                    window.makeKeyAndOrderFront(nil)
+                }
+                if let existing = browser.tabs.first(where: { $0.address == url }) {
+                    browser.select(existing)
+                } else {
+                    _ = browser.open(url, foreground: true, atEnd: true)
+                }
+                browser.announce("Passkey available for \(rp) — sign in here")
+                return
+            }
+            if Connect.shared.driving != nil, let tab = browser.tabs.first(where: { $0.built === web }) {
+                if tab.id != browser.activeID { browser.select(tab) }
+                NSApp.activate(ignoringOtherApps: true)
+                if let window = Links.window ?? NSApp.mainWindow {
+                    window.makeKeyAndOrderFront(nil)
+                }
+                browser.announce("Passkey available for \(rp)")
+            }
+        }
     }
 
     var listeningPort: UInt16? { port }
@@ -282,12 +337,15 @@ final class AgentTools: ObservableObject {
                 }
             }
             let toolName = (message["method"] as? String == "tools/call") ? (params["name"] as? String) : nil
-            connect.drove(caller, pages: pages.filter { $0.owner.hasPrefix(caller.id) }.count, action: toolName.map(AgentTools.actionLabel))
+            let clientPages = pages.filter { $0.owner.hasPrefix(caller.id) }
+            let activeURL = clientPages.last?.web.url ?? browser?.active?.address
+            connect.drove(caller, pages: clientPages.count, action: toolName.map(AgentTools.actionLabel), url: activeURL)
             guard let reply = await rpc(message, owner: owner, caller: caller) else {
                 // A notification: nothing to say, and that is signed too.
                 return HTTPRequest.reply(202, Data(), headers: ["X-Signature": connect.sign(Data(), nonce: nonce)])
             }
-            connect.drove(caller, pages: pages.filter { $0.owner.hasPrefix(caller.id) }.count, action: nil)
+            let afterPages = pages.filter { $0.owner.hasPrefix(caller.id) }
+            connect.drove(caller, pages: afterPages.count, action: nil, url: afterPages.last?.web.url ?? activeURL)
             if let result = reply["result"] as? [String: Any], let refusal = result[AgentTools.refusal] as? [String: Any] {
                 return json(403, refusal, signed: nonce)
             }
@@ -575,10 +633,13 @@ final class AgentTools: ObservableObject {
                 let (value, error) = await target.run(AgentTools.pageInfoScript)
                 if let error { return AgentTools.failed(error) }
                 var info = (value as? [String: Any]) ?? [:]
+                let offered = Passkeys.shared.offered(in: target.web)
                 info["page"] = target.id
                 info["title"] = target.title
                 info["url"] = target.address
                 info["loading"] = target.web.isLoading
+                info["passkeysAvailable"] = !offered.isEmpty
+                info["passkeyCount"] = offered.count
                 return AgentTools.said(info)
             }
 
@@ -882,6 +943,20 @@ final class AgentTools: ObservableObject {
         if pages.isEmpty {
             room?.close()
             room = nil
+        }
+    }
+
+    /// Open or focus the latest page a connected app is working on so the user
+    /// can watch live or step in (Follow button in ConnectPill).
+    func followClient(_ clientID: String, fallbackURL: URL?) {
+        guard let browser else { return }
+        let url = pages.last(where: { ($0.owner == clientID || $0.owner.hasPrefix(clientID + "/")) && $0.web.url != nil })?.web.url ?? fallbackURL
+        guard let url else { return }
+        if browser.agentFull { browser.agentFull = false }
+        if let existing = browser.tabs.first(where: { $0.address == url }) {
+            browser.select(existing)
+        } else {
+            _ = browser.open(url, foreground: true, atEnd: true)
         }
     }
 
@@ -1745,6 +1820,7 @@ private final class Sheet: Target {
     let reading: Bool
     var onChange: (() -> Void)?
     private var observations: [NSKeyValueObservation] = []
+    private let passkeyRelay = PasskeyRelay()
 
     init(id: String, owner: String, in room: NSWindow, reading: Bool, bare: WKContentRuleList?) {
         self.id = id
@@ -1759,6 +1835,15 @@ private final class Sheet: Target {
         // The ad blocker, as a tab has it: a page still fetching its ads and
         // trackers is a page settled() is still waiting on.
         Shield.shared.protect(config.userContentController)
+        if !reading {
+            config.userContentController.addScriptMessageHandler(passkeyRelay, contentWorld: Web.world, name: PasskeyRelay.name)
+            config.userContentController.addUserScript(
+                WKUserScript(source: PasskeyRelay.page, injectionTime: .atDocumentStart, forMainFrameOnly: false, in: .page)
+            )
+            config.userContentController.addUserScript(
+                WKUserScript(source: PasskeyRelay.bridge, injectionTime: .atDocumentStart, forMainFrameOnly: false, in: Web.world)
+            )
+        }
         if let bare { config.userContentController.add(bare) }
         web = WKWebView(frame: room.contentView?.bounds ?? NSRect(x: 0, y: 0, width: 1280, height: 900), configuration: config)
         web.autoresizingMask = [.width, .height]
@@ -1776,14 +1861,17 @@ private final class Sheet: Target {
     /// On or off for where it is going: off for a site it is paused on, and
     /// off everywhere once it is switched off in Settings.
     func go(_ url: URL) {
+        Passkeys.shared.forget(web)
         Shield.shared.tune(web.configuration.userContentController, for: url.host())
         web.load(URLRequest(url: url))
     }
 
     func drop() {
+        Passkeys.shared.forget(web)
         onChange = nil
         observations.forEach { $0.invalidate() }
         observations = []
+        web.configuration.userContentController.removeScriptMessageHandler(forName: PasskeyRelay.name, contentWorld: Web.world)
         web.stopLoading()
         web.removeFromSuperview()
     }
