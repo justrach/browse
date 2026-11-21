@@ -89,8 +89,34 @@ one, calls share the app's own pool. `POST /session/close`
 to a tool no app may use (`theme`), is refused with
 `403 {"error": "out_of_scope", "tool", "scope"}`; the user saying no to their
 tabs, with `403 {"error": "declined"}`. For every app, browse never types
-into a password field, and `drive` stops before paying, sending, posting,
-booking, deleting or signing up.
+into a password field, redacts secret fields in `snapshot` and `screenshot`,
+and `drive` stops before paying, sending, posting, booking, deleting or
+signing up.
+
+## Stdio MCP bridge (`browse-mcp`)
+
+For coding agents that speak MCP over stdio (Antigravity, Claude Code, Codex,
+Cursor, etc.), `browse.app/Contents/MacOS/browse-mcp` is built on
+`modelcontextprotocol/swift-sdk` and speaks `v1-p256-sig` automatically:
+
+1. Turn on **Settings › Agent › Connected apps** in `browse` (and click
+   **Copy MCP config**).
+2. Add it to your MCP client:
+
+```json
+{
+  "mcpServers": {
+    "browse": {
+      "command": "/Applications/browse.app/Contents/MacOS/browse-mcp",
+      "args": ["--name", "Antigravity"]
+    }
+  }
+}
+```
+
+On the first tool call, `browse-mcp` pairs once with a 6-digit confirmation in
+`browse`'s window (enable **Read and act in your tabs** there if you want the
+agent to inspect or screenshot your open tabs with `page: "active"`).
 
 ## Visibility and revocation
 

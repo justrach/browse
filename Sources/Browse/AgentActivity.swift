@@ -39,19 +39,28 @@ struct AgentActivity: View {
                     ForEach(visible, id: \.first?.id) { group in
                         if group.first?.kind == .page {
                             PagesCard(pages: group, open: visit)
+                                .transition(.opacity.combined(with: .move(edge: .top)))
                         } else if let entry = group.first {
                             EntryRow(entry: entry, full: full, live: live, visit: visit)
+                                .transition(.opacity.combined(with: .move(edge: .top)))
                         }
                     }
                 }
+                .animation(Motion.snappy, value: visible.map { $0.first?.id })
             }
             if live {
                 HStack(alignment: .top, spacing: 7) {
-                    Image(systemName: running.isEmpty ? "sparkle" : "bolt.horizontal.circle")
-                        .font(.system(size: 10))
-                        .frame(width: 14, height: 15)
+                    if !running.isEmpty {
+                        PulseDot(color: Palette.accent, size: 5, active: true)
+                            .frame(width: 14, height: 15)
+                    } else {
+                        Image(systemName: "sparkle")
+                            .font(.system(size: 10))
+                            .frame(width: 14, height: 15)
+                    }
                     Text(currentStatus)
                         .fixedSize(horizontal: false, vertical: true)
+                        .contentTransition(.numericText())
                 }
                 .font(.system(size: 11.5))
                 .foregroundStyle(Palette.muted)
@@ -64,7 +73,8 @@ struct AgentActivity: View {
                 }
             }
         }
-        .animation(Motion.settle, value: expanded)
+        .animation(Motion.snappy, value: expanded)
+        .animation(Motion.snappy, value: running.count)
     }
 
     private var currentStatus: String {
@@ -94,6 +104,7 @@ struct AgentActivity: View {
                     TimelineView(.periodic(from: .now, by: 1)) { context in
                         Text(Self.span(from: started, to: context.date))
                             .monospacedDigit()
+                            .contentTransition(.numericText())
                     }
                 } else if let ended {
                     Text(Self.span(from: started, to: ended)).monospacedDigit()
@@ -101,8 +112,10 @@ struct AgentActivity: View {
                 if !activity.isEmpty {
                     Text(expanded ? "Less" : "Details")
                         .font(.system(size: 10.5))
-                    Image(systemName: expanded ? "chevron.down" : "chevron.right")
+                    Image(systemName: "chevron.right")
                         .font(.system(size: 8, weight: .semibold))
+                        .rotationEffect(.degrees(expanded ? 90 : 0))
+                        .animation(Motion.snappy, value: expanded)
                 }
             }
             .font(.system(size: full ? 12.5 : 12))

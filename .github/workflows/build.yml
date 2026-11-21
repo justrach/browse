@@ -41,6 +41,7 @@ jobs:
         run: |
           plutil -p build/browse.app/Contents/Info.plist | grep -E 'CFBundleName|CFBundleExecutable|CFBundleIdentifier'
           test -x build/browse.app/Contents/MacOS/Browse
+          test -x build/browse.app/Contents/MacOS/browse-mcp
       - name: Package the pull request test build
         if: github.event_name == 'pull_request' && matrix.runner == 'macos-26'
         run: ditto -c -k --sequesterRsrc --keepParent build/browse.app "$RUNNER_TEMP/browse-test.zip"

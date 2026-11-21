@@ -13,6 +13,10 @@ in [ROADMAP.md](ROADMAP.md).
 
 ### Added
 
+- Customizable keyboard shortcuts in **Settings › Shortcuts**: search commands or keys, click any key pill to rebind (with conflict handling and macOS reserved-key checks), right-click to clear or reset, and configure an optional system-wide global hotkey to summon `browse` from any app. Added default shortcuts across menus (`⌥⌘P` pin/unpin, `⌥⌘E` rename tab, `⌥⌘M` copy Markdown link, `⌥⌘B` bookmarks, `⇧⌘O` bookmarks bar, `⌃⌘F` full screen, `⌥⌘D` swap split, `⌥⌘T` tidy page, `⇧⌘;` expand Codegraff, `⌘/` searchable shortcut guide).
+- Bundled **`browse-mcp`** stdio MCP server (built on `modelcontextprotocol/swift-sdk`) inside `browse.app/Contents/MacOS/browse-mcp`, with one-click **Copy MCP config** in **Settings › Agent › Connected apps** so external coding agents (Antigravity, Claude Code, Codex, Cursor) can pair once with a 6-digit code and control `browse` securely with P-256 signed requests.
+- New and upgraded MCP tools (`snapshot` interactive accessibility map with secret redaction, `scroll`, `press_key`, `hover`, `wait_for`, `page: "active"` targeting, and upgraded `screenshot` supporting `full_page`, CSS `selector` crops, `target: "window"`, secret-field masking, and optional `save_to` file output alongside inline MCP image blocks).
+- Polished agent UX and motion: breathing live status indicators (`PulseDot`), live-action `ConnectPill` with a one-click **Stop** button, smooth rotating activity disclosures, numeric-text timer transitions, and refined spring transitions for Codegraff column/stage swaps (respecting macOS Reduce Motion).
 - Passkeys under the sign-in field, as in Safari: on sites that offer conditional WebAuthn (such as GitHub and Google), the Mac's passkeys for the site appear first under the sign-in box beside saved passwords, and clicking one opens the Mac's sheet for that passkey and signs you in.
 
 ### Fixed

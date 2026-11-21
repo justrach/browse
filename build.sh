@@ -103,10 +103,12 @@ else
   BUILD="$(date +%Y%m%d%H%M)"
   swift build -c "$CONFIG"
   BINARY=".build/$CONFIG/Browse"
+  MCP_BINARY=".build/$CONFIG/browse-mcp"
 
   rm -rf "$APP"
   mkdir -p "$APP/Contents/MacOS" "$APP/Contents/Resources"
   cp "$BINARY" "$APP/Contents/MacOS/Browse"
+  if [ -x "$MCP_BINARY" ]; then cp "$MCP_BINARY" "$APP/Contents/MacOS/browse-mcp"; fi
   cp LICENSE "$APP/Contents/Resources/"
   cp docs/legal/upstream-mit.txt "$APP/Contents/Resources/LICENSE.MIT"
 
@@ -120,6 +122,7 @@ if [ "$CONFIG" = "release" ]; then
   rm -rf "$APP.dSYM"
   dsymutil "$BINARY" -o "$APP.dSYM" 2>/dev/null || echo "no dSYM this time" >&2
   strip -x "$APP/Contents/MacOS/Browse"
+  if [ -f "$APP/Contents/MacOS/browse-mcp" ]; then strip -x "$APP/Contents/MacOS/browse-mcp"; fi
 fi
 
 # Build the macOS icon from the mark used in the app — browse's own, the
@@ -243,7 +246,13 @@ if [ -n "$IDENTITY" ] && [ -f "$PROFILE" ]; then
   fi
 fi
 if [ -n "$IDENTITY" ]; then
-  codesign --force --deep --timestamp --options runtime \
+  # Sign helper CLI tools first with hardened runtime alone — restricted app
+  # entitlements (like passkeys) apply only to the main browser executable.
+  if [ -f "$APP/Contents/MacOS/browse-mcp" ]; then
+    codesign --force --timestamp --options runtime \
+      --sign "$IDENTITY" "$APP/Contents/MacOS/browse-mcp"
+  fi
+  codesign --force --timestamp --options runtime \
     --entitlements "$ENTITLEMENTS" \
     --sign "$IDENTITY" "$APP"
   echo "signed as: $IDENTITY"
@@ -251,7 +260,10 @@ else
   # A build that cannot sign at all is not a build: `|| true` here let one
   # through as though it had finished, leaving a bundle that would not open.
   # set -e stops it now, with codesign's own words above.
-  codesign --force --deep --sign - "$APP"
+  if [ -f "$APP/Contents/MacOS/browse-mcp" ]; then
+    codesign --force --sign - "$APP/Contents/MacOS/browse-mcp"
+  fi
+  codesign --force --sign - "$APP"
   [ "$STEP" != "app" ] && echo "no Developer ID certificate found — the DMG will only open on this Mac" >&2
 fi
 

@@ -182,8 +182,52 @@ enum Motion {
         reduced ? nil : .spring(response: 0.30, dampingFraction: 0.86)
     }
 
+    static var snappy: Animation? {
+        reduced ? nil : .spring(response: 0.24, dampingFraction: 0.84)
+    }
+
+    static var gentle: Animation? {
+        reduced ? nil : .spring(response: 0.42, dampingFraction: 0.88)
+    }
+
     static var quick: Animation? {
         reduced ? nil : .easeOut(duration: 0.14)
+    }
+}
+
+/// Live breathing status dot for active agent runs and connected MCP sessions.
+/// Renders static under macOS Reduce Motion.
+struct PulseDot: View {
+    var color: Color = Palette.accent
+    var size: CGFloat = 6
+    var active: Bool = true
+    @State private var breathing = false
+
+    var body: some View {
+        ZStack {
+            if active && !Motion.reduced {
+                Circle()
+                    .fill(color.opacity(breathing ? 0.0 : 0.42))
+                    .frame(width: size * (breathing ? 2.4 : 1.15), height: size * (breathing ? 2.4 : 1.15))
+                    .animation(.easeOut(duration: 1.35).repeatForever(autoreverses: false), value: breathing)
+            }
+            Circle()
+                .fill(color)
+                .frame(width: size, height: size)
+        }
+        .frame(width: size * 2.4, height: size * 2.4)
+        .onAppear { if active { breathing = true } }
+        .onChange(of: active) { _, on in breathing = on }
+    }
+}
+
+/// Subtle spring press feedback for interactive pills and buttons.
+struct TactilePress: ButtonStyle {
+    func makeBody(configuration: Configuration) -> some View {
+        configuration.label
+            .scaleEffect(!Motion.reduced && configuration.isPressed ? 0.96 : 1)
+            .opacity(configuration.isPressed ? 0.84 : 1)
+            .animation(Motion.snappy, value: configuration.isPressed)
     }
 }
 

@@ -18,13 +18,14 @@ struct SettingsPanel: View {
     @Namespace private var glow
 
     enum Page: String, CaseIterable, Identifiable {
-        case general, themes, tabs, extensions, agent, passwords, downloads, privacy, sync, about
+        case general, themes, tabs, shortcuts, extensions, agent, passwords, downloads, privacy, sync, about
         var id: String { rawValue }
         var title: String {
             switch self {
             case .general: return "General"
             case .themes: return "Themes"
             case .tabs: return "Tabs"
+            case .shortcuts: return "Shortcuts"
             case .extensions: return "Extensions"
             case .agent: return "Agent"
             case .passwords: return "Passwords"
@@ -39,6 +40,7 @@ struct SettingsPanel: View {
             case .general: return "macwindow"
             case .themes: return "paintpalette"
             case .tabs: return "rectangle.split.3x1"
+            case .shortcuts: return "command"
             case .extensions: return "puzzlepiece.extension"
             case .agent: return "sparkle"
             case .passwords: return "key"
@@ -163,6 +165,7 @@ struct SettingsPanel: View {
                     case .general: general
                     case .themes: ThemesPage(browser: browser, prefs: prefs)
                     case .tabs: tabs
+                    case .shortcuts: ShortcutsPage(browser: browser)
                     case .extensions: ExtensionsPage(browser: browser)
                     case .agent: AgentPage(browser: browser, prefs: prefs, agent: browser.agent)
                     case .passwords: passwords

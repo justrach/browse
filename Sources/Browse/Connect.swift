@@ -90,8 +90,9 @@ final class Connect: ObservableObject {
     /// Which scope a tool is in. Nil for one no connected app may use.
     static func scope(of tool: String) -> Scope? {
         switch tool {
-        case "search", "read_pages", "tabs", "read", "links": return .read
-        case "open", "go", "back", "forward", "reload", "form_fields", "fill", "click", "type", "submit", "drive", "screenshot", "close", "show":
+        case "search", "read_pages", "tabs", "read", "links", "snapshot": return .read
+        case "open", "go", "back", "forward", "reload", "form_fields", "fill", "click", "type", "submit",
+             "drive", "screenshot", "scroll", "press_key", "hover", "wait_for", "close", "show":
             return .ownPages
         case "run_js": return .runJS
         default: return nil
@@ -103,8 +104,10 @@ final class Connect: ObservableObject {
 
     /// The app driving right now, for the pill over the page.
     struct Driving: Equatable {
+        let clientID: String
         let name: String
         let pages: Int
+        let action: String?
     }
     @Published private(set) var driving: Driving?
 
@@ -201,9 +204,17 @@ final class Connect: ObservableObject {
     /// The question up now, pairing or tabs, so a test run can answer it
     /// (./bench ui connect yes|no) — nothing else ever does.
     private var question: (window: NSWindow, alert: NSAlert)?
+    /// Direct callback for hidden --test runs where no visible window exists to host a sheet.
+    private var testAnswer: ((Bool) -> Void)?
 
     func answer(_ yes: Bool) {
-        guard Store.testing, let question else { return }
+        guard Store.testing else { return }
+        if let act = testAnswer {
+            testAnswer = nil
+            act(yes)
+            return
+        }
+        guard let question else { return }
         question.window.endSheet(question.alert.window, returnCode: yes ? .alertFirstButtonReturn : .alertSecondButtonReturn)
     }
 
@@ -279,8 +290,12 @@ final class Connect: ObservableObject {
             }
             self.pairing = pairing
         }
+        if Store.testing {
+            testAnswer = { yes in decide(yes ? .alertFirstButtonReturn : .alertSecondButtonReturn) }
+            return
+        }
         NSApp.requestUserAttention(.informationalRequest)
-        guard let window = NSApp.keyWindow ?? NSApp.mainWindow ?? NSApp.windows.first(where: { $0.isVisible && !($0 is NSPanel) }) else {
+        guard let window = sheetHost else {
             decide(alert.runModal())
             return
         }
@@ -371,14 +386,26 @@ final class Connect: ObservableObject {
         return yes
     }
 
+    private var sheetHost: NSWindow? {
+        if let main = Links.window, main.contentView != nil { return main }
+        return NSApp.keyWindow ?? NSApp.mainWindow ?? NSApp.windows.first {
+            (Store.testing || $0.isVisible) && $0.contentView != nil && !($0 is NSPanel) && !$0.isExcludedFromWindowsMenu
+        }
+    }
+
     private func askTabs(_ name: String) async -> Bool {
         let alert = NSAlert()
         alert.messageText = "Let “\(name)” use your tabs?"
         alert.informativeText = "\(name) wants to read and act in the tabs you have open, with your sign-ins, until browse quits. It never fills in a password."
         alert.addButton(withTitle: "Allow")
         alert.addButton(withTitle: "Don't Allow")
+        if Store.testing {
+            return await withCheckedContinuation { done in
+                testAnswer = { done.resume(returning: $0) }
+            }
+        }
         NSApp.requestUserAttention(.criticalRequest)
-        guard let window = NSApp.keyWindow ?? NSApp.mainWindow ?? NSApp.windows.first(where: { $0.isVisible && !($0 is NSPanel) }) else {
+        guard let window = sheetHost else {
             return alert.runModal() == .alertFirstButtonReturn
         }
         return await withCheckedContinuation { done in
@@ -403,12 +430,26 @@ final class Connect: ObservableObject {
 
     /// An app just did something: named over the page, and gone a few
     /// seconds after it stops.
-    func drove(_ caller: Caller, pages: Int) {
-        driving = Driving(name: caller.name, pages: pages)
+    func drove(_ caller: Caller, pages: Int, action: String? = nil) {
+        withAnimation(Motion.settle) {
+            driving = Driving(clientID: caller.id, name: caller.name, pages: pages, action: action)
+        }
         quiet?.cancel()
-        let work = DispatchWorkItem { [weak self] in self?.driving = nil }
+        guard action == nil else { return }
+        let work = DispatchWorkItem { [weak self] in
+            withAnimation(Motion.settle) { self?.driving = nil }
+        }
         quiet = work
-        DispatchQueue.main.asyncAfter(deadline: .now() + 5, execute: work)
+        DispatchQueue.main.asyncAfter(deadline: .now() + 4.5, execute: work)
+    }
+
+    /// Close all pages opened by the currently driving external app and dismiss the pill.
+    func stopDriving() {
+        quiet?.cancel()
+        if let id = driving?.clientID {
+            AgentTools.shared.stopClient(id)
+        }
+        withAnimation(Motion.snappy) { driving = nil }
     }
 
     // MARK: - browse's own key
@@ -496,16 +537,46 @@ final class Connect: ObservableObject {
 /// Settings › Agent › Connected apps.
 struct ConnectCard: View {
     @ObservedObject private var connect = Connect.shared
+    @State private var copied = false
+
+    private var mcpBinary: String {
+        let bundled = Bundle.main.bundleURL.appendingPathComponent("Contents/MacOS/browse-mcp").path
+        return FileManager.default.isExecutableFile(atPath: bundled) ? bundled : "/Applications/browse.app/Contents/MacOS/browse-mcp"
+    }
+
+    private func copyMCPConfig() {
+        let json = """
+        {
+          "mcpServers": {
+            "browse": {
+              "command": "\(mcpBinary)",
+              "args": ["--name", "Coding Agent"]
+            }
+          }
+        }
+        """
+        NSPasteboard.general.clearContents()
+        NSPasteboard.general.setString(json, forType: .string)
+        copied = true
+        DispatchQueue.main.asyncAfter(deadline: .now() + 2) { copied = false }
+    }
 
     var body: some View {
         Card {
             Line(
                 "Connected apps",
-                "Other apps on this Mac, like Harness, using the browser for their agents — with your sign-ins, only what you allow, every request signed. Each one asks here first, with a code to check"
+                "Other apps and MCP coding agents on this Mac — Antigravity, Claude Code, Codex, Cursor, Harness — using browse with your sign-ins, only what you allow, every request signed"
             ) {
                 Switch(on: Binding(get: { connect.on }, set: { connect.switchOn($0) }))
             }
             if connect.on {
+                Rule()
+                Line(
+                    "MCP server (stdio)",
+                    "Add browse-mcp to Claude Code, Antigravity, Codex or Cursor; pairs once with a 6-digit code"
+                ) {
+                    Pill(copied ? "Copied" : "Copy MCP config") { copyMCPConfig() }
+                }
                 ForEach(connect.clients) { client in
                     Rule()
                     Line(client.name, used(client)) {
@@ -523,7 +594,7 @@ struct ConnectCard: View {
                 }
                 if connect.clients.isEmpty {
                     Rule()
-                    Line("None yet", "Connect from the other app — in Harness, Settings › Use browse for web tasks") { EmptyView() }
+                    Line("None yet", "Copy the MCP config into your agent, or connect from Harness › Settings › Use browse for web tasks") { EmptyView() }
                 }
             }
         }
@@ -542,18 +613,42 @@ struct ConnectPill: View {
 
     var body: some View {
         if let driving = connect.driving {
-            HStack(spacing: 7) {
-                Circle().fill(Palette.accent).frame(width: 6, height: 6)
-                Text(driving.pages > 0 ? "\(driving.name) · \(driving.pages) page\(driving.pages == 1 ? "" : "s")" : "\(driving.name) is using browse")
-                    .font(.system(size: 12))
-                    .foregroundStyle(Palette.ink)
+            HStack(spacing: 8) {
+                PulseDot(color: Palette.accent, size: 6, active: driving.action != nil || driving.pages > 0)
+                VStack(alignment: .leading, spacing: 1) {
+                    Text(driving.action.map { "\(driving.name) · \($0)" }
+                         ?? (driving.pages > 0
+                             ? "\(driving.name) · \(driving.pages) page\(driving.pages == 1 ? "" : "s")"
+                             : "\(driving.name) is using browse"))
+                        .font(.system(size: 12, weight: .medium))
+                        .foregroundStyle(Palette.ink)
+                        .lineLimit(1)
+                        .contentTransition(.numericText())
+                }
+                Button {
+                    connect.stopDriving()
+                } label: {
+                    Text("Stop")
+                        .font(.system(size: 11, weight: .medium))
+                        .foregroundStyle(Palette.muted)
+                        .padding(.horizontal, 8)
+                        .padding(.vertical, 3)
+                        .background(Palette.wash, in: Capsule())
+                }
+                .buttonStyle(TactilePress())
+                .help("Close pages opened by \(driving.name)")
             }
-            .padding(.horizontal, 13)
-            .padding(.vertical, 7)
+            .padding(.leading, 10)
+            .padding(.trailing, 8)
+            .padding(.vertical, 6)
             .background(Palette.ground, in: Capsule())
             .overlay(Capsule().strokeBorder(Palette.hairline, lineWidth: 1))
-            .shadow(color: .black.opacity(0.10), radius: 18, y: 6)
-            .transition(.move(edge: .bottom).combined(with: .opacity))
+            .shadow(color: .black.opacity(0.12), radius: 18, y: 6)
+            .transition(.asymmetric(
+                insertion: .move(edge: .bottom).combined(with: .opacity).combined(with: .scale(scale: 0.94)),
+                removal: .move(edge: .bottom).combined(with: .opacity)
+            ))
+            .animation(Motion.snappy, value: driving)
         }
     }
 }

@@ -130,17 +130,20 @@ struct AgentColumn: View {
                         .foregroundStyle(Palette.ink)
                         .lineLimit(1)
                     if !full {
-                        Circle().fill(light).frame(width: 5, height: 5)
+                        PulseDot(color: light, size: 5, active: agent.phase == .starting || agent.phase == .working)
                             .accessibilityLabel(status)
                     }
                 }
                 if full || agent.asking != nil || !agent.phase.words.isEmpty {
-                    HStack(spacing: 5) {
-                        if full { Circle().fill(light).frame(width: 5, height: 5) }
+                    HStack(spacing: 4) {
+                        if full {
+                            PulseDot(color: light, size: 5, active: agent.phase == .starting || agent.phase == .working)
+                        }
                         Text(status)
                             .font(.system(size: 10.5))
                             .foregroundStyle(Palette.muted)
                             .lineLimit(1)
+                            .contentTransition(.numericText())
                     }
                 }
             }
@@ -177,11 +180,17 @@ struct AgentColumn: View {
                 .popover(isPresented: $showingGuide, arrowEdge: .bottom) { AgentGuide() }
             Door(
                 icon: full ? "sidebar.right" : "arrow.up.left.and.arrow.down.right",
-                help: full ? "Beside the page" : "Expand conversation"
+                help: (full ? "Beside the page" : "Expand conversation")
+                    + (ShortcutStore.shared.key(for: .expandAgent).map { "   \($0.display)" } ?? "")
             ) {
-                if full { browser.talkToColumn() } else { browser.takeStage() }
+                withAnimation(Motion.gentle) {
+                    if full { browser.talkToColumn() } else { browser.takeStage() }
+                }
             }
-            Door(icon: "xmark", help: "Close   ⌘;") { browser.toggleAgent() }
+            Door(
+                icon: "xmark",
+                help: "Close" + (ShortcutStore.shared.key(for: .toggleAgent).map { "   \($0.display)" } ?? "")
+            ) { browser.toggleAgent() }
         }
         .padding(.horizontal, full ? 20 : 18)
         .frame(height: full ? 56 : 44)

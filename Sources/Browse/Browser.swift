@@ -128,6 +128,36 @@ final class Browser: NSObject, ObservableObject {
         }
     }
 
+    /// ⇧⌘;. Expand or collapse Codegraff between full stage and side column.
+    func toggleAgentFull() {
+        if !prefs.usesAgent { prefs.usesAgent = true }
+        if talkOnStage {
+            leaveStage()
+        } else {
+            takeStage()
+        }
+    }
+
+    /// ⌥⌘P. Pin or unpin the active tab.
+    func togglePin() {
+        guard let tab = active, !tab.isBlank else { return }
+        if tab.pin == nil { pin(tab) } else { unpin(tab) }
+    }
+
+    /// ⌃⌘F. Enter or exit macOS full screen on the browser window.
+    func toggleFullScreen() {
+        (Links.window ?? NSApp.keyWindow ?? NSApp.windows.first { $0.contentView != nil && !($0 is NSPanel) })?
+            .toggleFullScreen(nil)
+    }
+
+    /// System-wide global hotkey: bring browse forward and open the address bar.
+    func summonFromElsewhere() {
+        NSApp.activate(ignoringOtherApps: true)
+        (Links.window ?? NSApp.windows.first { $0.contentView != nil && !($0 is NSPanel) })?
+            .makeKeyAndOrderFront(nil)
+        edit()
+    }
+
     /// The Ask tab: Codegraff's page on the stage — the chats so far and a
     /// field for a new one (see AgentHome.swift) — or, pressed again, the
     /// page that was there.
