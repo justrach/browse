@@ -29,30 +29,36 @@ import WebKit
 // with ten ordinary sites open (Wikipedia, YouTube, the news; 25 Sep 2026).
 
 extension Browser {
-    /// How long a tab has to go without being looked at. A quarter of an
-    /// hour, or `sleep.after` in seconds — for the bench and the measurements.
-    static var sleepAfter: TimeInterval {
+    /// How long a tab has to go without being looked at, or `sleep.after` in
+    /// seconds for the bench and measurements.
+    var sleepAfter: TimeInterval {
         let set = Store.settings.double(forKey: "sleep.after")
-        return set > 0 ? set : 15 * 60
+        if set > 0 { return set }
+        return prefs.memoryMode == .low ? 3 * 60 : 10 * 60
     }
 
-    /// Tabs kept awake behind the one on screen, or `sleep.awake` — for the
-    /// bench and the measurements.
-    static var awakeMost: Int {
+    /// Tabs kept awake behind the one on screen, or `sleep.awake` for the
+    /// bench and measurements.
+    var awakeMost: Int {
         let set = Store.settings.integer(forKey: "sleep.awake")
-        return set > 0 ? set : 3
+        if set > 0 { return set }
+        return prefs.memoryMode == .low ? 1 : 2
     }
 
-    /// How long a tab past `awakeMost` is left before it sleeps anyway: a
-    /// minute, or `sleep.crowded` in seconds.
-    static var crowdedAfter: TimeInterval {
+    /// How long a tab past `awakeMost` is left before it sleeps anyway, or
+    /// `sleep.crowded` in seconds.
+    var crowdedAfter: TimeInterval {
         let set = Store.settings.double(forKey: "sleep.crowded")
-        return set > 0 ? set : 60
+        if set > 0 { return set }
+        return prefs.memoryMode == .low ? 20 : 45
     }
 
     /// Started once, at launch.
     func watchForSleep() {
-        let every = min(60, max(5, Browser.sleepAfter / 4))
+        // Keep shared URLCache tightly bounded instead of letting macOS grow it unbounded.
+        URLCache.shared = URLCache(memoryCapacity: 12 * 1024 * 1024, diskCapacity: 48 * 1024 * 1024)
+
+        let every = min(30, max(5, sleepAfter / 4))
         let timer = Timer(timeInterval: every, repeats: true) { [weak self] _ in
             MainActor.assumeIsolated { self?.sleepIdle() }
         }
@@ -65,27 +71,60 @@ extension Browser {
             MainActor.assumeIsolated {
                 guard let self, let event = self.pressure?.data else { return }
                 let critical = event.contains(.critical)
-                self.sleepIdle(within: critical ? 0 : 5 * 60)
-                // Codegraff's share, if it has been started at all: its pages
-                // are only kept for the next step; graff can be brought back.
-                if AgentTools.shared.browser != nil {
-                    if critical { self.agent.rest() } else if self.agent.phase != .working { AgentTools.shared.dropPages() }
-                }
+                self.reclaimMemory(critical: critical)
             }
         }
         source.resume()
         pressure = source
     }
 
+    /// Reclaim memory immediately on pressure or on user request.
+    func reclaimMemory(critical: Bool) {
+        URLCache.shared.removeAllCachedResponses()
+        for tab in tabs + parkedTabs where tab.asleep {
+            tab.dropCover()
+        }
+        sleepIdle(within: critical ? 0 : 2 * 60)
+        if AgentTools.shared.browser != nil {
+            if critical {
+                agent.rest()
+                AgentTools.shared.reapIdlePages(olderThan: 0)
+            } else {
+                AgentTools.shared.reapIdlePages(olderThan: 30)
+                if agent.phase != .working { AgentTools.shared.dropPages() }
+            }
+        }
+    }
+
+    /// User-triggered one-click cleanup from Settings: puts every eligible
+    /// inactive tab to sleep and trims caches right now.
+    func sleepInactiveNow() {
+        let eligible = (tabs + parkedTabs).filter { awake(because: $0, allowIdlePinned: prefs.memoryMode == .low) == nil }
+        eligible.forEach { sleep($0) }
+        URLCache.shared.removeAllCachedResponses()
+        for tab in tabs + parkedTabs where tab.asleep { tab.dropCover() }
+        AgentTools.shared.reapIdlePages(olderThan: 15)
+        if !eligible.isEmpty {
+            announce("Put \(eligible.count) inactive tab\(eligible.count == 1 ? "" : "s") to sleep")
+        } else {
+            announce("Memory trimmed — no inactive tabs to sleep")
+        }
+    }
+
     /// Every tab that has gone long enough without being looked at, the one
     /// left longest first.
     func sleepIdle(within given: TimeInterval? = nil) {
         guard prefs.sleepsTabs else { return }
-        let wait = given ?? Browser.sleepAfter
+        let wait = given ?? sleepAfter
         let now = Date()
+        let lowRAM = prefs.memoryMode == .low
         // The rows of the other spaces too: parked is not the same as used.
         let idle = (tabs + parkedTabs)
-            .filter { now.timeIntervalSince($0.touched) >= wait && awake(because: $0) == nil }
+            .filter { tab in
+                let threshold = (tab.pin != nil && lowRAM) ? max(wait, 20 * 60) : wait
+                return now.timeIntervalSince(tab.touched) >= threshold
+                    && awake(because: tab, allowIdlePinned: lowRAM) == nil
+            }
             .sorted { $0.touched < $1.touched }
         for tab in idle { self.sleep(tab) }
         // Too many awake: the ones looked at longest ago, past the few kept,
@@ -93,16 +132,16 @@ extension Browser {
         let crowd = (tabs + parkedTabs)
             .filter { tab in !idle.contains { $0 === tab } && awake(because: tab) == nil }
             .sorted { $0.touched > $1.touched }
-        for tab in crowd.dropFirst(Browser.awakeMost) where now.timeIntervalSince(tab.touched) >= Browser.crowdedAfter {
+        for tab in crowd.dropFirst(awakeMost) where now.timeIntervalSince(tab.touched) >= crowdedAfter {
             self.sleep(tab)
         }
     }
 
     /// Why a tab has to stay awake — nil when nothing keeps it. The clock is
     /// the caller's business; this is everything else.
-    func awake(because tab: Tab) -> String? {
+    func awake(because tab: Tab, allowIdlePinned: Bool = false) -> String? {
         if tab.id == activeID || showing(inSplit: tab) { return "on screen" }
-        if tab.pin != nil { return "pinned" }
+        if tab.pin != nil && !allowIdlePinned { return "pinned" }
         if tab.bench { return "a bench tab" }
         if tab.isBlank { return "blank" }
         if tab.asleep { return "already asleep" }
@@ -122,7 +161,8 @@ extension Browser {
     /// it go — looking again at each step, since each takes a moment and you
     /// may have gone back to the tab in the meantime.
     func sleep(_ tab: Tab, done: ((String) -> Void)? = nil) {
-        if let reason = awake(because: tab) {
+        let allowPinned = prefs.memoryMode == .low
+        if let reason = awake(because: tab, allowIdlePinned: allowPinned) {
             done?(reason)
             return
         }
@@ -132,13 +172,13 @@ extension Browser {
                 done?("holding something typed")
                 return
             }
-            if let reason = self.awake(because: tab) {
+            if let reason = self.awake(because: tab, allowIdlePinned: allowPinned) {
                 done?(reason)
                 return
             }
             tab.snapshot { [weak self, weak tab] picture in
                 guard let self, let tab else { return }
-                if let reason = self.awake(because: tab) {
+                if let reason = self.awake(because: tab, allowIdlePinned: allowPinned) {
                     done?(reason)
                     return
                 }

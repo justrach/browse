@@ -50,8 +50,10 @@ final class AgentTools: ObservableObject {
     private static let largest = 900_000
     /// Pages kept at once. The oldest goes when another is wanted. Each is a
     /// WebKit process of its own, tens of MB; pages only read close as soon
-    /// as they are read, so these are the ones graff is acting on.
-    private static let most = 6
+    /// as they are read, so these are the ones graff/MCP is acting on.
+    private static let most = 4
+    nonisolated private static let idleSheetTTL: TimeInterval = 180
+    private var idleReaper: Timer?
 
     // MARK: - the server
 
@@ -964,10 +966,35 @@ final class AgentTools: ObservableObject {
     func stopClient(_ clientID: String) {
         let closing = pages.filter { $0.owner == clientID || $0.owner.hasPrefix(clientID + "/") }
         closing.forEach(close)
+        releaseRoomIfEmpty()
+    }
+
+    /// Reap idle offscreen agent/MCP WebKit pages so long-lived MCP sessions
+    /// don't hold hundreds of MB of background WebContent processes.
+    func reapIdlePages(olderThan age: TimeInterval = AgentTools.idleSheetTTL) {
+        let now = Date()
+        let stale = pages.filter { now.timeIntervalSince($0.lastUsed) >= age }
+        stale.forEach(close)
+        releaseRoomIfEmpty()
+    }
+
+    private func releaseRoomIfEmpty() {
         if pages.isEmpty {
+            idleReaper?.invalidate()
+            idleReaper = nil
             room?.close()
             room = nil
         }
+    }
+
+    private func ensureReaper() {
+        guard idleReaper == nil else { return }
+        let timer = Timer(timeInterval: 60, repeats: true) { [weak self] _ in
+            MainActor.assumeIsolated { self?.reapIdlePages() }
+        }
+        timer.tolerance = 15
+        RunLoop.main.add(timer, forMode: .common)
+        idleReaper = timer
     }
 
     /// Human-readable status for the live driving pill.
@@ -1005,6 +1032,7 @@ final class AgentTools: ObservableObject {
         let window = room ?? makeRoom()
         let sheet = Sheet(id: "p\(made)", owner: owner, in: window, reading: reading, bare: reading ? bare : nil)
         pages.append(sheet)
+        if !reading { ensureReaper() }
         sheet.onChange = { [weak self] in self?.publishPages() }
         publishPages()
         while pages.filter({ $0.owner == owner }).count > AgentTools.most, let oldest = pages.first(where: { $0.owner == owner }) {
@@ -1076,8 +1104,8 @@ final class AgentTools: ObservableObject {
         if ref.isEmpty, caller == nil, let pinned = browser.agent.pinned, browser.tabs.contains(where: { $0 === pinned }) {
             return await act(TabTarget(tab: pinned))
         }
-        if ref.isEmpty, let latest = mine.last { return await act(latest) }
-        if let sheet = mine.first(where: { $0.id == ref }) { return await act(sheet) }
+        if ref.isEmpty, let latest = mine.last { latest.lastUsed = Date(); return await act(latest) }
+        if let sheet = mine.first(where: { $0.id == ref }) { sheet.lastUsed = Date(); return await act(sheet) }
         if let tab = tab(ref, browser) {
             if let refused = await refusedTabs(caller) { return refused }
             return await act(TabTarget(tab: tab))
@@ -1818,6 +1846,7 @@ private final class Sheet: Target {
     let owner: String
     let web: WKWebView
     let reading: Bool
+    var lastUsed = Date()
     var onChange: (() -> Void)?
     private var observations: [NSKeyValueObservation] = []
     private let passkeyRelay = PasskeyRelay()

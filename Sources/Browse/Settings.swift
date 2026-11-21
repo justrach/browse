@@ -335,8 +335,22 @@ struct SettingsPanel: View {
                 Switch(on: $prefs.showsReading)
             }
             Rule()
-            Line("Sleep tabs you aren't using", "Three stay awake behind the one you're on, and the rest sleep after a minute, or any tab after a quarter of an hour. They come back where you left them. Pinned tabs, sound, calls and anything typed stay awake.") {
+            Line("Sleep tabs you aren't using", "Background tabs give their WebKit processes back and restore right where you left them. Audio, calls, downloads and unsaved forms stay awake.") {
                 Switch(on: $prefs.sleepsTabs)
+            }
+            if prefs.sleepsTabs {
+                Line(
+                    "Memory profile",
+                    prefs.memoryMode == .low
+                        ? "Low RAM: keeps 1 background tab awake, sleeps extras after 20 s, idle tabs after 3 min, and idle pinned tabs after 20 min"
+                        : "Balanced: keeps 2 background tabs awake, sleeps extras after 45 s, and idle tabs after 10 min"
+                ) {
+                    HStack(spacing: 8) {
+                        Segmented(options: Preferences.MemoryMode.allCases.map { ($0, $0.title) }, selection: $prefs.memoryMode)
+                        Pill("Sleep now") { browser.sleepInactiveNow() }
+                    }
+                }
+                .padding(.leading, 14)
             }
             Rule()
             Line("Spaces", "Separate sets of tabs, signed in where the others are or starting afresh, switched with ⌃1–⌃9, two fingers sideways over the column, or the space's icon. Mission Control's own ⌃1–⌃9, if you turned them on, take those keys first.") {

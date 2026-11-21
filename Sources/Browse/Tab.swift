@@ -109,7 +109,7 @@ enum Web {
         // it; a sign-in window opened by its button still opens.
         config.preferences.javaScriptCanOpenWindowsAutomatically = false
         config.mediaTypesRequiringUserActionForPlayback = .audio
-        if Store.testing, !Store.measuring { config.preferences.inactiveSchedulingPolicy = .none }
+        config.preferences.inactiveSchedulingPolicy = (Store.testing && !Store.measuring) ? .none : .throttle
         inspector(config.preferences)
         return config
     }
@@ -942,6 +942,10 @@ final class Tab: ObservableObject, Identifiable {
         discard()
     }
 
+    /// Release any decoded wake-cover bitmap under memory pressure; the
+    /// compressed JPEG (`picture`) stays for instant re-decode on wake.
+    func dropCover() { cover = nil }
+
     /// Whether the page holds something typed and not yet sent — a draft, a
     /// half-filled form. A page that can't answer is treated as holding
     /// nothing: a PDF, an image, a page whose process has already gone.
@@ -959,7 +963,13 @@ final class Tab: ObservableObject, Identifiable {
     /// on — can still be pictured. Nil when there is nothing to draw.
     func snapshot(_ done: @escaping (Data?) -> Void) {
         guard let built else { return done(nil) }
-        built.takeSnapshot(with: nil) { image, _ in
+        // Capture at 1x logical width (capped at 960px) instead of full 2x
+        // Retina to cut peak wake-cover bitmap RAM by ~4x.
+        let shot = WKSnapshotConfiguration()
+        shot.afterScreenUpdates = false
+        let width = built.bounds.width
+        if width > 0 { shot.snapshotWidth = NSNumber(value: min(960, max(1, Double(width)))) }
+        built.takeSnapshot(with: shot) { image, _ in
             guard let image, let cg = image.cgImage(forProposedRect: nil, context: nil, hints: nil) else {
                 return done(nil)
             }
