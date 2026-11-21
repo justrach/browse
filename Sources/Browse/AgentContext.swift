@@ -4,48 +4,103 @@ struct AgentPageContext: View {
     @ObservedObject var tab: Tab
     @ObservedObject var agent: Agent
 
+    @State private var hoverPin = false
+    @State private var hoverToggle = false
+
     private var pinned: Bool { agent.pinned === tab }
     private var included: Bool { pinned || agent.withPage }
     private var title: String { tab.title.isEmpty ? (tab.address?.host() ?? "This page") : tab.title }
+    private var host: String { tab.address?.host()?.replacingOccurrences(of: "www.", with: "") ?? "Local page" }
 
     var body: some View {
         HStack(spacing: 8) {
-            Image(systemName: pinned ? "pin.fill" : "doc.text")
-                .font(.system(size: 11))
-                .frame(width: 16)
-            VStack(alignment: .leading, spacing: 2) {
-                Text(title).fontWeight(.medium).lineLimit(1)
-                Text("\(pinned ? "Pinned" : included ? "Included" : "Excluded") · \(tab.address?.host()?.replacingOccurrences(of: "www.", with: "") ?? "Local page")")
-                    .font(.system(size: 10.5))
-                    .foregroundStyle(Palette.muted)
+            ZStack(alignment: .bottomTrailing) {
+                Mark(icon: tab.icon, letter: tab.monogram, size: 16)
+                    .opacity(included ? 1 : 0.45)
+                if pinned {
+                    Circle()
+                        .fill(Palette.accent)
+                        .frame(width: 6, height: 6)
+                        .overlay(Circle().strokeBorder(Palette.ground, lineWidth: 1))
+                        .offset(x: 2, y: 2)
+                }
+            }
+            .frame(width: 18, height: 18)
+
+            VStack(alignment: .leading, spacing: 1.5) {
+                Text(title)
+                    .font(.system(size: 12, weight: .medium))
+                    .foregroundStyle(included ? Palette.ink : Palette.muted)
                     .lineLimit(1)
+                HStack(spacing: 4) {
+                    Text(pinned ? "Pinned" : included ? "Included" : "Excluded")
+                        .foregroundStyle(pinned ? Palette.accent : Palette.muted)
+                    Text("·")
+                        .foregroundStyle(Palette.muted.opacity(0.6))
+                    Text(host)
+                        .foregroundStyle(Palette.muted)
+                }
+                .font(.system(size: 10.5))
+                .lineLimit(1)
             }
             .frame(maxWidth: .infinity, alignment: .leading)
-            Button {
-                agent.pin(pinned ? nil : tab)
-                if !pinned { agent.withPage = true }
-            } label: {
-                Image(systemName: pinned ? "pin.slash" : "pin")
-                    .frame(width: 24, height: 28)
-                    .contentShape(Rectangle())
+
+            HStack(spacing: 2) {
+                Button {
+                    withAnimation(Motion.snappy) {
+                        agent.pin(pinned ? nil : tab)
+                        if !pinned { agent.withPage = true }
+                    }
+                } label: {
+                    Image(systemName: pinned ? "pin.fill" : "pin")
+                        .font(.system(size: 10.5, weight: .medium))
+                        .foregroundStyle(pinned ? Palette.accent : (hoverPin ? Palette.ink : Palette.muted))
+                        .frame(width: 24, height: 24)
+                        .background(
+                            RoundedRectangle(cornerRadius: 6, style: .continuous)
+                                .fill(hoverPin ? Palette.hover : .clear)
+                        )
+                        .contentShape(Rectangle())
+                }
+                .buttonStyle(TactilePress())
+                .onHover { hoverPin = $0 }
+                .help(pinned ? "Unpin: follow the page in front" : "Pin this page to the conversation")
+                .accessibilityLabel(pinned ? "Unpin page context" : "Pin page context")
+
+                Button {
+                    withAnimation(Motion.snappy) {
+                        if pinned { agent.pin(nil) }
+                        agent.withPage = !included
+                    }
+                } label: {
+                    Image(systemName: included ? "xmark" : "plus")
+                        .font(.system(size: 10.5, weight: .medium))
+                        .foregroundStyle(hoverToggle ? Palette.ink : Palette.muted)
+                        .frame(width: 24, height: 24)
+                        .background(
+                            RoundedRectangle(cornerRadius: 6, style: .continuous)
+                                .fill(hoverToggle ? Palette.hover : .clear)
+                        )
+                        .contentShape(Rectangle())
+                }
+                .buttonStyle(TactilePress())
+                .onHover { hoverToggle = $0 }
+                .help(included ? "Exclude the page from your next message" : "Include this page with your next message")
+                .accessibilityLabel(included ? "Exclude page context" : "Include page context")
             }
-            .help(pinned ? "Unpin: follow the page in front" : "Pin this page to the conversation")
-            .accessibilityLabel(pinned ? "Unpin page context" : "Pin page context")
-            Button {
-                if pinned { agent.pin(nil) }
-                agent.withPage = !included
-            } label: {
-                Image(systemName: included ? "xmark" : "plus")
-                    .frame(width: 24, height: 28)
-                    .contentShape(Rectangle())
-            }
-            .help(included ? "Exclude the page from your next message" : "Include this page with your next message")
-            .accessibilityLabel(included ? "Exclude page context" : "Include page context")
         }
-        .buttonStyle(.plain)
-        .font(.system(size: 11.5))
-        .foregroundStyle(included ? Palette.ink : Palette.muted)
-        .padding(.vertical, 4)
+        .padding(.horizontal, 10)
+        .padding(.vertical, 6)
+        .background(
+            RoundedRectangle(cornerRadius: 11, style: .continuous)
+                .fill(Palette.ink.opacity(included ? 0.035 : 0.018))
+        )
+        .overlay(
+            RoundedRectangle(cornerRadius: 11, style: .continuous)
+                .strokeBorder(pinned ? Palette.accent.opacity(0.32) : Palette.hairline.opacity(included ? 0.9 : 0.5), lineWidth: 1)
+        )
+        .animation(Motion.snappy, value: included)
+        .animation(Motion.snappy, value: pinned)
         .help(title + "\n" + (tab.address?.absoluteString ?? ""))
     }
 }

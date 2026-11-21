@@ -50,8 +50,10 @@ final class AgentTools: ObservableObject {
     private static let largest = 900_000
     /// Pages kept at once. The oldest goes when another is wanted. Each is a
     /// WebKit process of its own, tens of MB; pages only read close as soon
-    /// as they are read, so these are the ones graff is acting on.
-    private static let most = 6
+    /// as they are read, so these are the ones graff/MCP is acting on.
+    private static let most = 4
+    nonisolated private static let idleSheetTTL: TimeInterval = 180
+    private var idleReaper: Timer?
 
     // MARK: - the server
 
@@ -62,13 +64,68 @@ final class AgentTools: ObservableObject {
         return announce()
     }
 
+    private var passkeysWired = false
+    /// Deduplicates auto-opening a focused tab for conditional passkeys per (sheet, rp).
+    private var passkeyFocused: Set<String> = []
+
     /// Only listening, not telling graff: for connected apps (Connect.swift),
     /// which find the server through a file of their own.
     func listening() async -> Bool {
+        wirePasskeys()
         if port != nil { return true }
         if listener == nil { listen() }
         strip()
         return await withCheckedContinuation { waiting.append($0) }
+    }
+
+    private func wirePasskeys() {
+        guard !passkeysWired else { return }
+        passkeysWired = true
+
+        Passkeys.shared.onFocusForCeremony = { [weak self] web, rp in
+            guard let self, let browser = self.browser else { return nil }
+            let isSheet = self.pages.contains { $0.web === web }
+            let tab = browser.tabs.first { $0.built === web }
+            let agentDriving = Connect.shared.driving != nil || browser.agent.phase == .working
+            guard isSheet || (tab != nil && (agentDriving || tab?.id == browser.activeID)) else { return nil }
+            if let tab, tab.id != browser.activeID {
+                browser.select(tab)
+            }
+            guard let window = Links.window ?? NSApp.mainWindow ?? NSApp.windows.first(where: { $0.contentView != nil && !($0 is NSPanel) && !$0.isExcludedFromWindowsMenu }) else {
+                return nil
+            }
+            NSApp.activate(ignoringOtherApps: true)
+            window.makeKeyAndOrderFront(nil)
+            browser.announce("Passkey requested for \(rp)")
+            return window
+        }
+
+        Passkeys.shared.onConditionalAvailable = { [weak self] web, rp, _ in
+            guard let self, let browser = self.browser, !Store.testing else { return }
+            if let sheet = self.pages.first(where: { $0.web === web }), let url = web.url {
+                let key = "\(sheet.id)|\(rp)"
+                guard self.passkeyFocused.insert(key).inserted else { return }
+                NSApp.activate(ignoringOtherApps: true)
+                if let window = Links.window ?? NSApp.mainWindow {
+                    window.makeKeyAndOrderFront(nil)
+                }
+                if let existing = browser.tabs.first(where: { $0.address == url }) {
+                    browser.select(existing)
+                } else {
+                    _ = browser.open(url, foreground: true, atEnd: true)
+                }
+                browser.announce("Passkey available for \(rp) — sign in here")
+                return
+            }
+            if Connect.shared.driving != nil, let tab = browser.tabs.first(where: { $0.built === web }) {
+                if tab.id != browser.activeID { browser.select(tab) }
+                NSApp.activate(ignoringOtherApps: true)
+                if let window = Links.window ?? NSApp.mainWindow {
+                    window.makeKeyAndOrderFront(nil)
+                }
+                browser.announce("Passkey available for \(rp)")
+            }
+        }
     }
 
     var listeningPort: UInt16? { port }
@@ -281,12 +338,16 @@ final class AgentTools: ObservableObject {
                     return json(403, ["error": "out_of_scope", "tool": name, "scope": scope?.rawValue ?? "none"], signed: nonce)
                 }
             }
-            connect.drove(caller, pages: pages.filter { $0.owner.hasPrefix(caller.id) }.count)
+            let toolName = (message["method"] as? String == "tools/call") ? (params["name"] as? String) : nil
+            let clientPages = pages.filter { $0.owner.hasPrefix(caller.id) }
+            let activeURL = clientPages.last?.web.url ?? browser?.active?.address
+            connect.drove(caller, pages: clientPages.count, action: toolName.map(AgentTools.actionLabel), url: activeURL)
             guard let reply = await rpc(message, owner: owner, caller: caller) else {
                 // A notification: nothing to say, and that is signed too.
                 return HTTPRequest.reply(202, Data(), headers: ["X-Signature": connect.sign(Data(), nonce: nonce)])
             }
-            connect.drove(caller, pages: pages.filter { $0.owner.hasPrefix(caller.id) }.count)
+            let afterPages = pages.filter { $0.owner.hasPrefix(caller.id) }
+            connect.drove(caller, pages: afterPages.count, action: nil, url: afterPages.last?.web.url ?? activeURL)
             if let result = reply["result"] as? [String: Any], let refusal = result[AgentTools.refusal] as? [String: Any] {
                 return json(403, refusal, signed: nonce)
             }
@@ -353,12 +414,14 @@ final class AgentTools: ObservableObject {
     can open it. For research, `search` first, then `read_pages` with every promising link at \
     once — it loads them in parallel — rather than one page at a time. Pages read that way \
     are closed once read; `open` one to keep it. `open` a page to act on \
-    it (click, type, submit, run_js, screenshot). For a task of several steps on a page — a \
-    search with its filters, a form, a date picker — `drive` it: give the whole goal and every \
-    value to type, and Jev does the steps quickly; then check the page. Without Jev, or for a \
-    plain form, `form_fields` then one `fill` with every field, then check what it says each \
-    holds. `tabs` lists the user's own tabs too; one \
-    of theirs can be read or acted on by its id. `show` puts a page in front of the user as a tab.
+    it (`snapshot`, `page_info`, `read_markdown`, `click`, `click_at`, `type`, `press_key`, \
+    `scroll`, `hover`, `wait_for`, `submit`, `run_js`, `screenshot`). Use `snapshot` to see \
+    interactive elements (buttons, links, tabs, inputs) with exact CSS selectors; password \
+    and card values are redacted. `screenshot` returns an image of the viewport, a `full_page`, \
+    a specific `selector`, or the whole `window` (`target: "window"`), and can also `save_to` \
+    a file path. `tabs` lists the user's own tabs too; pass a tab id or `page: "active"` to \
+    read or act on the tab in front. `open_tab` opens a visible tab directly in the browser, \
+    and `show` puts a page in front of the user as a tab.
     """
 
     private static func tool(_ name: String, _ description: String, _ properties: [String: [String: Any]] = [:], required: [String] = []) -> [String: Any] {
@@ -372,7 +435,7 @@ final class AgentTools: ObservableObject {
     private static let themeRoles: [String: Any] = Dictionary(uniqueKeysWithValues:
         ["ground", "ink", "muted", "faint", "hairline", "wash", "hover", "accent", "onAccent"].map { ($0, ["type": "string"] as [String: Any]) })
 
-    private static let page: [String: Any] = ["type": "string", "description": "A page's id: one of yours (p1, p2…) or a tab of the user's from `tabs`. Leave out for your latest page."]
+    private static let page: [String: Any] = ["type": "string", "description": "A page's id: one of yours (p1, p2…), a tab id from `tabs`, or \"active\" for the user's frontmost tab. Leave out for your latest page."]
 
     private static let tools: [[String: Any]] = [
         tool("search", "Search the web with the user's search engine. Returns the results' text and their links, ready for read_pages.", [
@@ -389,6 +452,13 @@ final class AgentTools: ObservableObject {
             "page": page,
             "limit": ["type": "integer", "description": "Most characters to return. 60000 unless asked."],
         ]),
+        tool("read_markdown", "Extract a page as clean structured Markdown (headings, paragraphs, lists, links, blockquotes and code blocks).", [
+            "page": page,
+            "limit": ["type": "integer", "description": "Most characters to return. 60000 unless asked."],
+        ]),
+        tool("page_info", "Fast page metadata: title, URL, loading state, viewport size, scroll position/height, and currently focused element.", [
+            "page": page,
+        ]),
         tool("links", "The links on a page: their words and where they go.", ["page": page]),
         tool("go", "Take a page to another address and wait for it to load.", [
             "url": ["type": "string", "description": "An address. Words that aren't one are searched for."],
@@ -401,6 +471,12 @@ final class AgentTools: ObservableObject {
             "selector": ["type": "string"],
             "page": page,
         ], required: ["selector"]),
+        tool("click_at", "Click at exact viewport coordinates (x, y) — useful for canvases, video scrubbers, maps, or custom controls without CSS selectors.", [
+            "x": ["type": "number", "description": "Horizontal viewport coordinate in CSS pixels."],
+            "y": ["type": "number", "description": "Vertical viewport coordinate in CSS pixels."],
+            "button": ["type": "string", "enum": ["left", "right", "middle"], "description": "Mouse button (default left)."],
+            "page": page,
+        ], required: ["x", "y"]),
         tool("type", "Type text into the field a CSS selector names, replacing what is there.", [
             "selector": ["type": "string"],
             "text": ["type": "string"],
@@ -443,8 +519,46 @@ final class AgentTools: ObservableObject {
             "script": ["type": "string", "description": "An expression, or a function called at once."],
             "page": page,
         ], required: ["script"]),
-        tool("screenshot", "A picture of a page as it looks.", ["page": page]),
+        tool("snapshot", "Structured map of visible interactive elements (buttons, links, tabs, inputs, dialogs, headings) with their role, accessible name, state/value (secrets redacted), and exact CSS selector for click/type/hover/screenshot.", [
+            "page": page,
+            "selector": ["type": "string", "description": "Optional root CSS selector to scope the snapshot (e.g. a dialog or nav)."],
+            "limit": ["type": "integer", "description": "Max elements to return. 150 unless asked."],
+        ]),
+        tool("scroll", "Scroll a page, a scrollable element, or bring a selector into view.", [
+            "direction": ["type": "string", "enum": ["down", "up", "left", "right", "top", "bottom"], "description": "Direction to scroll (default down unless selector is scrolled into view)."],
+            "amount": ["type": "integer", "description": "Pixels to scroll (default 600)."],
+            "selector": ["type": "string", "description": "Optional CSS selector to scroll into view (or scroll inside if direction is given)."],
+            "page": page,
+        ]),
+        tool("press_key", "Send a keyboard key press (Enter, Escape, Tab, ArrowDown, ArrowUp, Backspace, Space, etc.) to the focused element or a CSS selector.", [
+            "key": ["type": "string", "description": "Key name such as Enter, Escape, Tab, ArrowDown, ArrowUp, ArrowLeft, ArrowRight, Backspace, Space, or a single character."],
+            "selector": ["type": "string", "description": "Optional CSS selector to focus before pressing the key."],
+            "modifiers": ["type": "array", "items": ["type": "string", "enum": ["shift", "alt", "ctrl", "meta"]], "description": "Optional modifier keys."],
+            "page": page,
+        ], required: ["key"]),
+        tool("hover", "Hover over an element to reveal menus, tooltips or hover states.", [
+            "selector": ["type": "string", "description": "CSS selector of the element to hover."],
+            "page": page,
+        ], required: ["selector"]),
+        tool("wait_for", "Wait until a CSS selector or visible text appears (or disappears) on the page.", [
+            "selector": ["type": "string", "description": "CSS selector to wait for."],
+            "text": ["type": "string", "description": "Substring of visible page text to wait for."],
+            "state": ["type": "string", "enum": ["visible", "hidden"], "description": "Wait for visible (default) or hidden."],
+            "timeout": ["type": "number", "description": "Seconds to wait (default 10, max 30)."],
+            "page": page,
+        ]),
+        tool("screenshot", "Take a screenshot of a page (viewport, full page, or a specific CSS selector) or the whole browse window. Returns an inline image and optionally writes it to a file path.", [
+            "page": page,
+            "full_page": ["type": "boolean", "description": "Capture the full scrollable page height (up to 8000 px) instead of only the viewport."],
+            "selector": ["type": "string", "description": "Optional CSS selector to crop the screenshot to that element."],
+            "target": ["type": "string", "enum": ["page", "window"], "description": "\"page\" (default) captures the web page; \"window\" captures the entire browse window including tabs and sidebar."],
+            "save_to": ["type": "string", "description": "Optional absolute file path to also save the screenshot image (PNG if ending in .png, else JPEG)."],
+        ]),
         tool("tabs", "Your pages and the user's own tabs: id, title, address, and which tab they have in front."),
+        tool("open_tab", "Open a URL directly as a visible tab in the user's browser window.", [
+            "url": ["type": "string", "description": "An address or search query."],
+            "foreground": ["type": "boolean", "description": "Whether to bring the new tab to the front (default true)."],
+        ], required: ["url"]),
         tool("show", "Put a page in front of the user as a tab of theirs, or bring one of their tabs to the front.", ["page": page], required: ["page"]),
         tool("close", "Close one of your pages, or a tab of the user's.", ["page": page], required: ["page"]),
     ]
@@ -506,6 +620,29 @@ final class AgentTools: ObservableObject {
                 if let error { return AgentTools.failed(error) }
                 let body = AgentTools.cut(text as? String ?? "", arguments["limit"] as? Int ?? 60_000)
                 return AgentTools.text("\(target.title)\n\(target.address)\n\n\(body)")
+            }
+
+        case "read_markdown":
+            return await on(arguments, browser, owner, caller) { target in
+                let (value, error) = await target.run(AgentTools.markdownScript)
+                if let error { return AgentTools.failed(error) }
+                let body = AgentTools.cut(value as? String ?? "", arguments["limit"] as? Int ?? 60_000)
+                return AgentTools.text("# \(target.title)\n\n<\(target.address)>\n\n\(body)")
+            }
+
+        case "page_info":
+            return await on(arguments, browser, owner, caller) { target in
+                let (value, error) = await target.run(AgentTools.pageInfoScript)
+                if let error { return AgentTools.failed(error) }
+                var info = (value as? [String: Any]) ?? [:]
+                let offered = Passkeys.shared.offered(in: target.web)
+                info["page"] = target.id
+                info["title"] = target.title
+                info["url"] = target.address
+                info["loading"] = target.web.isLoading
+                info["passkeysAvailable"] = !offered.isEmpty
+                info["passkeyCount"] = offered.count
+                return AgentTools.said(info)
             }
 
         case "links":
@@ -573,6 +710,26 @@ final class AgentTools: ObservableObject {
                 return AgentTools.said(["page": target.id, "title": target.title, "url": target.address])
             }
 
+        case "click_at":
+            let x = (arguments["x"] as? Double) ?? (arguments["x"] as? Int).map(Double.init)
+            let y = (arguments["y"] as? Double) ?? (arguments["y"] as? Int).map(Double.init)
+            guard let x, let y else { return AgentTools.failed("click_at needs numeric x and y coordinates") }
+            let button = (arguments["button"] as? String ?? "left").lowercased()
+            return await on(arguments, browser, owner, caller) { target in
+                let (value, error) = await target.run(AgentTools.clickAtScript(x: x, y: y, button: button))
+                if let error { return AgentTools.failed(error) }
+                if let dict = value as? [String: Any], let err = dict["error"] as? String {
+                    return AgentTools.failed(err)
+                }
+                try? await Task.sleep(nanoseconds: 350_000_000)
+                await target.settled()
+                var out = (value as? [String: Any]) ?? [:]
+                out["page"] = target.id
+                out["title"] = target.title
+                out["url"] = target.address
+                return AgentTools.said(out)
+            }
+
         case "drive":
             guard browser.prefs.agentJev else {
                 return AgentTools.failed("drive is switched off in Settings › Agent. Use form_fields, fill and click.")
@@ -611,13 +768,113 @@ final class AgentTools: ObservableObject {
                 return AgentTools.said(plain)
             }
 
+        case "snapshot":
+            let root = arguments["selector"] as? String
+            let limit = min(max(arguments["limit"] as? Int ?? 150, 1), 400)
+            return await on(arguments, browser, owner, caller) { target in
+                let (value, error) = await target.run(AgentTools.snapshotScript(root: root, limit: limit))
+                if let error { return AgentTools.failed(error) }
+                return AgentTools.text("\(target.id) · \(target.title)\n\(target.address)\n\n" + (value as? String ?? ""))
+            }
+
+        case "scroll":
+            let direction = arguments["direction"] as? String
+            let amount = arguments["amount"] as? Int ?? 600
+            let selector = arguments["selector"] as? String
+            return await on(arguments, browser, owner, caller) { target in
+                let (value, error) = await target.run(AgentTools.scrollScript(direction: direction, amount: amount, selector: selector))
+                if let error { return AgentTools.failed(error) }
+                if let dict = value as? [String: Any] { return AgentTools.said(dict) }
+                return AgentTools.text(String(describing: value ?? "ok"))
+            }
+
+        case "press_key":
+            guard let key = arguments["key"] as? String, !key.isEmpty else { return AgentTools.failed("press_key needs a key") }
+            let selector = arguments["selector"] as? String
+            let modifiers = (arguments["modifiers"] as? [Any] ?? []).compactMap { $0 as? String }
+            return await on(arguments, browser, owner, caller) { target in
+                let (value, error) = await target.run(AgentTools.pressKeyScript(key: key, selector: selector, modifiers: modifiers))
+                if let error { return AgentTools.failed(error) }
+                guard value as? String == "ok" else { return AgentTools.failed(value as? String ?? "press_key failed") }
+                try? await Task.sleep(nanoseconds: 250_000_000)
+                await target.settled()
+                return AgentTools.said(["page": target.id, "key": key, "title": target.title, "url": target.address])
+            }
+
+        case "hover":
+            guard let selector = arguments["selector"] as? String, !selector.isEmpty else { return AgentTools.failed("hover needs a selector") }
+            return await on(arguments, browser, owner, caller) { target in
+                let (value, error) = await target.run(AgentTools.hoverScript(selector: selector))
+                if let error { return AgentTools.failed(error) }
+                guard value as? String == "ok" else { return AgentTools.failed(value as? String ?? "hover failed") }
+                try? await Task.sleep(nanoseconds: 200_000_000)
+                return AgentTools.said(["page": target.id, "hovered": selector])
+            }
+
+        case "wait_for":
+            let selector = arguments["selector"] as? String
+            let text = arguments["text"] as? String
+            guard selector != nil || text != nil else { return AgentTools.failed("wait_for needs selector or text") }
+            let state = (arguments["state"] as? String ?? "visible").lowercased()
+            let timeout = min(max((arguments["timeout"] as? Double) ?? (arguments["timeout"] as? Int).map(Double.init) ?? 10.0, 0.5), 30.0)
+            return await on(arguments, browser, owner, caller) { target in
+                let deadline = Date().addingTimeInterval(timeout)
+                let check = AgentTools.waitCheckScript(selector: selector, text: text)
+                while true {
+                    let (value, error) = await target.run(check)
+                    if let error { return AgentTools.failed(error) }
+                    let present = (value as? Bool) ?? ((value as? NSNumber)?.boolValue ?? false)
+                    if (state == "hidden" && !present) || (state != "hidden" && present) {
+                        return AgentTools.said(["matched": true, "state": state, "page": target.id, "url": target.address])
+                    }
+                    if Date() >= deadline {
+                        return AgentTools.failed("Timed out after \(Int(timeout))s waiting for \(selector ?? text ?? "condition") to be \(state)")
+                    }
+                    try? await Task.sleep(nanoseconds: 150_000_000)
+                }
+            }
+
         case "screenshot":
+            let targetKind = (arguments["target"] as? String ?? "page").lowercased()
+            let saveTo = (arguments["save_to"] as? String)?.trimmingCharacters(in: .whitespacesAndNewlines)
+            if targetKind == "window" {
+                if let refused = await refusedTabs(caller) { return refused }
+                guard let window = Links.window ?? NSApp.keyWindow ?? NSApp.windows.first(where: { $0.contentView != nil && !($0 is NSPanel) }),
+                      let (data, mime, rawPNG) = AgentTools.windowPicture(window)
+                else { return AgentTools.failed("No browse window available to capture") }
+                return AgentTools.imageReply(data: data, mime: mime, rawPNG: rawPNG, saveTo: saveTo)
+            }
+            let fullPage = arguments["full_page"] as? Bool ?? false
+            let selector = arguments["selector"] as? String
             return await on(arguments, browser, owner, caller) { target in
                 guard target.web.window != nil else {
                     return AgentTools.failed("That tab isn't drawn right now — `show` it first")
                 }
-                guard let jpeg = await AgentTools.picture(target.web) else { return AgentTools.failed("No picture") }
-                return ["content": [["type": "image", "data": jpeg.base64EncodedString(), "mimeType": "image/jpeg"]]]
+                if caller != nil { _ = await target.run(AgentTools.maskSecretsScript(mask: true)) }
+                defer {
+                    if caller != nil { Task { @MainActor in _ = await target.run(AgentTools.maskSecretsScript(mask: false)) } }
+                }
+                var cropRect: CGRect?
+                if let selector, !selector.isEmpty {
+                    let (rectVal, err) = await target.run(AgentTools.elementRectScript(selector: selector))
+                    if let err { return AgentTools.failed(err) }
+                    guard let dict = rectVal as? [String: Double],
+                          let x = dict["x"], let y = dict["y"], let w = dict["w"], let h = dict["h"],
+                          w > 0, h > 0
+                    else { return AgentTools.failed("Element not found or not visible: \(selector)") }
+                    cropRect = CGRect(x: x, y: y, width: w, height: h)
+                } else if fullPage {
+                    let (sizeVal, _) = await target.run("[document.documentElement.scrollWidth || window.innerWidth, Math.min(8000, Math.max(document.documentElement.scrollHeight, document.body ? document.body.scrollHeight : 0, window.innerHeight))]")
+                    if let dims = sizeVal as? [NSNumber], dims.count == 2 {
+                        let w = max(Double(target.web.bounds.width), dims[0].doubleValue)
+                        let h = max(Double(target.web.bounds.height), dims[1].doubleValue)
+                        cropRect = CGRect(x: 0, y: 0, width: w, height: h)
+                    }
+                }
+                guard let (data, mime, rawPNG) = await AgentTools.picture(target.web, rect: cropRect) else {
+                    return AgentTools.failed("No picture")
+                }
+                return AgentTools.imageReply(data: data, mime: mime, rawPNG: rawPNG, saveTo: saveTo)
             }
 
         case "tabs":
@@ -630,6 +887,13 @@ final class AgentTools: ObservableObject {
                 ]
             }
             return AgentTools.said(["your pages": pages.filter { $0.owner == owner }.map(describe), "the user's tabs": theirs])
+
+        case "open_tab":
+            guard let url = address(arguments["url"], browser) else { return AgentTools.failed("open_tab needs a url") }
+            if let refused = await refusedTabs(caller) { return refused }
+            let foreground = arguments["foreground"] as? Bool ?? true
+            let tab = browser.open(url, foreground: foreground, atEnd: true)
+            return AgentTools.said(["tab": AgentTools.short(tab), "url": url.absoluteString, "foreground": foreground])
 
         case "show":
             let ref = (arguments["page"] as? String ?? "").lowercased()
@@ -684,6 +948,77 @@ final class AgentTools: ObservableObject {
         }
     }
 
+    /// Open or focus the latest page a connected app is working on so the user
+    /// can watch live or step in (Follow button in ConnectPill).
+    func followClient(_ clientID: String, fallbackURL: URL?) {
+        guard let browser else { return }
+        let url = pages.last(where: { ($0.owner == clientID || $0.owner.hasPrefix(clientID + "/")) && $0.web.url != nil })?.web.url ?? fallbackURL
+        guard let url else { return }
+        if browser.agentFull { browser.agentFull = false }
+        if let existing = browser.tabs.first(where: { $0.address == url }) {
+            browser.select(existing)
+        } else {
+            _ = browser.open(url, foreground: true, atEnd: true)
+        }
+    }
+
+    /// Close every page opened by a connected app (Stop button in ConnectPill).
+    func stopClient(_ clientID: String) {
+        let closing = pages.filter { $0.owner == clientID || $0.owner.hasPrefix(clientID + "/") }
+        closing.forEach(close)
+        releaseRoomIfEmpty()
+    }
+
+    /// Reap idle offscreen agent/MCP WebKit pages so long-lived MCP sessions
+    /// don't hold hundreds of MB of background WebContent processes.
+    func reapIdlePages(olderThan age: TimeInterval = AgentTools.idleSheetTTL) {
+        let now = Date()
+        let stale = pages.filter { now.timeIntervalSince($0.lastUsed) >= age }
+        stale.forEach(close)
+        releaseRoomIfEmpty()
+    }
+
+    private func releaseRoomIfEmpty() {
+        if pages.isEmpty {
+            idleReaper?.invalidate()
+            idleReaper = nil
+            room?.close()
+            room = nil
+        }
+    }
+
+    private func ensureReaper() {
+        guard idleReaper == nil else { return }
+        let timer = Timer(timeInterval: 60, repeats: true) { [weak self] _ in
+            MainActor.assumeIsolated { self?.reapIdlePages() }
+        }
+        timer.tolerance = 15
+        RunLoop.main.add(timer, forMode: .common)
+        idleReaper = timer
+    }
+
+    /// Human-readable status for the live driving pill.
+    private static func actionLabel(_ tool: String) -> String {
+        switch tool {
+        case "screenshot": return "Taking screenshot…"
+        case "snapshot": return "Reading page elements…"
+        case "page_info": return "Inspecting page…"
+        case "search": return "Searching…"
+        case "read_pages", "read", "read_markdown": return "Reading page…"
+        case "open", "go": return "Loading page…"
+        case "open_tab": return "Opening tab…"
+        case "click", "click_at", "submit": return "Clicking…"
+        case "fill", "type": return "Filling form…"
+        case "press_key": return "Pressing key…"
+        case "scroll": return "Scrolling…"
+        case "hover": return "Hovering…"
+        case "wait_for": return "Waiting for page…"
+        case "drive": return "Driving page…"
+        case "run_js": return "Running script…"
+        default: return "Working…"
+        }
+    }
+
     /// A page put away once it has been read, or when asked.
     private func close(_ sheet: Sheet) {
         pages.removeAll { $0 === sheet }
@@ -697,6 +1032,7 @@ final class AgentTools: ObservableObject {
         let window = room ?? makeRoom()
         let sheet = Sheet(id: "p\(made)", owner: owner, in: window, reading: reading, bare: reading ? bare : nil)
         pages.append(sheet)
+        if !reading { ensureReaper() }
         sheet.onChange = { [weak self] in self?.publishPages() }
         publishPages()
         while pages.filter({ $0.owner == owner }).count > AgentTools.most, let oldest = pages.first(where: { $0.owner == owner }) {
@@ -758,18 +1094,23 @@ final class AgentTools: ObservableObject {
     private func on(_ arguments: [String: Any], _ browser: Browser, _ owner: String, _ caller: Connect.Caller?, _ act: (Target) async -> [String: Any]) async -> [String: Any] {
         let ref = (arguments["page"] as? String ?? "").lowercased()
         let mine = pages.filter { $0.owner == owner }
+        if ref == "active" {
+            guard let active = browser.active else { return AgentTools.failed("No active tab") }
+            if let refused = await refusedTabs(caller) { return refused }
+            return await act(TabTarget(tab: active))
+        }
         // Codegraff pinned to a tab (Agent.pinned): named by neither, it's
         // that tab — graff's own, never a connected app's.
         if ref.isEmpty, caller == nil, let pinned = browser.agent.pinned, browser.tabs.contains(where: { $0 === pinned }) {
             return await act(TabTarget(tab: pinned))
         }
-        if ref.isEmpty, let latest = mine.last { return await act(latest) }
-        if let sheet = mine.first(where: { $0.id == ref }) { return await act(sheet) }
+        if ref.isEmpty, let latest = mine.last { latest.lastUsed = Date(); return await act(latest) }
+        if let sheet = mine.first(where: { $0.id == ref }) { sheet.lastUsed = Date(); return await act(sheet) }
         if let tab = tab(ref, browser) {
             if let refused = await refusedTabs(caller) { return refused }
             return await act(TabTarget(tab: tab))
         }
-        return AgentTools.failed(ref.isEmpty ? "No page open yet — `open` one" : "No page or tab “\(ref)” — see `tabs`")
+        return AgentTools.failed(ref.isEmpty ? "No page open yet — `open` one, or pass `page: \"active\"` for the user's frontmost tab" : "No page or tab “\(ref)” — see `tabs`")
     }
 
     /// Nil when the user's tabs are this caller's to use; otherwise the
@@ -1047,21 +1388,384 @@ final class AgentTools: ObservableObject {
     }
 
     /// What a page shows, as a JPEG small enough to go back in one answer.
-    private static func picture(_ web: WKWebView) async -> Data? {
+    private static func jsonLiteral(_ value: Any) -> String {
+        guard let data = try? JSONSerialization.data(withJSONObject: [value], options: [.withoutEscapingSlashes]),
+              let text = String(data: data, encoding: .utf8)
+        else { return "null" }
+        return String(text.dropFirst().dropLast())
+    }
+
+    private static func snapshotScript(root: String?, limit: Int) -> String {
+        let rootJS = root.map { jsonLiteral($0) } ?? "null"
+        return """
+        (function () {
+          \(formKit)
+          var rootSel = \(rootJS);
+          var root = rootSel ? document.querySelector(rootSel) : document.body;
+          if (!root) return 'Root element not found: ' + rootSel;
+          var sel = 'a[href],button,input:not([type=hidden]),select,textarea,summary,[contenteditable],[role],h1,h2,h3,h4';
+          function isSecret(el) {
+            if (el.tagName !== 'INPUT' && el.tagName !== 'TEXTAREA') return false;
+            var ac = (el.getAttribute('autocomplete') || '').toLowerCase();
+            var hint = [el.name, el.id, el.getAttribute('aria-label'), el.placeholder, label(el)].join(' ');
+            return (el.type || '').toLowerCase() === 'password'
+              || /(^|\\s)(cc-|one-time-code|current-password|new-password)/.test(ac)
+              || /pass|pwd|otp|2fa|totp|cvc|cvv|card.?num|cc.?num/i.test(hint);
+          }
+          function roleOf(el) {
+            var r = (el.getAttribute('role') || '').trim().split(/\\s+/)[0];
+            if (r && r !== 'none' && r !== 'presentation') return r;
+            var t = el.tagName.toLowerCase();
+            if (t === 'a') return 'link';
+            if (t === 'button' || t === 'summary') return 'button';
+            if (t === 'select') return 'combobox';
+            if (t === 'textarea') return 'textbox';
+            if (/^h[1-4]$/.test(t)) return 'heading';
+            if (t === 'input') {
+              var k = (el.type || 'text').toLowerCase();
+              return { checkbox: 'checkbox', radio: 'radio', range: 'slider', search: 'searchbox',
+                submit: 'button', button: 'button', reset: 'button' }[k] || 'textbox';
+            }
+            return el.isContentEditable ? 'textbox' : 'generic';
+          }
+          function shown(el) {
+            var s = getComputedStyle(el);
+            if (s.display === 'none' || s.visibility === 'hidden' || parseFloat(s.opacity) === 0) return false;
+            var r = el.getBoundingClientRect();
+            return r.width > 0 && r.height > 0;
+          }
+          var out = [], seen = new Set(), nodes = root.querySelectorAll(sel);
+          for (var i = 0; i < nodes.length && out.length < \(limit); i++) {
+            var el = nodes[i];
+            if (!shown(el)) continue;
+            var r = roleOf(el);
+            if (r === 'generic') continue;
+            var nm = clean(el.getAttribute('aria-label') || label(el) || el.innerText || el.value || el.title || '');
+            if (!nm && (r === 'link' || r === 'button' || r === 'heading')) continue;
+            var css = selector(el);
+            if (seen.has(css)) continue;
+            seen.add(css);
+            var parts = ['[' + r + ']'];
+            if (nm) parts.push('"' + nm.slice(0, 90) + '"');
+            if (el.tagName === 'INPUT' || el.tagName === 'TEXTAREA' || el.tagName === 'SELECT') {
+              if (el.type === 'checkbox' || el.type === 'radio') {
+                parts.push(el.checked ? '(checked)' : '(unchecked)');
+              } else if (isSecret(el)) {
+                parts.push('(value: [secret])');
+              } else if (el.value) {
+                parts.push('(value: "' + clean(el.value).slice(0, 60) + '")');
+              }
+            }
+            if (el.disabled) parts.push('(disabled)');
+            if (el.getAttribute('aria-expanded') === 'true') parts.push('(expanded)');
+            if (el.getAttribute('aria-selected') === 'true') parts.push('(selected)');
+            if (el.tagName === 'A' && el.href) parts.push('<' + el.href.slice(0, 100) + '>');
+            parts.push('-> ' + css);
+            out.push(parts.join(' '));
+          }
+          return out.length ? out.join('\\n') : 'No visible interactive elements found.';
+        })()
+        """
+    }
+
+    private static func scrollScript(direction: String?, amount: Int, selector: String?) -> String {
+        let dirJS = direction.map { jsonLiteral($0.lowercased()) } ?? "null"
+        let selJS = selector.map { jsonLiteral($0) } ?? "null"
+        return """
+        (function () {
+          var dir = \(dirJS), amt = \(amount), sel = \(selJS);
+          var el = sel ? document.querySelector(sel) : null;
+          if (sel && !el) return { error: 'Element not found: ' + sel };
+          if (el && !dir) {
+            el.scrollIntoView({ behavior: 'instant', block: 'center', inline: 'center' });
+            var r = el.getBoundingClientRect();
+            return { scrolledIntoView: sel, x: Math.round(r.left), y: Math.round(r.top) };
+          }
+          dir = dir || 'down';
+          var target = el || window;
+          if (el) {
+            if (dir === 'top') el.scrollTop = 0;
+            else if (dir === 'bottom') el.scrollTop = el.scrollHeight;
+            else if (dir === 'down') el.scrollBy(0, amt);
+            else if (dir === 'up') el.scrollBy(0, -amt);
+            else if (dir === 'right') el.scrollBy(amt, 0);
+            else if (dir === 'left') el.scrollBy(-amt, 0);
+            return { scrollY: Math.round(el.scrollTop), scrollHeight: Math.round(el.scrollHeight), viewportHeight: Math.round(el.clientHeight) };
+          }
+          if (dir === 'top') target.scrollTo(0, 0);
+          else if (dir === 'bottom') target.scrollTo(0, document.documentElement.scrollHeight);
+          else if (dir === 'down') target.scrollBy(0, amt);
+          else if (dir === 'up') target.scrollBy(0, -amt);
+          else if (dir === 'right') target.scrollBy(amt, 0);
+          else if (dir === 'left') target.scrollBy(-amt, 0);
+          return { scrollY: Math.round(window.scrollY), scrollHeight: Math.round(document.documentElement.scrollHeight), viewportHeight: Math.round(window.innerHeight) };
+        })()
+        """
+    }
+
+    private static func pressKeyScript(key: String, selector: String?, modifiers: [String]) -> String {
+        let keyJS = jsonLiteral(key)
+        let selJS = selector.map { jsonLiteral($0) } ?? "null"
+        let modsJS = jsonLiteral(modifiers.map { $0.lowercased() })
+        return """
+        (function () {
+          var k = \(keyJS), sel = \(selJS), mods = \(modsJS);
+          var el = sel ? document.querySelector(sel) : (document.activeElement || document.body);
+          if (sel && !el) return 'Element not found: ' + sel;
+          if (sel && el.focus) el.focus();
+          if (k === 'Space') k = ' ';
+          var opts = {
+            key: k, code: k === ' ' ? 'Space' : k, bubbles: true, cancelable: true,
+            shiftKey: mods.indexOf('shift') >= 0, altKey: mods.indexOf('alt') >= 0,
+            ctrlKey: mods.indexOf('ctrl') >= 0, metaKey: mods.indexOf('meta') >= 0
+          };
+          var downOk = el.dispatchEvent(new KeyboardEvent('keydown', opts));
+          el.dispatchEvent(new KeyboardEvent('keypress', opts));
+          if (downOk && k === 'Enter') {
+            if (el.tagName === 'BUTTON' || el.tagName === 'A' || el.getAttribute('role') === 'button') el.click();
+            else if (el.form) { if (el.form.requestSubmit) el.form.requestSubmit(); else el.form.submit(); }
+          }
+          el.dispatchEvent(new KeyboardEvent('keyup', opts));
+          return 'ok';
+        })()
+        """
+    }
+
+    private static func hoverScript(selector: String) -> String {
+        let selJS = jsonLiteral(selector)
+        return """
+        (function () {
+          var el = document.querySelector(\(selJS));
+          if (!el) return 'Element not found: ' + \(selJS);
+          el.scrollIntoView({ behavior: 'instant', block: 'center', inline: 'center' });
+          var r = el.getBoundingClientRect();
+          var opts = { bubbles: true, cancelable: true, clientX: r.left + r.width / 2, clientY: r.top + r.height / 2 };
+          el.dispatchEvent(new PointerEvent('pointerover', opts));
+          el.dispatchEvent(new PointerEvent('pointerenter', Object.assign({}, opts, { bubbles: false })));
+          el.dispatchEvent(new MouseEvent('mouseover', opts));
+          el.dispatchEvent(new MouseEvent('mouseenter', Object.assign({}, opts, { bubbles: false })));
+          el.dispatchEvent(new MouseEvent('mousemove', opts));
+          return 'ok';
+        })()
+        """
+    }
+
+    private static func clickAtScript(x: Double, y: Double, button: String) -> String {
+        let btnCode = button == "right" ? 2 : (button == "middle" ? 1 : 0)
+        return """
+        (function () {
+          var x = \(x), y = \(y), btn = \(btnCode);
+          var el = document.elementFromPoint(x, y);
+          if (!el) return { error: 'No element at (' + x + ', ' + y + ')' };
+          var opts = { bubbles: true, cancelable: true, clientX: x, clientY: y, button: btn, buttons: btn === 2 ? 2 : (btn === 1 ? 4 : 1) };
+          el.dispatchEvent(new PointerEvent('pointerdown', opts));
+          el.dispatchEvent(new MouseEvent('mousedown', opts));
+          if (el.focus) try { el.focus(); } catch (e) {}
+          el.dispatchEvent(new PointerEvent('pointerup', opts));
+          el.dispatchEvent(new MouseEvent('mouseup', opts));
+          if (btn === 2) {
+            el.dispatchEvent(new MouseEvent('contextmenu', opts));
+          } else {
+            el.dispatchEvent(new MouseEvent('click', opts));
+          }
+          return {
+            clicked: el.tagName.toLowerCase(),
+            id: el.id || '',
+            text: (el.innerText || el.getAttribute('aria-label') || '').trim().slice(0, 80),
+            x: x, y: y
+          };
+        })()
+        """
+    }
+
+    private static let pageInfoScript = """
+    (function () {
+      var doc = document.documentElement, body = document.body;
+      var active = document.activeElement;
+      return {
+        scrollX: Math.round(window.scrollX),
+        scrollY: Math.round(window.scrollY),
+        scrollWidth: Math.round(Math.max(doc ? doc.scrollWidth : 0, body ? body.scrollWidth : 0)),
+        scrollHeight: Math.round(Math.max(doc ? doc.scrollHeight : 0, body ? body.scrollHeight : 0)),
+        viewportWidth: Math.round(window.innerWidth),
+        viewportHeight: Math.round(window.innerHeight),
+        readyState: document.readyState,
+        activeElement: active ? {
+          tag: active.tagName.toLowerCase(),
+          id: active.id || '',
+          role: active.getAttribute('role') || ''
+        } : null
+      };
+    })()
+    """
+
+    private static let markdownScript = """
+    (function () {
+      var root = document.querySelector('main, article, [role="main"]') || document.body;
+      if (!root) return '';
+      var skip = { SCRIPT: 1, STYLE: 1, NOSCRIPT: 1, SVG: 1, TEMPLATE: 1, IFRAME: 1 };
+      function clean(s) { return (s || '').replace(/\\s+/g, ' ').trim(); }
+      function walk(node, depth) {
+        if (!node) return '';
+        if (node.nodeType === 3) return node.nodeValue.replace(/\\s+/g, ' ');
+        if (node.nodeType !== 1 || skip[node.tagName]) return '';
+        var s = getComputedStyle(node);
+        if (s.display === 'none' || s.visibility === 'hidden') return '';
+        var tag = node.tagName;
+        if (tag === 'PRE') {
+          var code = (node.innerText || '').trim();
+          return code ? '\\n\\n```\\n' + code + '\\n```\\n\\n' : '';
+        }
+        if (tag === 'CODE' && node.parentElement && node.parentElement.tagName !== 'PRE') {
+          var c = clean(node.textContent);
+          return c ? '`' + c + '`' : '';
+        }
+        if (tag === 'A') {
+          var txt = clean(node.innerText);
+          var href = node.href || '';
+          return txt && href && !href.startsWith('javascript:') ? '[' + txt + '](' + href + ')' : txt;
+        }
+        var kids = '';
+        for (var i = 0; i < node.childNodes.length; i++) kids += walk(node.childNodes[i], depth + (tag === 'UL' || tag === 'OL' ? 1 : 0));
+        if (/^H[1-6]$/.test(tag)) {
+          var h = clean(kids);
+          return h ? '\\n\\n' + '#'.repeat(parseInt(tag[1], 10)) + ' ' + h + '\\n\\n' : '';
+        }
+        if (tag === 'LI') {
+          var li = clean(kids);
+          return li ? '\\n' + '  '.repeat(Math.max(0, depth - 1)) + '- ' + li : '';
+        }
+        if (tag === 'BLOCKQUOTE') {
+          var bq = clean(kids);
+          return bq ? '\\n\\n> ' + bq + '\\n\\n' : '';
+        }
+        if (tag === 'P' || tag === 'DIV' || tag === 'SECTION' || tag === 'ARTICLE' || tag === 'TR') {
+          var block = kids.trim();
+          return block ? '\\n\\n' + block + '\\n\\n' : '';
+        }
+        if (tag === 'BR') return '\\n';
+        return kids;
+      }
+      return walk(root, 0).replace(/\\n{3,}/g, '\\n\\n').trim();
+    })()
+    """
+
+    private static func waitCheckScript(selector: String?, text: String?) -> String {
+        let selJS = selector.map { jsonLiteral($0) } ?? "null"
+        let textJS = text.map { jsonLiteral($0) } ?? "null"
+        return """
+        (function () {
+          var sel = \(selJS), txt = \(textJS);
+          if (sel) {
+            var el = document.querySelector(sel);
+            if (!el) return false;
+            var s = getComputedStyle(el), r = el.getBoundingClientRect();
+            if (s.display === 'none' || s.visibility === 'hidden' || r.width === 0 || r.height === 0) return false;
+            if (txt) return (el.innerText || el.textContent || '').indexOf(txt) >= 0;
+            return true;
+          }
+          return txt ? ((document.body && document.body.innerText) || '').indexOf(txt) >= 0 : false;
+        })()
+        """
+    }
+
+    private static func elementRectScript(selector: String) -> String {
+        let selJS = jsonLiteral(selector)
+        return """
+        (function () {
+          var el = document.querySelector(\(selJS));
+          if (!el) return null;
+          el.scrollIntoView({ behavior: 'instant', block: 'center', inline: 'center' });
+          var r = el.getBoundingClientRect();
+          if (r.width <= 0 || r.height <= 0) return null;
+          return { x: Math.max(0, r.left), y: Math.max(0, r.top), w: r.width, h: r.height };
+        })()
+        """
+    }
+
+    private static func maskSecretsScript(mask: Bool) -> String {
+        mask ? """
+        (function () {
+          var all = document.querySelectorAll('input, textarea');
+          for (var i = 0; i < all.length; i++) {
+            var el = all[i], ac = (el.getAttribute('autocomplete') || '').toLowerCase();
+            var hint = [el.name, el.id, el.getAttribute('aria-label'), el.placeholder].join(' ');
+            var secret = (el.type || '').toLowerCase() === 'password'
+              || /(^|\\s)(cc-|one-time-code|current-password|new-password)/.test(ac)
+              || /pass|pwd|otp|2fa|totp|cvc|cvv|card.?num|cc.?num/i.test(hint);
+            if (secret) {
+              el.dataset.__browseMask = el.style.filter || '';
+              el.style.filter = 'brightness(0)';
+            }
+          }
+        })()
+        """ : """
+        (function () {
+          document.querySelectorAll('[data-__browse-mask]').forEach(function (el) {
+            el.style.filter = el.dataset.__browseMask || '';
+            delete el.dataset.__browseMask;
+          });
+        })()
+        """
+    }
+
+    private static func picture(_ web: WKWebView, rect: CGRect? = nil) async -> (Data, String, Data?)? {
         let shot = WKSnapshotConfiguration()
         shot.afterScreenUpdates = true
-        shot.snapshotWidth = NSNumber(value: min(1280, web.bounds.width))
+        if let rect {
+            shot.rect = rect
+            shot.snapshotWidth = NSNumber(value: min(1440, max(1, rect.width)))
+        } else {
+            shot.snapshotWidth = NSNumber(value: min(1280, max(1, web.bounds.width)))
+        }
         let image: NSImage? = await withCheckedContinuation { done in
             web.takeSnapshot(with: shot) { image, _ in done.resume(returning: image) }
         }
+        return encodeImage(image)
+    }
+
+    private static func windowPicture(_ window: NSWindow) -> (Data, String, Data?)? {
+        guard let view = window.contentView else { return nil }
+        let bounds = view.bounds
+        guard bounds.width > 0, bounds.height > 0,
+              let rep = view.bitmapImageRepForCachingDisplay(in: bounds)
+        else { return nil }
+        view.cacheDisplay(in: bounds, to: rep)
+        let image = NSImage(size: bounds.size)
+        image.addRepresentation(rep)
+        return encodeImage(image)
+    }
+
+    private static func encodeImage(_ image: NSImage?) -> (Data, String, Data?)? {
         guard let tiff = image?.tiffRepresentation, let bitmap = NSBitmapImageRep(data: tiff) else { return nil }
-        for quality in [0.7, 0.5, 0.3] {
+        let png = bitmap.representation(using: .png, properties: [:])
+        for quality in [0.78, 0.58, 0.38] {
             if let jpeg = bitmap.representation(using: .jpeg, properties: [.compressionFactor: quality]),
                jpeg.count * 4 / 3 < largest {
-                return jpeg
+                return (jpeg, "image/jpeg", png)
             }
         }
+        if let png, png.count * 4 / 3 < largest { return (png, "image/png", png) }
         return nil
+    }
+
+    private static func imageReply(data: Data, mime: String, rawPNG: Data?, saveTo: String?) -> [String: Any] {
+        var content: [[String: Any]] = [
+            ["type": "image", "data": data.base64EncodedString(), "mimeType": mime],
+        ]
+        if let saveTo, !saveTo.isEmpty {
+            let expanded = (saveTo as NSString).expandingTildeInPath
+            let url = URL(fileURLWithPath: expanded)
+            let bytes = expanded.lowercased().hasSuffix(".png") ? (rawPNG ?? data) : data
+            do {
+                try FileManager.default.createDirectory(at: url.deletingLastPathComponent(), withIntermediateDirectories: true)
+                try bytes.write(to: url, options: .atomic)
+                content.append(["type": "text", "text": "Saved screenshot to \(url.path) (\(bytes.count) bytes)"])
+            } catch {
+                content.append(["type": "text", "text": "Returned image, but could not save to \(url.path): \(error.localizedDescription)"])
+            }
+        }
+        return ["content": content]
     }
 
     private static func cut(_ text: String, _ limit: Int) -> String {
@@ -1142,8 +1846,10 @@ private final class Sheet: Target {
     let owner: String
     let web: WKWebView
     let reading: Bool
+    var lastUsed = Date()
     var onChange: (() -> Void)?
     private var observations: [NSKeyValueObservation] = []
+    private let passkeyRelay = PasskeyRelay()
 
     init(id: String, owner: String, in room: NSWindow, reading: Bool, bare: WKContentRuleList?) {
         self.id = id
@@ -1158,6 +1864,15 @@ private final class Sheet: Target {
         // The ad blocker, as a tab has it: a page still fetching its ads and
         // trackers is a page settled() is still waiting on.
         Shield.shared.protect(config.userContentController)
+        if !reading {
+            config.userContentController.addScriptMessageHandler(passkeyRelay, contentWorld: Web.world, name: PasskeyRelay.name)
+            config.userContentController.addUserScript(
+                WKUserScript(source: PasskeyRelay.page, injectionTime: .atDocumentStart, forMainFrameOnly: false, in: .page)
+            )
+            config.userContentController.addUserScript(
+                WKUserScript(source: PasskeyRelay.bridge, injectionTime: .atDocumentStart, forMainFrameOnly: false, in: Web.world)
+            )
+        }
         if let bare { config.userContentController.add(bare) }
         web = WKWebView(frame: room.contentView?.bounds ?? NSRect(x: 0, y: 0, width: 1280, height: 900), configuration: config)
         web.autoresizingMask = [.width, .height]
@@ -1175,14 +1890,17 @@ private final class Sheet: Target {
     /// On or off for where it is going: off for a site it is paused on, and
     /// off everywhere once it is switched off in Settings.
     func go(_ url: URL) {
+        Passkeys.shared.forget(web)
         Shield.shared.tune(web.configuration.userContentController, for: url.host())
         web.load(URLRequest(url: url))
     }
 
     func drop() {
+        Passkeys.shared.forget(web)
         onChange = nil
         observations.forEach { $0.invalidate() }
         observations = []
+        web.configuration.userContentController.removeScriptMessageHandler(forName: PasskeyRelay.name, contentWorld: Web.world)
         web.stopLoading()
         web.removeFromSuperview()
     }

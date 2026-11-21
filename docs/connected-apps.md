@@ -80,17 +80,45 @@ one, calls share the app's own pool. `POST /session/close`
 
 | Scope | Tools | Default |
 | --- | --- | --- |
-| `read` | `search`, `read_pages`, `tabs` (titles and addresses), `read` and `links` on the app's own pages | on |
-| `act-own-pages` | `open`, `go`, `back`, `forward`, `reload`, `form_fields`, `fill`, `click`, `type`, `submit`, `drive`, `screenshot`, `close`, `show`, on pages opened for the app | on |
-| `act-user-tabs` | the same, and `read`/`links`, in the user's own tabs; browse asks the user once each time it opens | off |
+| `read` | `search`, `read_pages`, `tabs` (titles and addresses), `read`, `read_markdown`, `page_info`, `links`, `snapshot` on the app's own pages | on |
+| `act-own-pages` | `open`, `open_tab` (requires `act-user-tabs`), `go`, `back`, `forward`, `reload`, `form_fields`, `fill`, `click`, `click_at`, `type`, `submit`, `drive`, `screenshot`, `scroll`, `press_key`, `hover`, `wait_for`, `close`, `show`, on pages opened for the app | on |
+| `act-user-tabs` | the same, plus `open_tab` and `read`/`read_markdown`/`page_info`/`links`/`snapshot`, in the user's own tabs; browse asks the user once each time it opens | off |
 | `run-js` | `run_js` in the app's own pages (and the user's tabs with `act-user-tabs`) | off |
 
 `tools/list` shows only what the app may use. A call outside its scopes, or
 to a tool no app may use (`theme`), is refused with
 `403 {"error": "out_of_scope", "tool", "scope"}`; the user saying no to their
 tabs, with `403 {"error": "declined"}`. For every app, browse never types
-into a password field, and `drive` stops before paying, sending, posting,
-booking, deleting or signing up.
+into a password field, redacts secret fields in `snapshot` and `screenshot`,
+and `drive` stops before paying, sending, posting, booking, deleting or
+signing up.
+
+## Stdio MCP bridge (`browse-mcp`)
+
+For coding agents that speak MCP over stdio (Antigravity, Claude Code, Codex,
+Cursor, etc.), `browse.app/Contents/MacOS/browse-mcp` is built on
+`modelcontextprotocol/swift-sdk`, speaks `v1-p256-sig` automatically, publishes
+MCP `Tool.Annotations`, and exposes MCP resources (`browse://tabs`,
+`browse://active`):
+
+1. Turn on **Settings › Agent › Connected apps** in `browse` and click
+   **Copy JSON**, **Claude Code**, or **Codex**.
+2. Add it to your MCP client:
+
+```json
+{
+  "mcpServers": {
+    "browse": {
+      "command": "/Applications/browse.app/Contents/MacOS/browse-mcp",
+      "args": ["--name", "Antigravity"]
+    }
+  }
+}
+```
+
+On the first tool call, `browse-mcp` pairs once with a 6-digit confirmation in
+`browse`'s window (enable **Read and act in your tabs** there if you want the
+agent to inspect or screenshot your open tabs with `page: "active"`).
 
 ## Visibility and revocation
 

@@ -182,8 +182,52 @@ enum Motion {
         reduced ? nil : .spring(response: 0.30, dampingFraction: 0.86)
     }
 
+    static var snappy: Animation? {
+        reduced ? nil : .spring(response: 0.24, dampingFraction: 0.84)
+    }
+
+    static var gentle: Animation? {
+        reduced ? nil : .spring(response: 0.42, dampingFraction: 0.88)
+    }
+
     static var quick: Animation? {
         reduced ? nil : .easeOut(duration: 0.14)
+    }
+}
+
+/// Live breathing status dot for active agent runs and connected MCP sessions.
+/// Renders static under macOS Reduce Motion.
+struct PulseDot: View {
+    var color: Color = Palette.accent
+    var size: CGFloat = 6
+    var active: Bool = true
+    @State private var breathing = false
+
+    var body: some View {
+        ZStack {
+            if active && !Motion.reduced {
+                Circle()
+                    .fill(color.opacity(breathing ? 0.0 : 0.42))
+                    .frame(width: size * (breathing ? 2.4 : 1.15), height: size * (breathing ? 2.4 : 1.15))
+                    .animation(.easeOut(duration: 1.35).repeatForever(autoreverses: false), value: breathing)
+            }
+            Circle()
+                .fill(color)
+                .frame(width: size, height: size)
+        }
+        .frame(width: size * 2.4, height: size * 2.4)
+        .onAppear { if active { breathing = true } }
+        .onChange(of: active) { _, on in breathing = on }
+    }
+}
+
+/// Subtle spring press feedback for interactive pills and buttons.
+struct TactilePress: ButtonStyle {
+    func makeBody(configuration: Configuration) -> some View {
+        configuration.label
+            .scaleEffect(!Motion.reduced && configuration.isPressed ? 0.96 : 1)
+            .opacity(configuration.isPressed ? 0.84 : 1)
+            .animation(Motion.snappy, value: configuration.isPressed)
     }
 }
 
@@ -320,5 +364,30 @@ struct SideGlass: NSViewRepresentable {
 
     func updateNSView(_ view: NSVisualEffectView, context: Context) {
         view.appearance = dark.map { NSAppearance(named: $0 ? .darkAqua : .aqua) } ?? nil
+    }
+}
+
+/// A crisp, high-contrast keyboard keycap badge — legible in light mode, dark
+/// mode, and over page-tinted sidebars alike.
+struct ShortcutBadge: View {
+    let keys: String
+    var active: Bool = false
+
+    var body: some View {
+        Text(keys)
+            .font(.system(size: 10.5, weight: .semibold, design: .rounded))
+            .foregroundStyle(active ? Palette.ink : Palette.ink.opacity(0.84))
+            .padding(.horizontal, 5.5)
+            .padding(.vertical, 2)
+            .frame(minWidth: 20, minHeight: 19)
+            .background(
+                Palette.ink.opacity(active ? 0.13 : 0.085),
+                in: RoundedRectangle(cornerRadius: 5, style: .continuous)
+            )
+            .overlay(
+                RoundedRectangle(cornerRadius: 5, style: .continuous)
+                    .strokeBorder(Palette.ink.opacity(active ? 0.26 : 0.18), lineWidth: 0.75)
+            )
+            .fixedSize()
     }
 }

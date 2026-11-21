@@ -141,6 +141,17 @@ final class Passkeys: NSObject {
     /// Said when what a page is offered changes, with its view.
     static let offeredChanged = Notification.Name("search.passkeys.offered")
 
+    /// Called when an explicit passkey ceremony arrives from an unfocused tab
+    /// or offscreen agent page (`AgentTools.Sheet`). Returning a visible
+    /// window brings browse + the tab into focus and anchors the Touch ID sheet
+    /// there instead of refusing with "The document is not focused."
+    var onFocusForCeremony: ((WKWebView, String) -> NSWindow?)?
+
+    /// Called when macOS reports matching saved passkeys for a page waiting on
+    /// conditional mediation (`mediation: "conditional"`), so an agent page or
+    /// background tab driven by an agent can be opened/focused for sign-in.
+    var onConditionalAvailable: ((WKWebView, String, Int) -> Void)?
+
     private static func changed(_ web: WKWebView?) {
         NotificationCenter.default.post(name: offeredChanged, object: web)
     }
@@ -209,6 +220,9 @@ final class Passkeys: NSObject {
         conditional[key] = waiting
         Passkeys.log.notice("\(offered.count, privacy: .public) offered under the field for \(waiting.rp, privacy: .private)")
         Passkeys.changed(waiting.web)
+        if !offered.isEmpty, let web = waiting.web {
+            onConditionalAvailable?(web, waiting.rp, offered.count)
+        }
     }
 
     /// One of the passkeys under the field, picked: the Mac's sheet for it
@@ -270,9 +284,17 @@ final class Passkeys: NSObject {
         }
         // The page in front of you only: a tab behind, a window behind, or
         // Search itself behind doesn't get to bring up the Mac's sheet over
-        // what you're looking at. A test run is always behind.
-        guard underField || Store.testing || (NSApp.isActive && caller.window?.isKeyWindow == true) else {
-            return refuse(answer, "NotAllowedError", "The document is not focused.")
+        // what you're looking at — unless an agent you authorized is driving
+        // that page, in which case we bring the tab into focus first. A test
+        // run is always behind.
+        var anchorWindow = caller.window
+        if !underField && !Store.testing && !(NSApp.isActive && caller.window?.isKeyWindow == true) {
+            let rpHint = ((kind == "create" ? (body["rp"] as? [String: Any])?["id"] as? String : body["rpId"] as? String) ?? host).lowercased()
+            if let web = caller.web, let focused = onFocusForCeremony?(web, rpHint) {
+                anchorWindow = focused
+            } else {
+                return refuse(answer, "NotAllowedError", "The document is not focused.")
+            }
         }
         // A frame from another site can't ask on the page's behalf. One of
         // the page's own site can, as in Safari: Apple's sign-in is a frame
@@ -366,7 +388,7 @@ final class Passkeys: NSObject {
                 self.withdrawn = nil
                 return answer(Passkeys.failure("AbortError", "The operation was aborted."))
             }
-            self.begin(requests, token: token, in: caller.window, answer: answer)
+            self.begin(requests, token: token, in: anchorWindow, answer: answer)
             self.prfKey = Passkeys.pageKey(body)
         }
     }

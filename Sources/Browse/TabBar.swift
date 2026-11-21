@@ -5,6 +5,7 @@ import SwiftUI
 /// of one and into the other.
 struct TabBar: View {
     @ObservedObject var browser: Browser
+    @ObservedObject private var shortcuts = ShortcutStore.shared
 
     @Namespace private var pill
     /// The neighbouring spaces' own grey, apart from this one's.
@@ -285,10 +286,10 @@ struct TabBar: View {
     }
 
     /// What goes before the tabs: the space's dot, when there are spaces,
-    /// and the Ask tab, while Codegraff is on.
+    /// and the Ask button with its shortcut keycap, while Codegraff is on.
     private var dot: CGFloat {
         (browser.prefs.usesSpaces ? SpaceDot.width + Metrics.tabGap : 0)
-            + (browser.prefs.usesAgent ? Metrics.pinWidth + Metrics.tabGap : 0)
+            + (browser.prefs.usesAgent ? AskTab.compactWidth(for: shortcuts.key(for: .toggleAgent)?.display) + Metrics.tabGap : 0)
     }
 
     /// Every loose tab is the same width, so the cross is always in the same
@@ -310,67 +311,128 @@ struct TabBar: View {
     }
 }
 
-/// Codegraff's tab: a square the size of a pinned one at the head of the row,
-/// that puts its page on the stage — the chats so far and a field for a new
-/// one (see AgentHome.swift) — and, pressed again, gives the stage back. The
-/// grey of the tab in front slides onto it while its page is up.
+/// Codegraff's agent button: toggles the agent sidebar beside the current page
+/// and showcases its keyboard shortcut (`⌘;` by default) in a high-contrast
+/// keycap badge. In the sidebar it also offers a hover button to expand to full
+/// view (`⇧⌘;`).
 struct AskTab: View {
     @ObservedObject var browser: Browser
+    @ObservedObject private var shortcuts = ShortcutStore.shared
     let pill: Namespace.ID
     /// Wider in the column of tabs, where it is a row.
-    var width: CGFloat = Metrics.pinWidth
     var title: String?
 
     @State private var hovering = false
 
+    static func compactWidth(for key: String?) -> CGFloat {
+        guard let key, !key.isEmpty else { return 64 }
+        return key.count >= 3 ? 104 : 92
+    }
+
     var body: some View {
         let live = browser.talkOnStage
-        Button { browser.toggleStage() } label: {
-            HStack(spacing: 8) {
-                Image(systemName: "sparkle")
-                    .font(.system(size: 11, weight: .medium))
-                    .frame(width: 16, height: 16)
-                if let title {
-                    Text(title)
-                        .font(.system(size: 13, weight: live ? .medium : .regular))
-                    Spacer(minLength: 0)
-                    Text(".")
-                        .font(.system(size: 12, weight: .medium, design: .monospaced))
-                        .foregroundStyle(Palette.muted)
-                        .frame(width: 19, height: 19)
-                        .background(Palette.ink.opacity(0.04), in: RoundedRectangle(cornerRadius: 4))
-                        .help("Press . while reading to ask beside the page")
+        let sidebarOpen = browser.consulting && !browser.agentFull && browser.prefs.usesAgent
+        let open = live || sidebarOpen
+        let toggleKey = shortcuts.key(for: .toggleAgent)?.display
+        let expandKey = shortcuts.key(for: .expandAgent)?.display
+        let badgeKey = toggleKey ?? "."
+        let compactW = Self.compactWidth(for: toggleKey)
+
+        HStack(spacing: 0) {
+            Button { browser.toggleAgent() } label: {
+                HStack(spacing: title == nil ? 5 : 8) {
+                    Image(systemName: "sparkle")
+                        .font(.system(size: 11, weight: .semibold))
+                        .foregroundStyle(open ? Palette.accent : (hovering ? Palette.ink : Palette.ink.opacity(0.76)))
+                        .frame(width: title == nil ? 13 : 16, height: 16)
+                    if let title {
+                        Text(title)
+                            .font(.system(size: 13, weight: open ? .medium : .regular))
+                            .lineLimit(1)
+                        Spacer(minLength: 4)
+                    } else {
+                        Text("Ask")
+                            .font(.system(size: 12, weight: open ? .semibold : .medium))
+                            .lineLimit(1)
+                    }
+                    if title == nil {
+                        ShortcutBadge(keys: badgeKey, active: open)
+                    }
                 }
+                .foregroundStyle(open || hovering ? Palette.ink
+                                 : title != nil ? Palette.ink.opacity(0.84)
+                                 : Palette.ink.opacity(0.82))
+                .padding(.leading, title == nil ? 8 : 10)
+                .padding(.trailing, title == nil ? 6 : 4)
+                .padding(.vertical, 5)
+                .frame(maxWidth: title == nil ? nil : .infinity, alignment: .leading)
+                .contentShape(Rectangle())
             }
-            // As a row in the column it reads like the tabs under it (Side.swift).
-            .foregroundStyle(live || (title != nil && hovering) ? Palette.ink
-                             : title != nil ? Palette.ink.opacity(0.78)
-                             : (hovering ? Palette.ink.opacity(0.7) : Palette.muted))
-            .padding(.horizontal, title == nil ? 7 : 10)
-            .padding(.vertical, 6)
-            .frame(width: title == nil ? width : nil)
-            .frame(maxWidth: title == nil ? nil : .infinity, alignment: .leading)
-            .background {
-                if live, title != nil {
-                    // The column's raised glass, as its tabs have.
-                    Raised(corner: 9)
-                        .matchedGeometryEffect(id: "live", in: pill)
-                } else if live {
-                    RoundedRectangle(cornerRadius: 9, style: .continuous)
-                        .fill(Palette.wash)
-                        .matchedGeometryEffect(id: "live", in: pill)
-                } else {
-                    RoundedRectangle(cornerRadius: 9, style: .continuous)
-                        .fill(title != nil ? Palette.ink.opacity(hovering ? 0.05 : 0)
-                              : (hovering ? Palette.hover : Palette.wash.opacity(0.55)))
+            .buttonStyle(.plain)
+
+            if title != nil {
+                HStack(spacing: 5) {
+                    if hovering || open {
+                        Button { browser.toggleAgentFull() } label: {
+                            Image(systemName: live ? "sidebar.right" : "arrow.up.left.and.arrow.down.right")
+                                .font(.system(size: 10, weight: .medium))
+                                .foregroundStyle(Palette.muted)
+                                .frame(width: 20, height: 20)
+                                .background(Palette.ink.opacity(0.06), in: RoundedRectangle(cornerRadius: 5, style: .continuous))
+                        }
+                        .buttonStyle(.plain)
+                        .help((live ? "Move Agent to Sidebar" : "Expand Full View")
+                              + (expandKey.map { "   \($0)" } ?? ""))
+                    }
+                    ShortcutBadge(keys: badgeKey, active: open)
+                        .allowsHitTesting(false)
                 }
+                .padding(.trailing, 8)
             }
-            .contentShape(RoundedRectangle(cornerRadius: 9, style: .continuous))
         }
-        .buttonStyle(.plain)
+        .frame(width: title == nil ? compactW : nil)
+        .frame(maxWidth: title == nil ? nil : .infinity, alignment: .leading)
+        .background {
+            if live, title != nil {
+                // The column's raised glass, as its tabs have.
+                Raised(corner: 9)
+                    .matchedGeometryEffect(id: "live", in: pill)
+            } else if live {
+                RoundedRectangle(cornerRadius: 9, style: .continuous)
+                    .fill(Palette.wash)
+                    .overlay(
+                        RoundedRectangle(cornerRadius: 9, style: .continuous)
+                            .strokeBorder(Palette.accent.opacity(0.32), lineWidth: 0.75)
+                    )
+                    .matchedGeometryEffect(id: "live", in: pill)
+            } else if sidebarOpen {
+                RoundedRectangle(cornerRadius: 9, style: .continuous)
+                    .fill(title != nil ? Palette.ink.opacity(0.085) : Palette.wash)
+                    .overlay(
+                        RoundedRectangle(cornerRadius: 9, style: .continuous)
+                            .strokeBorder(Palette.accent.opacity(title != nil ? 0.30 : 0.38), lineWidth: 0.75)
+                    )
+            } else {
+                RoundedRectangle(cornerRadius: 9, style: .continuous)
+                    .fill(title != nil ? Palette.ink.opacity(hovering ? 0.055 : 0)
+                          : (hovering ? Palette.hover : Palette.wash.opacity(0.68)))
+                    .overlay(
+                        RoundedRectangle(cornerRadius: 9, style: .continuous)
+                            .strokeBorder(title != nil ? Color.clear : Palette.hairline, lineWidth: 0.75)
+                    )
+            }
+        }
+        .contentShape(RoundedRectangle(cornerRadius: 9, style: .continuous))
         .onHover { hovering = $0 }
-        .help(live ? "Back to the page" : "Ask Codegraff · Press . while reading to open beside the page")
+        .help(helpText(open: open, toggleKey: toggleKey, expandKey: expandKey))
         .animation(Motion.quick, value: hovering)
+        .animation(Motion.quick, value: open)
+    }
+
+    private func helpText(open: Bool, toggleKey: String?, expandKey: String?) -> String {
+        let primary = (open ? "Hide Agent Sidebar" : "Show Agent Sidebar") + (toggleKey.map { "   \($0)" } ?? "")
+        let secondary = expandKey.map { "  ·  Full view \($0)" } ?? ""
+        return primary + secondary + "  ·  Press . while reading"
     }
 }
 

@@ -7,6 +7,7 @@ import AppKit
 @main
 struct BrowseApp: App {
     @StateObject private var browser = Browser()
+    @ObservedObject private var shortcuts = ShortcutStore.shared
     /// Links from other apps, and the Dock icon.
     @NSApplicationDelegateAdaptor(Links.self) private var links
 
@@ -29,36 +30,37 @@ struct BrowseApp: App {
             // One window. Tabs are the only kind of "new" there is.
             CommandGroup(replacing: .newItem) {
                 Button("New Tab") { browser.newTab() }
-                    .keyboardShortcut("t")
+                    .shortcut(shortcuts.key(for: .newTab))
                 Button("New Private Tab") { browser.newShyTab() }
-                    .keyboardShortcut("n", modifiers: [.command, .shift])
+                    .shortcut(shortcuts.key(for: .newPrivateTab))
                 Button("Reopen Closed Tab") { browser.reopen() }
-                    .keyboardShortcut("t", modifiers: [.command, .shift])
+                    .shortcut(shortcuts.key(for: .reopenTab))
                     .disabled(browser.ghosts.isEmpty)
                 Divider()
                 Button("Open Address…") { browser.edit() }
-                    .keyboardShortcut("l")
+                    .shortcut(shortcuts.key(for: .openAddress))
                 Divider()
                 Button("Close Tab") { if let tab = browser.active { browser.close(tab) } }
-                    .keyboardShortcut("w")
+                    .shortcut(shortcuts.key(for: .closeTab))
             }
             CommandGroup(replacing: .printItem) {
                 Button("Share…") { browser.share() }
+                    .shortcut(shortcuts.key(for: .share))
                     .disabled(browser.active?.isBlank ?? true)
                 Button("Print…") { browser.printPage() }
-                    .keyboardShortcut("p")
+                    .shortcut(shortcuts.key(for: .printPage))
                     .disabled(browser.active?.isBlank ?? true)
             }
             CommandGroup(after: .pasteboard) {
                 Divider()
                 Button("Find on Page…") { browser.openFind() }
-                    .keyboardShortcut("f")
+                    .shortcut(shortcuts.key(for: .findOnPage))
                     .disabled(browser.active?.isBlank ?? true)
                 Button("Find Next") { browser.look(forward: true) }
-                    .keyboardShortcut("g")
+                    .shortcut(shortcuts.key(for: .findNext))
                     .disabled(!browser.finding)
                 Button("Find Previous") { browser.look(forward: false) }
-                    .keyboardShortcut("g", modifiers: [.command, .shift])
+                    .shortcut(shortcuts.key(for: .findPrevious))
                     .disabled(!browser.finding)
             }
             CommandGroup(replacing: .toolbar) {
@@ -66,13 +68,13 @@ struct BrowseApp: App {
                     get: { browser.prefs.sidebar },
                     set: { _ in browser.toggleSidebar() }
                 ))
-                .keyboardShortcut("s", modifiers: [.command, .shift])
+                .shortcut(shortcuts.key(for: .toggleSidebarLayout))
                 // Folded away, not moved (see Fold.swift) — the column, or the
                 // strip across the top.
                 Button(browser.prefs.sidebar
                        ? (browser.folded ? "Show Sidebar" : "Hide Sidebar")
                        : (browser.folded ? "Show Tab Bar" : "Hide Tab Bar")) { browser.toggleFold() }
-                    .keyboardShortcut("s")
+                    .shortcut(shortcuts.key(for: .toggleFold))
                 Picker("Tabs Wear", selection: Binding(
                     get: { browser.prefs.glyph },
                     set: { browser.prefs.glyph = $0 }
@@ -83,103 +85,116 @@ struct BrowseApp: App {
                 }
                 Divider()
                 Button("Reload Page") { browser.reload() }
-                    .keyboardShortcut("r")
+                    .shortcut(shortcuts.key(for: .reloadPage))
                 Button("Reload Page From Origin") { browser.reload(fromOrigin: true) }
-                    .keyboardShortcut("r", modifiers: [.command, .option])
+                    .shortcut(shortcuts.key(for: .reloadFromOrigin))
                 Button("Reading Mode") { browser.toggleReader() }
-                    .keyboardShortcut("r", modifiers: [.command, .shift])
+                    .shortcut(shortcuts.key(for: .readingMode))
                 Button("Float Video") { browser.toggleFloat() }
-                    .keyboardShortcut("p", modifiers: [.command, .shift])
+                    .shortcut(shortcuts.key(for: .floatVideo))
                 // Two tabs side by side (Split.swift): this one and the one
                 // before it.
                 Button(browser.shownSplit != nil ? "Leave Split View" : "Split View") { browser.toggleSplit() }
-                    .keyboardShortcut("d")
+                    .shortcut(shortcuts.key(for: .toggleSplit))
                     .disabled(browser.shownSplit == nil && !browser.tabs.contains { !$0.isBlank })
                 if browser.shownSplit != nil {
                     Button("Swap Sides") { browser.swapSplit() }
+                        .shortcut(shortcuts.key(for: .swapSplit))
                 }
+                Button("Enter Full Screen") { browser.toggleFullScreen() }
+                    .shortcut(shortcuts.key(for: .fullScreen))
                 Divider()
-                Button(browser.consulting && browser.prefs.usesAgent ? "Hide Codegraff" : "Show Codegraff") { browser.toggleAgent() }
-                    .keyboardShortcut(";", modifiers: [.command])
+                Button(browser.consulting && browser.prefs.usesAgent ? "Hide Agent Sidebar" : "Show Agent Sidebar") { browser.toggleAgent() }
+                    .shortcut(shortcuts.key(for: .toggleAgent))
+                Button(browser.talkOnStage ? "Move Agent to Sidebar" : "Expand Agent Full Screen") { browser.toggleAgentFull() }
+                    .shortcut(shortcuts.key(for: .expandAgent))
                 Divider()
                 Button("Hide Elements…") { browser.toggleHiding() }
-                    .keyboardShortcut("h", modifiers: [.command, .shift])
+                    .shortcut(shortcuts.key(for: .hideElements))
                 Button("Hidden on This Site…") { browser.reviewing.toggle() }
-                    .keyboardShortcut("u", modifiers: [.command, .shift])
+                    .shortcut(shortcuts.key(for: .hiddenOnSite))
                 Button("Tidy This Page") { browser.tidy() }
+                    .shortcut(shortcuts.key(for: .tidyPage))
                     .disabled(browser.tidying || browser.active?.isBlank != false)
                 Button("Fill In This Form with Codegraff") {
                     if let tab = browser.active { browser.talk(about: tab, task: Browser.fillTask) }
                 }
-                .keyboardShortcut("f", modifiers: [.command, .option])
+                .shortcut(shortcuts.key(for: .fillFormWithAgent))
                 .disabled(browser.active?.isBlank != false)
                 Divider()
                 Button("Zoom In") { browser.zoom(by: 1.1) }
-                    .keyboardShortcut("+")
+                    .shortcut(shortcuts.key(for: .zoomIn))
                 Button("Zoom Out") { browser.zoom(by: 1 / 1.1) }
-                    .keyboardShortcut("-")
+                    .shortcut(shortcuts.key(for: .zoomOut))
                 Button("Actual Size") { browser.resetZoom() }
-                    .keyboardShortcut("0")
+                    .shortcut(shortcuts.key(for: .actualSize))
                 Divider()
                 // The Web Inspector, on the keys Chrome and Arc use (see Inspector.swift).
                 Button("Web Inspector") { browser.toggleInspector() }
-                    .keyboardShortcut("i", modifiers: [.command, .option])
+                    .shortcut(shortcuts.key(for: .webInspector))
                 Button("JavaScript Console") { browser.showConsole() }
-                    .keyboardShortcut("j", modifiers: [.command, .option])
+                    .shortcut(shortcuts.key(for: .jsConsole))
                 Button("Inspect Element") { browser.inspectElement() }
-                    .keyboardShortcut("c", modifiers: [.command, .option])
+                    .shortcut(shortcuts.key(for: .inspectElement))
             }
             CommandMenu("Tabs") {
                 Button("Back") { browser.back() }
-                    .keyboardShortcut("[")
+                    .shortcut(shortcuts.key(for: .back))
                     .disabled(browser.active?.canGoBack != true)
                 Button("Forward") { browser.forward() }
-                    .keyboardShortcut("]")
+                    .shortcut(shortcuts.key(for: .forward))
                     .disabled(browser.active?.canGoForward != true)
                 Divider()
                 Button("Next Tab") { browser.step(1) }
-                    .keyboardShortcut("]", modifiers: [.command, .shift])
+                    .shortcut(shortcuts.key(for: .nextTab))
                 Button("Previous Tab") { browser.step(-1) }
-                    .keyboardShortcut("[", modifiers: [.command, .shift])
+                    .shortcut(shortcuts.key(for: .previousTab))
                 Button("Search Tabs…") { browser.summon() }
-                    .keyboardShortcut("k")
+                    .shortcut(shortcuts.key(for: .searchTabs))
                 Divider()
                 if let tab = browser.active {
                     if tab.pin == nil {
                         Button("Pin Tab") { browser.pin(tab) }
+                            .shortcut(shortcuts.key(for: .pinTab))
                             .disabled(tab.isBlank)
                     } else {
                         Button("Change Letter") { browser.editLetter(tab) }
                         Button("Unpin Tab") { browser.unpin(tab) }
+                            .shortcut(shortcuts.key(for: .pinTab))
                     }
                 }
                 Button("Rename Tab") { if let tab = browser.active { browser.beginTabRename(tab) } }
+                    .shortcut(shortcuts.key(for: .renameTab))
                     .disabled(browser.active == nil)
                 Button("Duplicate Tab") { browser.duplicate() }
-                    .keyboardShortcut("d", modifiers: [.command, .shift])
+                    .shortcut(shortcuts.key(for: .duplicateTab))
                     .disabled(browser.active?.isBlank ?? true)
                 Button("Copy Address") { browser.copyAddress() }
-                    .keyboardShortcut("c", modifiers: [.command, .shift])
+                    .shortcut(shortcuts.key(for: .copyAddress))
                     .disabled(browser.active?.isBlank ?? true)
                 Button("Copy as Markdown Link") { browser.copyMarkdownLink() }
+                    .shortcut(shortcuts.key(for: .copyMarkdownLink))
                     .disabled(browser.active?.isBlank ?? true)
                 Button("Paste and Go") { browser.pasteAndGo() }
-                    .keyboardShortcut("v", modifiers: [.command, .shift])
+                    .shortcut(shortcuts.key(for: .pasteAndGo))
                 Divider()
                 Button("Close Other Tabs") { if let tab = browser.active { browser.closeOthers(but: tab) } }
+                    .shortcut(shortcuts.key(for: .closeOtherTabs))
                     .disabled(browser.tabs.count < 2)
                 Button("Stop Sound in Tab") { browser.pauseMedia() }
-                    .keyboardShortcut("m", modifiers: [.command, .shift])
+                    .shortcut(shortcuts.key(for: .stopMedia))
             }
             CommandMenu("Bookmarks") {
                 Button("Add This Page") { browser.bookmarkCurrent() }
-                    .keyboardShortcut("b", modifiers: [.command, .shift])
+                    .shortcut(shortcuts.key(for: .bookmarkPage))
                     .disabled(browser.active?.isBlank ?? true)
                 Button("Show Bookmarks…") { browser.bookmarking = true }
+                    .shortcut(shortcuts.key(for: .showBookmarks))
                 Toggle("Show Bookmarks Bar", isOn: Binding(
                     get: { browser.prefs.bookmarksBar },
                     set: { on in withAnimation(Motion.glide) { browser.prefs.bookmarksBar = on } }
                 ))
+                .shortcut(shortcuts.key(for: .toggleBookmarksBar))
                 // The bookmarks themselves follow, put in by AppKit (see
                 // BookmarkMenu in Bookmarks.swift).
             }
@@ -206,23 +221,26 @@ struct BrowseApp: App {
                 }
                 Divider()
                 Button("Show History…") { browser.recalling = true }
-                    .keyboardShortcut("y")
+                    .shortcut(shortcuts.key(for: .showHistory))
                 Button("Downloads…") { browser.hoarding = true }
-                    .keyboardShortcut("j", modifiers: [.command, .shift])
+                    .shortcut(shortcuts.key(for: .showDownloads))
                 Divider()
                 Button("Clear Browsing Data…") { browser.recallMode = .clearing }
-                    .keyboardShortcut(.delete, modifiers: [.command, .shift])
+                    .shortcut(shortcuts.key(for: .clearData))
                 Button("Clear History") { browser.clearHistory() }
+                    .shortcut(shortcuts.key(for: .clearHistory))
             }
             CommandGroup(after: .appSettings) {
                 Button("Settings…") { browser.tuning = true }
-                    .keyboardShortcut(",")
+                    .shortcut(shortcuts.key(for: .settings))
                 Button("Welcome…") { browser.welcoming = true }
+                    .shortcut(shortcuts.key(for: .welcome))
                 Button("Passwords…") { browser.managing = true }
-                    .keyboardShortcut("l", modifiers: [.command, .option])
+                    .shortcut(shortcuts.key(for: .passwords))
             }
             CommandGroup(replacing: .help) {
                 Button("Keyboard Shortcuts…") { browser.showShortcuts() }
+                    .shortcut(shortcuts.key(for: .showShortcuts))
                 Button("Send Feedback…") { Links.writeFeedback() }
             }
         }
@@ -362,7 +380,7 @@ struct ContentView: View {
         HStack(spacing: 0) {
             if consulting && browser.agentFull {
                 AgentColumn(browser: browser, agent: browser.agent, prefs: browser.prefs, full: true)
-                    .transition(.opacity)
+                    .transition(.opacity.combined(with: .scale(scale: 0.99)))
             } else {
                 page
                     // A tab carried out of the sidebar: the half it would
@@ -370,18 +388,20 @@ struct ContentView: View {
                     .overlay { SplitDropZone(browser: browser) }
                 if consulting {
                     AgentColumn(browser: browser, agent: browser.agent, prefs: browser.prefs)
-                        .transition(.move(edge: .trailing))
+                        .transition(.move(edge: .trailing).combined(with: .opacity))
                 }
             }
         }
+        .animation(Motion.gentle, value: browser.agentFull)
     }
 
     @ViewBuilder
     private var page: some View {
         if let pair = browser.shownSplit {
-            // Two tabs side by side (Split.swift).
+            // Two tabs side by side (Split.swift). StageView lives directly in
+            // AppKit; SwiftUI only supplies overlays for Find, links and forms.
             SplitStage(browser: browser, left: pair.left, right: pair.right) { tab in
-                pane(tab, corner: Split.corner)
+                paneOverlays(tab)
             }
             .transition(.opacity)
         } else if let tab = browser.active {
@@ -394,28 +414,34 @@ struct ContentView: View {
     /// A tab's page, with what goes over the page in front: the link under
     /// the pointer, Find, the offer to fill a form, saved sign-ins.
     private func pane(_ tab: Tab, corner: CGFloat = 0) -> some View {
+        Page(tab: tab, corner: corner)
+            .overlay { paneOverlays(tab, includePageOverlays: false) }
+    }
+
+    @ViewBuilder
+    private func paneOverlays(_ tab: Tab, includePageOverlays: Bool = true) -> some View {
         let front = tab.id == browser.activeID
-        return Page(tab: tab, corner: corner)
-            .overlay {
-                if front, browser.prefs.showsLinks { LinkBubble(status: browser.linkStatus) }
+        ZStack {
+            if includePageOverlays { PageOverlays(tab: tab) }
+            if front, browser.prefs.showsLinks { LinkBubble(status: browser.linkStatus) }
+        }
+        .overlay(alignment: .topTrailing) {
+            if front, browser.finding {
+                FindBar(browser: browser)
+                    .transition(.move(edge: .top).combined(with: .opacity))
             }
-            .overlay(alignment: .topTrailing) {
-                if front, browser.finding {
-                    FindBar(browser: browser)
-                        .transition(.move(edge: .top).combined(with: .opacity))
-                }
+        }
+        // A form on the page: Codegraff offered to fill it in.
+        .overlay(alignment: .bottomTrailing) {
+            if front { FormPill(browser: browser, tab: tab) }
+        }
+        .overlay(alignment: .topLeading) {
+            if let asked = browser.suggesting, asked.tab == tab.id {
+                AccountList(browser: browser, asked: asked)
+                    .transition(.opacity)
             }
-            // A form on the page: Codegraff offered to fill it in.
-            .overlay(alignment: .bottomTrailing) {
-                if front { FormPill(browser: browser, tab: tab) }
-            }
-            .overlay(alignment: .topLeading) {
-                if let asked = browser.suggesting, asked.tab == tab.id {
-                    AccountList(browser: browser, asked: asked)
-                        .transition(.opacity)
-                }
-            }
-            .animation(Motion.quick, value: browser.suggesting)
+        }
+        .animation(Motion.quick, value: browser.suggesting)
     }
 
     /// What the column and the strip take from the page right now: animated
@@ -871,6 +897,8 @@ struct ContentView: View {
     /// keystrokes because this runs first.
     private func watchKeys() {
         guard keys == nil else { return }
+        HotKey.pressed = { browser.summonFromElsewhere() }
+        ShortcutStore.shared.applyGlobalHotKey()
         keys = NSEvent.addLocalMonitorForEvents(matching: [.keyDown, .flagsChanged]) { event in
             guard event.type == .keyDown else {
                 // ⌘ let go of ends a ⌘K walk, wherever it stopped.
@@ -906,14 +934,8 @@ struct ContentView: View {
     /// ⌘← and ⌘→ are Search's too while nothing is being typed: WebKit takes
     /// them to scroll the page sideways and never hands them back, so
     /// passing them on left them dead for going back and forward (#324).
-    private func pageFirst(_ event: NSEvent, key: String, shifted: Bool) -> Bool {
-        let reserved = (key == "t") || (key == "w" && !shifted) || (key == "n" && shifted)
-            || ((key == "[" || key == "]" || key == "{" || key == "}") && shifted)
-            || (key == "z" && browser.veiling)
-            || (key == "k" && !shifted)
-            || (key == ";" && !shifted)
-            || (!shifted && (event.keyCode == 123 || event.keyCode == 124) && !caretIn(event))
-        guard !reserved, event.window?.firstResponder is PageView else { return false }
+    private func pageFirst(_ event: NSEvent, alwaysOurs: Bool) -> Bool {
+        guard !alwaysOurs, event.window?.firstResponder is PageView else { return false }
         if let passed = ContentView.passed, PageView.same(passed, event) {
             ContentView.passed = nil
             return false
@@ -938,6 +960,8 @@ struct ContentView: View {
     ]
 
     private func take(_ event: NSEvent) -> Bool {
+        // While recording a custom shortcut in Settings › Shortcuts, let the recorder have every key.
+        if ShortcutStore.shared.recording { return false }
         // A small window's keys are its own (see Little.swift).
         if let little = LittleWindow.owning(event.window) { return little.take(event) }
         let flags = event.modifierFlags.intersection(.deviceIndependentFlagsMask)
@@ -1053,156 +1077,180 @@ struct ContentView: View {
             return true
         }
 
-        // A shortcut an extension registered — ⌥⇧D, ⌃⇧Y — before ours, since
-        // none of ours use those.
+        // A shortcut an extension registered — ⌥⇧D, ⌃⇧Y — before ours, unless
+        // the user bound that key to a browser command in Settings › Shortcuts.
         if #available(macOS 15.4, *), !flags.intersection([.command, .option, .control]).isEmpty,
+           let combo = KeyCombo(event: event), ShortcutStore.shared.command(for: combo) == nil,
            Extensions.shared.take(event) {
             return true
         }
 
-        guard flags.contains(.command) else { return false }
         let shifted = flags.contains(.shift)
 
-        if flags.contains(.option), !shifted, !flags.contains(.control),
-           event.characters(byApplyingModifiers: [])?.lowercased() == "r" {
-            if pageFirst(event, key: "r", shifted: false) { return false }
-            browser.reload(fromOrigin: true)
-            return true
-        }
-
-        // Other shortcuts with ⌥ or ⌃ on top are somebody else's.
-        guard !flags.contains(.option), !flags.contains(.control) else { return false }
-
         // ⌘↩ in the address field: the words go to Codegraff, not to a page.
-        if event.keyCode == 36, browser.fieldShowing {
+        if flags.contains(.command), !flags.contains(.option), !flags.contains(.control),
+           event.keyCode == 36, browser.fieldShowing {
             browser.ask(browser.typed)
             return true
         }
 
-        // ⌘1 through ⌘9, and ⌘0, by the key rather than the character it
-        // types. On AZERTY and many other layouts the top row types &, é, "…
-        // unless shift is held, so matching the character left these
-        // shortcuts dead there; the shortcut belongs to the key, as it does
-        // in every other browser. The ninth is the last tab, however many.
-        if !shifted, let number = ContentView.digits[event.keyCode] {
-            if number == 0 {
-                browser.resetZoom()
-            } else {
-                browser.select(index: number == 9 ? browser.tabs.count - 1 : number - 1)
-            }
+        // ⌘1 through ⌘9, by the key rather than the character it types (AZERTY, etc.).
+        if flags.contains(.command), !shifted, !flags.contains(.option), !flags.contains(.control),
+           let number = ContentView.digits[event.keyCode], number > 0 {
+            browser.select(index: number == 9 ? browser.tabs.count - 1 : number - 1)
             return true
         }
 
-        // Keep the clearing controls reachable from a focused page editor.
-        if shifted, event.keyCode == 51 {
-            browser.recallMode = .clearing
+        // ⌘Z while pointing to hide elements undoes the last veil.
+        if flags.contains(.command), !shifted, !flags.contains(.option), !flags.contains(.control),
+           key == "z", browser.veiling {
+            browser.undoHiding()
             return true
         }
 
-        // The page's turn first, for the keys it may want (Refs #147).
-        if pageFirst(event, key: key, shifted: shifted) { return false }
+        // Custom and default shortcuts from ShortcutStore.
+        if let combo = KeyCombo(event: event), combo.isUsable,
+           let command = ShortcutStore.shared.command(for: combo) {
+            if combo.movesCaret, caretIn(event) { return false }
+            if pageFirst(event, alwaysOurs: command.alwaysOurs) { return false }
+            return perform(command.id, event: event)
+        }
 
-        switch key {
-        case "t" where !shifted:
+        // ⌘← and ⌘→, for hands that never learned the brackets.
+        if flags.contains(.command), !shifted, !flags.contains(.option), !flags.contains(.control),
+           !caretIn(event) {
+            if event.keyCode == 123 { browser.back(); return true }
+            if event.keyCode == 124 { browser.forward(); return true }
+        }
+        return false
+    }
+
+    private func perform(_ id: CommandID, event: NSEvent) -> Bool {
+        switch id {
+        case .newTab:
             browser.newTab()
-        case "t" where shifted:
-            browser.reopen()
-        case "c" where shifted:
-            browser.copyAddress()
-        case "d" where !shifted:
-            // Two tabs side by side, or back to one (Split.swift).
-            browser.toggleSplit()
-        case "d" where shifted:
-            browser.duplicate()
-        case "n" where shifted:
+        case .newPrivateTab:
             browser.newShyTab()
-        case "y" where !shifted:
-            browser.recalling.toggle()
-        case "j" where shifted:
-            browser.hoarding.toggle()
-        case "v" where shifted:
-            // In a text field this key is paste without formatting — a Google
-            // Doc, a form, the address field. It only means Paste and Go when
-            // nothing is being typed. Passing the key on is not enough: WebKit
-            // has no use for ⌘⇧V, hands it back, and the menu's Paste and Go
-            // takes it. So the plain paste is done here, as Chrome does.
-            // A web view has an input context only while the caret is in
-            // something editable, in any frame — including frames the page's
-            // own script can't look into, like the one a Google Doc types in.
+        case .reopenTab:
+            browser.reopen()
+        case .openAddress:
+            browser.edit()
+        case .closeTab:
+            if browser.peekTab != nil {
+                browser.closePeek()
+            } else if let tab = browser.active {
+                browser.close(tab)
+            }
+        case .share:
+            browser.share()
+        case .printPage:
+            browser.printPage()
+        case .findOnPage:
+            browser.openFind()
+        case .findNext:
+            browser.look(forward: true)
+        case .findPrevious:
+            browser.look(forward: false)
+        case .toggleSidebarLayout:
+            browser.toggleSidebar()
+        case .toggleFold:
+            browser.toggleFold()
+        case .reloadPage:
+            browser.reload()
+        case .reloadFromOrigin:
+            browser.reload(fromOrigin: true)
+        case .readingMode:
+            browser.toggleReader()
+        case .floatVideo:
+            browser.toggleFloat()
+        case .toggleSplit:
+            browser.toggleSplit()
+        case .swapSplit:
+            if browser.shownSplit != nil { browser.swapSplit() }
+        case .fullScreen:
+            browser.toggleFullScreen()
+        case .hideElements:
+            browser.toggleHiding()
+        case .hiddenOnSite:
+            browser.reviewing.toggle()
+        case .tidyPage:
+            browser.tidy()
+        case .zoomIn:
+            browser.zoom(by: 1.1)
+        case .zoomOut:
+            browser.zoom(by: 1 / 1.1)
+        case .actualSize:
+            browser.resetZoom()
+        case .webInspector:
+            browser.toggleInspector()
+        case .jsConsole:
+            browser.showConsole()
+        case .inspectElement:
+            browser.inspectElement()
+        case .toggleAgent:
+            browser.toggleAgent()
+        case .expandAgent:
+            browser.toggleAgentFull()
+        case .fillFormWithAgent:
+            if let tab = browser.active, !tab.isBlank { browser.talk(about: tab, task: Browser.fillTask) }
+        case .back:
+            browser.back()
+        case .forward:
+            browser.forward()
+        case .nextTab:
+            browser.step(1)
+        case .previousTab:
+            browser.step(-1)
+        case .searchTabs:
+            if browser.editing, !browser.offers.isEmpty {
+                browser.stepSummon()
+            } else {
+                browser.summon()
+            }
+        case .pinTab:
+            browser.togglePin()
+        case .renameTab:
+            if let tab = browser.active { browser.beginTabRename(tab) }
+        case .duplicateTab:
+            browser.duplicate()
+        case .copyAddress:
+            browser.copyAddress()
+        case .copyMarkdownLink:
+            browser.copyMarkdownLink()
+        case .pasteAndGo:
+            // In a text field ⇧⌘V is paste without formatting; only Paste and Go when not typing.
             if browser.active?.typing == true || browser.active?.built?.inputContext != nil
                 || browser.editing || event.window?.firstResponder is NSTextView {
                 _ = event.window?.firstResponder?.tryToPerform(#selector(NSTextView.pasteAsPlainText(_:)), with: nil)
             } else {
                 browser.pasteAndGo()
             }
-        case "p" where !shifted:
-            browser.printPage()
-        case "f" where !shifted:
-            browser.openFind()
-        case "g":
-            browser.look(forward: !shifted)
-        case "m" where shifted:
+        case .closeOtherTabs:
+            if let tab = browser.active { browser.closeOthers(but: tab) }
+        case .stopMedia:
             browser.pauseMedia()
-        case "p" where shifted:
-            browser.toggleFloat()
-        case ";" where !shifted:
-            browser.toggleAgent()
-        case "k" where !shifted:
-            // Held down, ⌘K walks the list a step at a time; letting go of ⌘
-            // takes wherever it stopped.
-            if browser.editing, !browser.offers.isEmpty {
-                browser.stepSummon()
-            } else {
-                browser.summon()
-            }
-        case "s" where shifted:
-            browser.toggleSidebar()
-        case "s" where !shifted:
-            // The column or the strip, folded away (see Fold.swift).
-            browser.toggleFold()
-        case "b" where shifted:
+        case .bookmarkPage:
             browser.bookmarkCurrent()
-        case "," where !shifted:
+        case .showBookmarks:
+            browser.bookmarking.toggle()
+        case .toggleBookmarksBar:
+            withAnimation(Motion.glide) { browser.prefs.bookmarksBar.toggle() }
+        case .showHistory:
+            browser.recalling.toggle()
+        case .showDownloads:
+            browser.hoarding.toggle()
+        case .clearData:
+            browser.recallMode = .clearing
+        case .clearHistory:
+            browser.clearHistory()
+        case .settings:
             browser.tuning.toggle()
-        case "h" where shifted:
-            browser.toggleHiding()
-        case "u" where shifted:
-            browser.reviewing.toggle()
-        case "z" where !shifted:
-            // Only while pointing. Everywhere else undo belongs to the page.
-            guard browser.veiling else { return false }
-            browser.undoHiding()
-        // ⌘+ arrives as "=" or "+" depending on the keyboard; both mean bigger.
-        case "=", "+":
-            browser.zoom(by: 1.1)
-        case "-":
-            browser.zoom(by: 1 / 1.1)
-        case "0":
-            browser.resetZoom()
-        case "w" where !shifted:
-            if browser.peekTab != nil {
-                browser.closePeek()
-            } else if let tab = browser.active {
-                browser.close(tab)
-            }
-        case "l" where !shifted:
-            browser.edit()
-        case "r" where !shifted:
-            browser.reload()
-        case "r" where shifted:
-            browser.toggleReader()
-        case "[":
-            shifted ? browser.step(-1) : browser.back()
-        case "]":
-            shifted ? browser.step(1) : browser.forward()
-        default:
-            // Moving or selecting text belongs to the editor, not the page's
-            // history — in web forms and in the browser's own fields alike.
-            guard !shifted, !caretIn(event) else { return false }
-            // ⌘← and ⌘→, for hands that never learned the brackets.
-            if event.keyCode == 123 { browser.back(); return true }
-            if event.keyCode == 124 { browser.forward(); return true }
-            return false
+        case .passwords:
+            browser.managing.toggle()
+        case .showShortcuts:
+            browser.showingShortcuts.toggle()
+        case .welcome:
+            browser.welcoming.toggle()
         }
         return true
     }

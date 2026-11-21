@@ -14,53 +14,17 @@ struct AgentComposer: View {
         foot
     }
 
-    /// Under the field: the model it is on and how hard it thinks, each a
-    /// menu of what graff offers — the models its keys reach, the levels
-    /// that model takes (as Harness asks graff for them).
+    /// Under the field: NanoHarness-style unified model + reasoning chip.
+    /// Fits cleanly beside the send button at every sidebar width without
+    /// ever clipping or colliding with the circular action button.
     @ViewBuilder
     private var choices: some View {
-        HStack(spacing: 12) {
+        HStack(spacing: 6) {
             if let current = agent.model {
                 ModelPicker(agent: agent, current: current)
-                    .help("The model Codegraff uses — changing it carries the conversation over")
-            }
-            if let effort = agent.effort {
-                Menu {
-                    ForEach(effort.levels, id: \.value) { level in
-                        Button {
-                            agent.choose(effort: level.value)
-                        } label: {
-                            if level.value == effort.current {
-                                Label(level.name, systemImage: "checkmark")
-                            } else {
-                                Text(level.name)
-                            }
-                        }
-                    }
-                } label: {
-                    HStack(spacing: 4) {
-                        Image(systemName: "brain")
-                            .font(.system(size: 9.5))
-                        Text("Thinking: \(effort.currentName)")
-                        Image(systemName: "chevron.down")
-                            .font(.system(size: 7.5, weight: .semibold))
-                    }
-                    .font(.system(size: 11.5))
-                    .foregroundStyle(Palette.muted)
-                    .contentShape(Rectangle())
-                }
-                // Drawn as given, the same as the model's menu beside it —
-                // a borderless menu sets its own size and ink.
-                .menuStyle(.button)
-                .buttonStyle(.plain)
-                .menuIndicator(.hidden)
-                .help("Reasoning effort — how much time the model spends preparing its response")
+                    .help("Model & reasoning — click for reasoning slider or to switch models")
             }
         }
-        .font(.system(size: 11.5))
-        .foregroundStyle(Palette.muted)
-        .menuStyle(.borderlessButton)
-        .fixedSize()
         .disabled(agent.phase == .working)
     }
 
@@ -133,33 +97,35 @@ struct AgentComposer: View {
                 .frame(maxWidth: .infinity, minHeight: expanded ? (full ? 56 : 38) : nil, alignment: .topLeading)
                 if expanded {
                     HStack(spacing: 8) {
-                        ScrollView(.horizontal, showsIndicators: false) { choices }
+                        choices
                             .frame(maxWidth: .infinity, alignment: .leading)
-                            .frame(height: 20)
                         actions
                     }
                 } else {
                     actions
                 }
             }
-            .padding(.leading, full ? 16 : 12)
+            .padding(.leading, full ? 14 : 11)
             .padding(.trailing, full ? 10 : 8)
-            .padding(.top, expanded ? (full ? 13 : 12) : 6)
-            .padding(.bottom, expanded ? 9 : 6)
-            .background(full ? Palette.ground : Palette.ink.opacity(0.035), in: RoundedRectangle(cornerRadius: full ? 20 : 14, style: .continuous))
+            .padding(.top, expanded ? (full ? 13 : 11) : 6)
+            .padding(.bottom, expanded ? 8 : 6)
+            .background(full ? Palette.ground : Palette.ink.opacity(0.035), in: RoundedRectangle(cornerRadius: full ? 20 : 15, style: .continuous))
             .overlay(
-                RoundedRectangle(cornerRadius: full ? 20 : 14, style: .continuous)
-                    .strokeBorder(typing.wrappedValue ? Palette.accent.opacity(full ? 0.45 : 0.18) : (full ? Palette.hairline : .clear), lineWidth: 1)
+                RoundedRectangle(cornerRadius: full ? 20 : 15, style: .continuous)
+                    .strokeBorder(
+                        typing.wrappedValue ? Palette.accent.opacity(full ? 0.45 : 0.35) : Palette.hairline,
+                        lineWidth: 1
+                    )
             )
             .shadow(color: .black.opacity(full ? 0.035 : 0), radius: 8, y: 2)
             .animation(Motion.quick, value: typing.wrappedValue)
-            .animation(Motion.settle, value: expanded)
+            .animation(Motion.snappy, value: expanded)
             .onTapGesture { typing.wrappedValue = true }
         }
         .animation(Motion.settle, value: agent.queue.map(\.id))
-        .padding(.horizontal, full ? 12 : 18)
-        .padding(.top, full ? 4 : 8)
-        .padding(.bottom, full ? 12 : 16)
+        .padding(.horizontal, full ? 12 : 14)
+        .padding(.top, full ? 4 : 6)
+        .padding(.bottom, full ? 12 : 14)
     }
 
     private var actions: some View {
@@ -187,16 +153,17 @@ struct AgentComposer: View {
     /// The send (or stop) button: the accent once there's something to
     /// send, a quiet grey until then.
     private func round(icon: String, help: String, live: Bool, act: @escaping () -> Void) -> some View {
-        Button(action: act) {
+        let size: CGFloat = full ? 32 : 28
+        return Button(action: act) {
             Image(systemName: icon)
-                .font(.system(size: 11.5, weight: .bold))
+                .font(.system(size: full ? 11.5 : 11, weight: .bold))
                 .foregroundStyle(live ? Palette.onAccent : Palette.muted)
-                .frame(width: 32, height: 32)
+                .frame(width: size, height: size)
                 .background(live ? Palette.accent : Palette.wash, in: Circle())
         }
-        .buttonStyle(.plain)
+        .buttonStyle(TactilePress())
         .accessibilityLabel(help)
-        .animation(Motion.quick, value: live)
+        .animation(Motion.snappy, value: live)
         .help(help)
     }
 

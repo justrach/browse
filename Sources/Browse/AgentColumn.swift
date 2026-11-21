@@ -14,6 +14,7 @@ struct AgentColumn: View {
     @ObservedObject var browser: Browser
     @ObservedObject var agent: Agent
     @ObservedObject var prefs: Preferences
+    @ObservedObject private var shortcuts = ShortcutStore.shared
 
     /// The whole stage rather than a column beside it (see Browser.agentFull).
     var full = false
@@ -130,17 +131,20 @@ struct AgentColumn: View {
                         .foregroundStyle(Palette.ink)
                         .lineLimit(1)
                     if !full {
-                        Circle().fill(light).frame(width: 5, height: 5)
+                        PulseDot(color: light, size: 5, active: agent.phase == .starting || agent.phase == .working)
                             .accessibilityLabel(status)
                     }
                 }
                 if full || agent.asking != nil || !agent.phase.words.isEmpty {
-                    HStack(spacing: 5) {
-                        if full { Circle().fill(light).frame(width: 5, height: 5) }
+                    HStack(spacing: 4) {
+                        if full {
+                            PulseDot(color: light, size: 5, active: agent.phase == .starting || agent.phase == .working)
+                        }
                         Text(status)
                             .font(.system(size: 10.5))
                             .foregroundStyle(Palette.muted)
                             .lineLimit(1)
+                            .contentTransition(.numericText())
                     }
                 }
             }
@@ -177,11 +181,17 @@ struct AgentColumn: View {
                 .popover(isPresented: $showingGuide, arrowEdge: .bottom) { AgentGuide() }
             Door(
                 icon: full ? "sidebar.right" : "arrow.up.left.and.arrow.down.right",
-                help: full ? "Beside the page" : "Expand conversation"
+                help: (full ? "Beside the page" : "Expand conversation")
+                    + (ShortcutStore.shared.key(for: .expandAgent).map { "   \($0.display)" } ?? "")
             ) {
-                if full { browser.talkToColumn() } else { browser.takeStage() }
+                withAnimation(Motion.gentle) {
+                    if full { browser.talkToColumn() } else { browser.takeStage() }
+                }
             }
-            Door(icon: "xmark", help: "Close   ⌘;") { browser.toggleAgent() }
+            Door(
+                icon: "xmark",
+                help: "Close" + (ShortcutStore.shared.key(for: .toggleAgent).map { "   \($0.display)" } ?? "")
+            ) { browser.toggleAgent() }
         }
         .padding(.horizontal, full ? 20 : 18)
         .frame(height: full ? 56 : 44)
@@ -283,13 +293,42 @@ struct AgentColumn: View {
                     .fixedSize(horizontal: false, vertical: true)
                 AgentStarters(agent: agent, page: browser.active, compact: true, focus: browser.focusAgent)
                     .padding(.top, 8)
-                Text("Press . while reading to open Codegraff here.")
-                    .font(.system(size: 11))
-                    .foregroundStyle(Palette.muted)
-                    .padding(.top, 8)
+                agentShortcutHints
+                    .padding(.top, 10)
             }
         }
         .padding(.top, 28)
+    }
+
+    private var agentShortcutHints: some View {
+        let toggle = shortcuts.key(for: .toggleAgent)?.display
+        let expand = shortcuts.key(for: .expandAgent)?.display
+        return VStack(alignment: .leading, spacing: 6) {
+            HStack(spacing: 12) {
+                if let toggle {
+                    HStack(spacing: 5) {
+                        ShortcutBadge(keys: toggle)
+                        Text("Sidebar")
+                            .font(.system(size: 11))
+                            .foregroundStyle(Palette.muted)
+                    }
+                }
+                if let expand {
+                    HStack(spacing: 5) {
+                        ShortcutBadge(keys: expand)
+                        Text("Full view")
+                            .font(.system(size: 11))
+                            .foregroundStyle(Palette.muted)
+                    }
+                }
+                HStack(spacing: 5) {
+                    ShortcutBadge(keys: ".")
+                    Text("Quick ask")
+                        .font(.system(size: 11))
+                        .foregroundStyle(Palette.muted)
+                }
+            }
+        }
     }
 
     /// Everything the talk draws is held to one measure and centred on the
@@ -329,230 +368,772 @@ struct AgentColumn: View {
     }
 }
 
-/// The model graff works on, and a way to change it that holds up with five
-/// hundred of them: a popover with a field that narrows the list as you type
-/// — arrows walk it, Return takes one — the few used last at the top, then
-/// one section per provider, the one you are on first and the long routers
-/// last. Nested menus built from the first word of each name were a heap
-/// once OpenRouter's "anthropic/…" names came in.
+/// Unified NanoHarness-style Model + Reasoning chip and two-step popover
+/// (`model_picker.zig` + `view_picker.zig`):
+/// - Trigger chip shows maker mark + model label + current effort level in one
+///   compact pill that never collides with the send button.
+/// - Clicking opens the compact reasoning card (brand-colored capsule slider
+///   for instant effort changes) with a header button expanding into the full
+///   searchable catalog (subscription routes first with Plan pills, favorites,
+///   exact search ranking, stable model IDs, and two-step reasoning stage).
 struct ModelPicker: View {
     @ObservedObject var agent: Agent
     let current: Agent.Model
+
     @State private var open = false
+    @State private var hovering = false
+
+    private var effortLabel: String? {
+        guard let effort = agent.effort, !effort.current.isEmpty else { return nil }
+        return Agent.Model.reasoningLabel(effort.current, binary: current.binaryEffort)
+    }
 
     var body: some View {
         Button { open.toggle() } label: {
-            HStack(spacing: 5) {
-                ProviderMark(provider: current.provider, size: 13)
+            HStack(spacing: 6) {
+                ProviderMark(provider: current.makerKey, size: 14)
                 Text(current.label)
+                    .font(.system(size: 12, weight: .medium))
+                    .foregroundStyle(hovering || open ? Palette.ink : Palette.ink.opacity(0.9))
+                    .lineLimit(1)
+                    .truncationMode(.tail)
+                    .contentTransition(.numericText())
+                if let effortLabel {
+                    Text(effortLabel)
+                        .font(.system(size: 12, weight: .medium))
+                        .foregroundStyle(Palette.muted.opacity(0.8))
+                        .fixedSize()
+                        .contentTransition(.numericText())
+                }
                 Image(systemName: "chevron.down")
                     .font(.system(size: 7.5, weight: .semibold))
+                    .foregroundStyle(Palette.muted)
             }
+            .padding(.horizontal, 7)
+            .frame(height: 26)
+            .background(
+                RoundedRectangle(cornerRadius: 8, style: .continuous)
+                    .fill(hovering || open ? Palette.hover : .clear)
+            )
             .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
-        .accessibilityLabel("Model: \(current.label), \(Agent.Model.said(current.provider))")
+        .onHover { hovering = $0 }
+        .animation(Motion.quick, value: hovering)
+        .accessibilityLabel(
+            "Model: \(current.label)"
+                + (effortLabel.map { ", reasoning \($0)" } ?? "")
+                + ", via \(Agent.Model.said(current.provider))"
+        )
         .popover(isPresented: $open, arrowEdge: .top) {
-            ModelList(agent: agent, current: current) { open = false }
+            NanoModelPopover(agent: agent, current: current) { open = false }
         }
     }
 }
 
-private struct ModelList: View {
+private struct NanoModelPopover: View {
     @ObservedObject var agent: Agent
     let current: Agent.Model
     let done: () -> Void
 
+    enum Step: Equatable {
+        case compact
+        case list
+        case stage(Agent.Model)
+    }
+
+    @Environment(\.colorScheme) private var scheme
+    @State private var step: Step = .list
+    @State private var canReturnCompact = false
     @State private var query = ""
-    /// Where the arrow keys have walked to, in the order rows are drawn.
-    @State private var picked = 0
-    /// Long sections opened with "Show all".
-    @State private var opened: Set<String> = []
-    @FocusState private var typing: Bool
+    @State private var starredOnly = false
+    @State private var highlightedID: String?
+    @State private var stagedEffort: String = ""
+    @FocusState private var searchFocused: Bool
 
-    /// A section: its rows, each with its place among all the rows drawn,
-    /// and how many there are before any are held back.
-    struct Section: Identifiable {
-        let id: String
-        let title: String
-        var rows: [(index: Int, model: Agent.Model)]
-        let total: Int
-    }
+    private var dark: Bool { scheme == .dark }
 
-    /// A long provider shows this many until opened or searched.
-    private static let glimpse = 6
-
-    private var sections: [Section] {
-        let words = query.lowercased().split(separator: " ").map(String.init)
-        func matches(_ model: Agent.Model) -> Bool {
-            guard !words.isEmpty else { return true }
-            let hay = "\(model.label) \(model.name) \(Agent.Model.said(model.provider)) \(model.maker ?? "")".lowercased()
-            return words.allSatisfy { hay.contains($0) }
-        }
-        var out: [Section] = []
-        var index = 0
-        func add(_ id: String, _ title: String, _ models: [Agent.Model], total: Int) {
-            guard !models.isEmpty else { return }
-            let rows = models.map { model -> (Int, Agent.Model) in
-                defer { index += 1 }
-                return (index, model)
-            }
-            out.append(Section(id: id, title: title, rows: rows, total: total))
-        }
-        if words.isEmpty {
-            let recent = [current] + agent.recentModels.filter { $0 != current }
-            add("recent", "Recent", Array(recent.prefix(5)), total: min(5, recent.count))
-        }
-        let byProvider = Dictionary(grouping: agent.models.filter(matches), by: \.provider)
-        for provider in byProvider.keys.sorted(by: { (rank($0), $0) < (rank($1), $1) }) {
-            let all = byProvider[provider] ?? []
-            let held = words.isEmpty && all.count > Self.glimpse + 2 && !opened.contains(provider)
-            add(provider, Agent.Model.said(provider), held ? Array(all.prefix(Self.glimpse)) : all, total: all.count)
-        }
-        return out
-    }
-
-    /// The provider you are on first, the ones people pick by name next,
-    /// and the routers that carry hundreds last.
-    private func rank(_ provider: String) -> Int {
-        if provider == current.provider { return 0 }
-        let first = ["codegraff", "codex", "anthropic", "openai", "xai", "kimi", "deepseek"]
-        if let at = first.firstIndex(of: provider) { return at + 1 }
-        return provider == "openrouter" ? 99 : 50
+    private var currentLevels: [String] {
+        if !current.effortLevels.isEmpty { return current.effortLevels }
+        return agent.effort?.levels.map(\.value) ?? []
     }
 
     var body: some View {
-        let sections = sections
-        let rows = sections.flatMap { $0.rows.map(\.model) }
-        VStack(spacing: 0) {
+        Group {
+            switch step {
+            case .compact:
+                compactCard
+            case .list:
+                catalogList
+            case .stage(let model):
+                stagePage(for: model)
+            }
+        }
+        .animation(Motion.snappy, value: step)
+        .onAppear {
+            if currentLevels.count > 1 {
+                step = .compact
+                canReturnCompact = true
+            } else {
+                step = .list
+                canReturnCompact = false
+                highlightedID = current.id
+                DispatchQueue.main.async { searchFocused = true }
+            }
+        }
+    }
+
+    // MARK: - Step 0: Compact thinking tier card (276pt)
+
+    private var compactCard: some View {
+        let levels = currentLevels
+        let binary = current.binaryEffort
+        let accent = ProviderMark.brandAccent(for: current.makerKey, dark: dark)
+        let activeValue = agent.effort?.current ?? levels.first ?? ""
+        let activeIndex = levels.firstIndex(of: activeValue) ?? 0
+        let levelText = Agent.Model.reasoningLabel(activeValue, binary: binary)
+
+        return VStack(alignment: .leading, spacing: 0) {
+            Button {
+                canReturnCompact = true
+                highlightedID = current.id
+                step = .list
+                DispatchQueue.main.async { searchFocused = true }
+            } label: {
+                HStack(spacing: 8) {
+                    ProviderMark(provider: current.makerKey, size: 15)
+                    VStack(alignment: .leading, spacing: 1) {
+                        Text(current.label)
+                            .font(.system(size: 13, weight: .medium))
+                            .foregroundStyle(Palette.ink)
+                            .lineLimit(1)
+                        Text("via \(Agent.Model.said(current.provider))")
+                            .font(.system(size: 10.5))
+                            .foregroundStyle(Palette.muted)
+                            .lineLimit(1)
+                    }
+                    Spacer(minLength: 6)
+                    Image(systemName: "chevron.down")
+                        .font(.system(size: 10, weight: .semibold))
+                        .foregroundStyle(Palette.muted)
+                }
+                .padding(.horizontal, 10)
+                .padding(.vertical, 8)
+                .background(RoundedRectangle(cornerRadius: 8, style: .continuous).fill(Palette.hover.opacity(0.55)))
+                .contentShape(Rectangle())
+            }
+            .buttonStyle(.plain)
+            .padding(6)
+
+            Rectangle().fill(Palette.hairline).frame(height: 1).padding(.horizontal, 8)
+
+            VStack(alignment: .leading, spacing: 10) {
+                HStack(alignment: .firstTextBaseline) {
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text(binary ? "THINKING" : "REASONING")
+                            .font(.system(size: 10, weight: .medium, design: .monospaced))
+                            .foregroundStyle(Palette.muted.opacity(0.75))
+                        Text(levelText)
+                            .font(.system(size: 13, weight: .semibold))
+                            .foregroundStyle(Palette.ink)
+                            .contentTransition(.numericText())
+                    }
+                    Spacer(minLength: 0)
+                    if let ctx = current.window {
+                        Text(ctx)
+                            .font(.system(size: 10, weight: .medium, design: .monospaced))
+                            .foregroundStyle(Palette.muted)
+                            .padding(.horizontal, 6)
+                            .padding(.vertical, 2)
+                            .background(Palette.wash, in: RoundedRectangle(cornerRadius: 5, style: .continuous))
+                    }
+                }
+
+                EffortCapsuleSlider(
+                    count: levels.count,
+                    index: activeIndex,
+                    accent: accent,
+                    compact: true
+                ) { next in
+                    guard levels.indices.contains(next) else { return }
+                    agent.choose(effort: levels[next])
+                }
+
+                HStack {
+                    Text(binary ? "Off" : "Faster")
+                    Spacer()
+                    Text(binary ? "On" : "Deeper")
+                }
+                .font(.system(size: 10.5, weight: .medium))
+                .foregroundStyle(Palette.muted)
+            }
+            .padding(.horizontal, 12)
+            .padding(.top, 10)
+            .padding(.bottom, 12)
+        }
+        .frame(width: 276)
+    }
+
+    // MARK: - Step 1: Full searchable model catalog (356pt)
+
+    private struct SectionGroup: Identifiable {
+        let id: String
+        let provider: String
+        let title: String
+        let isPlan: Bool
+        let models: [Agent.Model]
+    }
+
+    private var trimmedQuery: String {
+        query.trimmingCharacters(in: .whitespacesAndNewlines)
+    }
+
+    private var catalogRows: (flat: [Agent.Model], sections: [SectionGroup]) {
+        let favs = agent.favoriteModelIDs
+        let base = starredOnly ? agent.models.filter { favs.contains($0.id) } : agent.models
+
+        if !trimmedQuery.isEmpty || starredOnly {
+            let matched: [(model: Agent.Model, rank: Int)] = base.compactMap { m in
+                guard let rank = m.searchRank(for: trimmedQuery) else { return nil }
+                return (m, rank)
+            }
+            let sorted = matched.sorted { a, b in
+                if a.model.billingRank != b.model.billingRank { return a.model.billingRank < b.model.billingRank }
+                if a.rank != b.rank { return a.rank < b.rank }
+                return false
+            }.map(\.model)
+            return (sorted, [])
+        }
+
+        // Preserve first-appearance route order, place `claude-agent` ahead of
+        // `anthropic`, then order routes by best billing rank (plan → local →
+        // credits → api), 1:1 with NanoHarness `model_picker.zig:rows`.
+        var routeOrder: [String] = []
+        var byRoute: [String: [Agent.Model]] = [:]
+        for model in base {
+            if byRoute[model.provider] == nil { routeOrder.append(model.provider) }
+            byRoute[model.provider, default: []].append(model)
+        }
+        if let agentIdx = routeOrder.firstIndex(of: "claude-agent"),
+           let anthIdx = routeOrder.firstIndex(of: "anthropic"),
+           agentIdx > anthIdx {
+            let moved = routeOrder.remove(at: agentIdx)
+            routeOrder.insert(moved, at: anthIdx)
+        }
+        let sortedRoutes = routeOrder.enumerated().sorted { a, b in
+            let ra = byRoute[a.element]?.map(\.billingRank).min() ?? 2
+            let rb = byRoute[b.element]?.map(\.billingRank).min() ?? 2
+            if ra != rb { return ra < rb }
+            return a.offset < b.offset
+        }.map(\.element)
+
+        var sections: [SectionGroup] = []
+        var flat: [Agent.Model] = []
+        for route in sortedRoutes {
+            let items = (byRoute[route] ?? []).sorted { a, b in
+                if a.billingRank != b.billingRank { return a.billingRank < b.billingRank }
+                return false
+            }
+            guard !items.isEmpty else { continue }
+            let isPlan = items.contains { $0.billingRank == 0 }
+            sections.append(SectionGroup(
+                id: route,
+                provider: route,
+                title: Agent.Model.said(route),
+                isPlan: isPlan,
+                models: items
+            ))
+            flat.append(contentsOf: items)
+        }
+        return (flat, sections)
+    }
+
+    private var catalogList: some View {
+        let data = catalogRows
+        let flat = data.flat
+        let highlighted = flat.first { $0.id == highlightedID } ?? flat.first
+
+        return VStack(spacing: 0) {
             HStack(spacing: 8) {
+                if canReturnCompact {
+                    Button { step = .compact } label: {
+                        Image(systemName: "chevron.left")
+                            .font(.system(size: 11, weight: .semibold))
+                            .foregroundStyle(Palette.muted)
+                            .frame(width: 22, height: 22)
+                            .background(Palette.wash, in: RoundedRectangle(cornerRadius: 6, style: .continuous))
+                    }
+                    .buttonStyle(.plain)
+                    .help("Back to reasoning slider")
+                }
                 Image(systemName: "magnifyingglass")
                     .font(.system(size: 11, weight: .medium))
                     .foregroundStyle(Palette.muted)
                 TextField("Search \(agent.models.count) models", text: $query)
                     .textFieldStyle(.plain)
                     .font(.system(size: 13))
-                    .focused($typing)
-                    .onSubmit { if rows.indices.contains(picked) { choose(rows[picked]) } }
+                    .focused($searchFocused)
+                    .onSubmit {
+                        if let pick = highlighted { openStageOrCommit(pick) }
+                    }
                     .onKeyPress(.downArrow) {
-                        picked = min(picked + 1, max(0, rows.count - 1))
+                        moveHighlight(in: flat, delta: 1)
                         return .handled
                     }
                     .onKeyPress(.upArrow) {
-                        picked = max(picked - 1, 0)
+                        moveHighlight(in: flat, delta: -1)
                         return .handled
                     }
+                    .onKeyPress(.escape) {
+                        if !query.isEmpty {
+                            query = ""
+                        } else if canReturnCompact {
+                            step = .compact
+                        } else {
+                            done()
+                        }
+                        return .handled
+                    }
+                if !query.isEmpty {
+                    Button { query = "" } label: {
+                        Image(systemName: "xmark.circle.fill")
+                            .font(.system(size: 12))
+                            .foregroundStyle(Palette.muted)
+                    }
+                    .buttonStyle(.plain)
+                }
+                Button {
+                    starredOnly.toggle()
+                    highlightedID = nil
+                } label: {
+                    Image(systemName: starredOnly ? "star.fill" : "star")
+                        .font(.system(size: 11.5, weight: .medium))
+                        .foregroundStyle(starredOnly ? Palette.accent : Palette.muted)
+                        .frame(width: 24, height: 24)
+                        .background(
+                            RoundedRectangle(cornerRadius: 6, style: .continuous)
+                                .fill(starredOnly ? Palette.accent.opacity(0.14) : .clear)
+                        )
+                }
+                .buttonStyle(.plain)
+                .help(starredOnly ? "Show all models" : "Show starred models")
             }
             .padding(.horizontal, 12)
-            .padding(.vertical, 10)
+            .padding(.vertical, 9)
+
             Rectangle().fill(Palette.hairline).frame(height: 1)
+
             ScrollViewReader { reader in
                 ScrollView {
                     LazyVStack(alignment: .leading, spacing: 0, pinnedViews: [.sectionHeaders]) {
-                        ForEach(sections) { section in
-                            SwiftUI.Section {
-                                ForEach(section.rows, id: \.index) { row in
-                                    line(row.model, lit: row.index == picked)
-                                        .id(row.index)
-                                        .onTapGesture { choose(row.model) }
-                                        .onHover { if $0 { picked = row.index } }
-                                }
-                                if section.rows.count < section.total {
-                                    Button {
-                                        opened.insert(section.id)
-                                    } label: {
-                                        Text("Show all \(section.total)")
-                                            .font(.system(size: 12))
+                        if data.sections.isEmpty {
+                            ForEach(flat, id: \.id) { model in
+                                modelRow(model, lit: model.id == highlighted?.id, showRoute: true)
+                                    .id(model.id)
+                            }
+                        } else {
+                            ForEach(data.sections) { section in
+                                SwiftUI.Section {
+                                    ForEach(section.models, id: \.id) { model in
+                                        modelRow(model, lit: model.id == highlighted?.id, showRoute: false)
+                                            .id(model.id)
+                                    }
+                                } header: {
+                                    HStack(spacing: 7) {
+                                        ProviderMark(provider: section.provider, size: 13)
+                                        Text(section.title)
+                                            .font(.system(size: 11, weight: .semibold))
                                             .foregroundStyle(Palette.muted)
-                                            .padding(.horizontal, 12)
-                                            .padding(.vertical, 6)
-                                            .contentShape(Rectangle())
+                                        Spacer(minLength: 4)
+                                        if section.isPlan {
+                                            Text("Plan")
+                                                .font(.system(size: 10, weight: .semibold))
+                                                .foregroundStyle(Palette.accent)
+                                                .padding(.horizontal, 6)
+                                                .padding(.vertical, 1.5)
+                                                .background(Palette.accent.opacity(0.12), in: RoundedRectangle(cornerRadius: 4, style: .continuous))
+                                        }
                                     }
-                                    .buttonStyle(.plain)
-                                }
-                            } header: {
-                                HStack(spacing: 6) {
-                                    if section.id != "recent" {
-                                        ProviderMark(provider: section.id, size: 12)
-                                    }
-                                    Text(section.title)
-                                }
-                                    .font(.system(size: 11, weight: .semibold))
-                                    .foregroundStyle(Palette.muted)
                                     .frame(maxWidth: .infinity, alignment: .leading)
                                     .padding(.horizontal, 12)
-                                    .padding(.top, 10)
+                                    .padding(.top, 9)
                                     .padding(.bottom, 4)
                                     .background(.regularMaterial)
+                                }
                             }
                         }
-                        if rows.isEmpty {
-                            Text("No model matches “\(query)”")
+                        if flat.isEmpty {
+                            Text(starredOnly && trimmedQuery.isEmpty
+                                 ? "No starred models yet — click ★ on any model."
+                                 : "No model matches “\(query)”")
                                 .font(.system(size: 12.5))
                                 .foregroundStyle(Palette.muted)
                                 .padding(16)
                         }
                     }
-                    .padding(.bottom, 6)
+                    .padding(.vertical, 4)
                 }
-                .onChange(of: picked) { _, now in reader.scrollTo(now) }
+                .onChange(of: highlightedID) { _, now in
+                    if let now { reader.scrollTo(now) }
+                }
             }
-            .frame(height: 400)
+            .frame(height: 380)
+
+            if let info = highlighted {
+                Rectangle().fill(Palette.hairline).frame(height: 1)
+                detailFooter(for: info)
+            }
         }
-        .frame(width: 360)
-        .onAppear { DispatchQueue.main.async { typing = true } }
-        .onChange(of: query) { _, _ in picked = 0 }
+        .frame(width: 356)
+        .onChange(of: query) { _, _ in
+            highlightedID = catalogRows.flat.first?.id
+        }
     }
 
-    private func line(_ model: Agent.Model, lit: Bool) -> some View {
-        HStack(spacing: 8) {
-            Image(systemName: "checkmark")
-                .font(.system(size: 9.5, weight: .bold))
-                .foregroundStyle(Palette.ink)
-                .opacity(model == current ? 1 : 0)
-                .frame(width: 12)
-            Text(model.label)
-                .font(.system(size: 13))
-                .foregroundStyle(Palette.ink)
-                .lineLimit(1)
-                .truncationMode(.tail)
-            if let tag = model.tag {
-                Text(tag)
-                    .font(.system(size: 10, weight: .medium))
-                    .foregroundStyle(Palette.muted)
+    private func modelRow(_ model: Agent.Model, lit: Bool, showRoute: Bool) -> some View {
+        let selected = model == current
+        let starred = agent.favoriteModelIDs.contains(model.id)
+
+        return HStack(spacing: 8) {
+            ProviderMark(provider: model.makerKey, size: 14)
+            VStack(alignment: .leading, spacing: 1) {
+                HStack(spacing: 5) {
+                    Text(model.label)
+                        .font(.system(size: 13, weight: .medium))
+                        .foregroundStyle(lit || selected ? Palette.ink : Palette.ink.opacity(0.92))
+                        .lineLimit(1)
+                        .truncationMode(.tail)
+                    if let tag = model.tag {
+                        Text(tag)
+                            .font(.system(size: 9.5, weight: .medium))
+                            .foregroundStyle(Palette.muted)
+                            .padding(.horizontal, 5)
+                            .padding(.vertical, 1)
+                            .background(Palette.wash, in: Capsule())
+                    }
+                }
+                if showRoute {
+                    Text("via \(Agent.Model.said(model.provider))")
+                        .font(.system(size: 10.5))
+                        .foregroundStyle(Palette.muted)
+                        .lineLimit(1)
+                }
+            }
+            Spacer(minLength: 6)
+            if showRoute && model.billingRank == 0 {
+                Text("Plan")
+                    .font(.system(size: 9.5, weight: .semibold))
+                    .foregroundStyle(Palette.accent)
                     .padding(.horizontal, 5)
                     .padding(.vertical, 1)
-                    .background(Palette.wash, in: Capsule())
-            }
-            Spacer(minLength: 8)
-            ProviderMark(provider: model.provider, size: 13)
-                .help(Agent.Model.said(model.provider))
-            if let maker = model.maker {
-                Text(maker)
-                    .font(.system(size: 11))
-                    .foregroundStyle(Palette.muted)
-                    .lineLimit(1)
+                    .background(Palette.accent.opacity(0.12), in: RoundedRectangle(cornerRadius: 4, style: .continuous))
             }
             if let window = model.window {
                 Text(window)
-                    .font(.system(size: 11))
-                    .monospacedDigit()
-                    .foregroundStyle(Palette.muted.opacity(0.8))
-                    .frame(minWidth: 34, alignment: .trailing)
+                    .font(.system(size: 10, weight: .medium, design: .monospaced))
+                    .foregroundStyle(Palette.muted.opacity(0.85))
+                    .padding(.horizontal, 5)
+                    .padding(.vertical, 1.5)
+                    .background(Palette.wash, in: RoundedRectangle(cornerRadius: 4, style: .continuous))
             }
+            if selected {
+                Image(systemName: "checkmark")
+                    .font(.system(size: 10, weight: .bold))
+                    .foregroundStyle(Palette.accent)
+            }
+            Button {
+                agent.toggleFavorite(model)
+            } label: {
+                Image(systemName: starred ? "star.fill" : "star")
+                    .font(.system(size: 10.5))
+                    .foregroundStyle(starred ? Palette.accent : Palette.muted.opacity(lit ? 0.7 : 0.35))
+                    .frame(width: 22, height: 22)
+                    .contentShape(Rectangle())
+            }
+            .buttonStyle(.plain)
+            .help(starred ? "Remove from starred" : "Star model")
         }
         .padding(.horizontal, 8)
-        .padding(.vertical, 5)
-        .background(RoundedRectangle(cornerRadius: 7, style: .continuous).fill(lit ? Palette.hover : .clear))
-        .padding(.horizontal, 4)
+        .padding(.vertical, showRoute ? 5 : 6)
+        .background(
+            RoundedRectangle(cornerRadius: 8, style: .continuous)
+                .fill(lit || selected ? Palette.hover : .clear)
+        )
+        .padding(.horizontal, 6)
         .contentShape(Rectangle())
+        .onTapGesture { openStageOrCommit(model) }
+        .onHover { over in if over { highlightedID = model.id } }
         .accessibilityElement(children: .combine)
         .accessibilityValue(Agent.Model.said(model.provider))
     }
 
-    private func choose(_ model: Agent.Model) {
-        done()
-        agent.choose(model)
+    /// Catalog-only facts strip under the list (matching NanoHarness detail card).
+    private func detailFooter(for model: Agent.Model) -> some View {
+        HStack(spacing: 8) {
+            Text("via \(Agent.Model.said(model.provider))")
+                .font(.system(size: 11, weight: .medium))
+                .foregroundStyle(Palette.muted)
+                .lineLimit(1)
+            Spacer(minLength: 4)
+            if let range = model.reasoningRange {
+                factChip(range)
+            }
+            if let billing = model.billingLabel {
+                factChip(billing)
+            }
+        }
+        .padding(.horizontal, 12)
+        .padding(.vertical, 8)
+        .background(Palette.ground.opacity(0.6))
+    }
+
+    private func factChip(_ text: String) -> some View {
+        Text(text)
+            .font(.system(size: 10, weight: .medium))
+            .foregroundStyle(Palette.muted)
+            .padding(.horizontal, 6)
+            .padding(.vertical, 2)
+            .background(Palette.wash, in: RoundedRectangle(cornerRadius: 5, style: .continuous))
+            .lineLimit(1)
+    }
+
+    private func moveHighlight(in flat: [Agent.Model], delta: Int) {
+        guard !flat.isEmpty else { return }
+        let idx = flat.firstIndex { $0.id == highlightedID } ?? 0
+        let next = min(max(0, idx + delta), flat.count - 1)
+        highlightedID = flat[next].id
+    }
+
+    private func openStageOrCommit(_ model: Agent.Model) {
+        let levels = model.effortLevels
+        if levels.count > 1 {
+            let preferred = agent.preferredEffort
+            if levels.contains(preferred) {
+                stagedEffort = preferred
+            } else if levels.contains("medium") {
+                stagedEffort = "medium"
+            } else {
+                stagedEffort = levels.last ?? ""
+            }
+            step = .stage(model)
+        } else {
+            done()
+            agent.choose(model)
+        }
+    }
+
+    // MARK: - Step 2: Model reasoning stage (356pt, 1:1 with NanoHarness `page`)
+
+    private func stagePage(for model: Agent.Model) -> some View {
+        let levels = model.effortLevels
+        let binary = model.binaryEffort
+        let accent = ProviderMark.brandAccent(for: model.makerKey, dark: dark)
+        let idx = levels.firstIndex(of: stagedEffort) ?? max(0, levels.count - 1)
+        let currentName = levels.indices.contains(idx)
+            ? Agent.Model.reasoningLabel(levels[idx], binary: binary)
+            : "Default"
+
+        return VStack(alignment: .leading, spacing: 14) {
+            HStack {
+                Button {
+                    step = .list
+                    DispatchQueue.main.async { searchFocused = true }
+                } label: {
+                    HStack(spacing: 5) {
+                        Image(systemName: "arrow.left")
+                            .font(.system(size: 11, weight: .semibold))
+                        Text("Models")
+                            .font(.system(size: 12, weight: .medium))
+                    }
+                    .foregroundStyle(Palette.ink)
+                    .padding(.horizontal, 8)
+                    .frame(height: 26)
+                    .background(Palette.wash, in: RoundedRectangle(cornerRadius: 6, style: .continuous))
+                }
+                .buttonStyle(.plain)
+                Spacer()
+                Text("esc")
+                    .font(.system(size: 10, weight: .medium, design: .monospaced))
+                    .foregroundStyle(Palette.muted)
+                    .padding(.horizontal, 6)
+                    .padding(.vertical, 2)
+                    .background(Palette.wash, in: RoundedRectangle(cornerRadius: 4, style: .continuous))
+            }
+
+            HStack(spacing: 12) {
+                ProviderMark(provider: model.makerKey, size: 20)
+                    .frame(width: 38, height: 38)
+                    .background(Palette.wash, in: RoundedRectangle(cornerRadius: 10, style: .continuous))
+                    .overlay(RoundedRectangle(cornerRadius: 10, style: .continuous).strokeBorder(Palette.hairline, lineWidth: 1))
+                VStack(alignment: .leading, spacing: 2) {
+                    Text(model.label)
+                        .font(.system(size: 15.5, weight: .semibold))
+                        .foregroundStyle(Palette.ink)
+                        .lineLimit(1)
+                    Text("via \(Agent.Model.said(model.provider))")
+                        .font(.system(size: 11, weight: .medium))
+                        .foregroundStyle(Palette.muted)
+                }
+                Spacer(minLength: 0)
+            }
+
+            if model.window != nil || model.billingLabel != nil || model.fastSupported {
+                HStack(spacing: 6) {
+                    if let ctx = model.window { factChip("\(ctx) context") }
+                    if let billing = model.billingLabel { factChip(billing) }
+                    if model.fastSupported { factChip("Fast supported") }
+                }
+            }
+
+            VStack(alignment: .leading, spacing: 10) {
+                HStack {
+                    Text(binary ? "Thinking" : "Reasoning")
+                        .font(.system(size: 13, weight: .medium))
+                        .foregroundStyle(Palette.ink)
+                    Spacer()
+                    Text(currentName)
+                        .font(.system(size: 12, weight: .semibold))
+                        .foregroundStyle(Palette.ink)
+                        .padding(.horizontal, 8)
+                        .padding(.vertical, 2.5)
+                        .background(accent.opacity(0.16), in: RoundedRectangle(cornerRadius: 6, style: .continuous))
+                        .overlay(RoundedRectangle(cornerRadius: 6, style: .continuous).strokeBorder(accent.opacity(0.32), lineWidth: 1))
+                        .contentTransition(.numericText())
+                }
+
+                if levels.count > 1 {
+                    EffortCapsuleSlider(
+                        count: levels.count,
+                        index: idx,
+                        accent: accent,
+                        compact: false
+                    ) { next in
+                        guard levels.indices.contains(next) else { return }
+                        stagedEffort = levels[next]
+                    }
+                    HStack {
+                        Text(binary ? "Off" : "Faster")
+                        Spacer()
+                        Text(binary ? "On" : "Deeper")
+                    }
+                    .font(.system(size: 11, weight: .medium))
+                    .foregroundStyle(Palette.muted)
+                }
+            }
+
+            Button {
+                done()
+                agent.choose(model, effort: levels.indices.contains(idx) ? levels[idx] : nil)
+            } label: {
+                Text("Use model")
+                    .font(.system(size: 13, weight: .medium))
+                    .foregroundStyle(Palette.onAccent)
+                    .frame(maxWidth: .infinity)
+                    .frame(height: 36)
+                    .background(Palette.accent, in: RoundedRectangle(cornerRadius: 8, style: .continuous))
+            }
+            .buttonStyle(TactilePress())
+            .keyboardShortcut(.return, modifiers: [])
+        }
+        .padding(16)
+        .frame(width: 356)
+        .onKeyPress(.escape) {
+            step = .list
+            DispatchQueue.main.async { searchFocused = true }
+            return .handled
+        }
+    }
+}
+
+/// Capsule reasoning slider 1:1 with NanoHarness `view_picker.zig:slider`:
+/// brand-colored capsule fill, illuminated stop dots, continuous pointer drag
+/// with alignment haptics, and smooth settle onto stops on release.
+private struct EffortCapsuleSlider: View {
+    let count: Int
+    let index: Int
+    let accent: Color
+    let compact: Bool
+    let onSelect: (Int) -> Void
+
+    @State private var dragFraction: CGFloat?
+
+    private var last: CGFloat { CGFloat(max(1, count - 1)) }
+    private var fraction: CGFloat { dragFraction ?? (CGFloat(index) / last) }
+
+    var body: some View {
+        let railH: CGFloat = compact ? 28 : 26
+        let thumbW: CGFloat = compact ? 40 : 28
+        let thumbH: CGFloat = compact ? 30 : 28
+
+        GeometryReader { geo in
+            let w = max(thumbW, geo.size.width)
+            let travel = max(1, w - thumbW)
+            let fillW = max(railH, thumbW + fraction * travel)
+            let thumbX = fraction * travel
+
+            ZStack(alignment: .leading) {
+                Capsule()
+                    .fill(Palette.ink.opacity(0.07))
+                    .overlay(Capsule().strokeBorder(Palette.hairline, lineWidth: 1))
+                    .frame(height: railH)
+
+                Capsule()
+                    .fill(
+                        LinearGradient(
+                            colors: [accent.opacity(0.85), accent],
+                            startPoint: .leading,
+                            endPoint: .trailing
+                        )
+                    )
+                    .frame(width: fillW, height: railH)
+
+                // Stop dots along the rail.
+                if count > 1 {
+                    ForEach(0..<count, id: \.self) { stop in
+                        let stopFrac = CGFloat(stop) / last
+                        let x = thumbW / 2 + stopFrac * travel
+                        let reached = stopFrac <= fraction + 0.01
+                        Circle()
+                            .fill(reached ? Color.white.opacity(0.65) : Palette.muted.opacity(0.35))
+                            .frame(width: 4.5, height: 4.5)
+                            .position(x: x, y: geo.size.height / 2)
+                    }
+                }
+
+                // Tactile neutral thumb.
+                Capsule()
+                    .fill(Color.white)
+                    .overlay(Capsule().strokeBorder(Color.black.opacity(0.14), lineWidth: 0.75))
+                    .shadow(color: .black.opacity(dragFraction != nil ? 0.22 : 0.14), radius: dragFraction != nil ? 6 : 3, y: 1)
+                    .frame(width: thumbW, height: thumbH)
+                    .offset(x: thumbX)
+            }
+            .frame(maxWidth: .infinity, maxHeight: .infinity)
+            .contentShape(Rectangle())
+            .gesture(
+                DragGesture(minimumDistance: 0)
+                    .onChanged { value in
+                        let raw = min(1, max(0, (value.location.x - thumbW / 2) / travel))
+                        dragFraction = raw
+                        let snapped = Int((raw * last).rounded())
+                        if snapped != index {
+                            NSHapticFeedbackManager.defaultPerformer.perform(.alignment, performanceTime: .now)
+                            onSelect(snapped)
+                        }
+                    }
+                    .onEnded { value in
+                        let raw = min(1, max(0, (value.location.x - thumbW / 2) / travel))
+                        let snapped = Int((raw * last).rounded())
+                        if snapped != index {
+                            NSHapticFeedbackManager.defaultPerformer.perform(.alignment, performanceTime: .now)
+                            onSelect(snapped)
+                        }
+                        withAnimation(Motion.snappy) { dragFraction = nil }
+                    }
+            )
+            .animation(dragFraction == nil ? Motion.snappy : nil, value: index)
+        }
+        .frame(height: compact ? 34 : 32)
     }
 }
 
@@ -948,7 +1529,7 @@ struct AgentPage: View {
         Card {
             Line(
                 "Codegraff",
-                "Ask beside a page with . while reading. ⌘; opens or closes chat; ⌘↩ asks from the address field."
+                "Toggle the agent sidebar with ⌘;, expand full screen with ⇧⌘;, or press . while reading. ⌘↩ asks from the address field."
             ) {
                 Switch(on: $prefs.usesAgent)
             }

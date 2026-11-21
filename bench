@@ -304,6 +304,9 @@ def main(argv):
     elif verb == "fill":
         if len(args) > 1: sys.exit("usage: bench fill [STEPS]")
         if args: request["steps"] = int(args[0])
+    elif verb == "split-drag":
+        if len(args) > 1: sys.exit("usage: bench split-drag [STEPS]")
+        if args: request["steps"] = int(args[0])
     elif verb == "peek":
         if len(args) != 1: sys.exit("usage: bench peek URL|close")
         request["url"] = args[0]

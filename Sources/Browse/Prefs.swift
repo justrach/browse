@@ -88,10 +88,26 @@ final class Preferences: ObservableObject {
     @Published var googleSuggestions: Bool {
         didSet { store.set(googleSuggestions, forKey: "search.google.suggestions") }
     }
-    /// Tabs nobody has looked at for half an hour give their page back and
-    /// keep where they were. On unless turned off.
+    enum MemoryMode: String, CaseIterable, Identifiable {
+        case balanced
+        case low
+        var id: String { rawValue }
+        var title: String {
+            switch self {
+            case .balanced: return "Balanced"
+            case .low: return "Low RAM"
+            }
+        }
+    }
+
+    /// Tabs nobody has looked at give their page back and keep where they were.
+    /// On unless turned off.
     @Published var sleepsTabs: Bool {
         didSet { store.set(sleepsTabs, forKey: "tabs.sleep") }
+    }
+    /// How aggressively inactive tabs and background WebKit processes are put to sleep.
+    @Published var memoryMode: MemoryMode {
+        didSet { store.set(memoryMode.rawValue, forKey: "tabs.memoryMode") }
     }
     @Published var showsReading: Bool {
         didSet { store.set(showsReading, forKey: "tabs.reading") }
@@ -332,6 +348,7 @@ final class Preferences: ObservableObject {
         recentSearches = store.bool(forKey: "search.recent")
         googleSuggestions = store.bool(forKey: "search.google.suggestions")
         sleepsTabs = store.object(forKey: "tabs.sleep") as? Bool ?? true
+        memoryMode = store.string(forKey: "tabs.memoryMode").flatMap(MemoryMode.init) ?? .balanced
         showsReading = store.object(forKey: "tabs.reading") as? Bool ?? true
         shielded = store.object(forKey: "shield") as? Bool ?? true
         let keeps = store.bool(forKey: "sites.keep")

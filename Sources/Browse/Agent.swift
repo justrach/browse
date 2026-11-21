@@ -115,6 +115,10 @@ final class Agent: ObservableObject {
         let provider: String
         let name: String
         var context = 0
+        var rawMaker: String? = nil
+        var billing: String? = nil
+        var effortLevels: [String] = []
+        var fastSupported = false
         var id: String { "\(provider)/\(name)" }
 
         static func == (a: Model, b: Model) -> Bool { a.id == b.id }
@@ -133,11 +137,109 @@ final class Agent: ObservableObject {
             name.split(separator: ":").dropFirst().first.map(String.init)
         }
 
+        /// Canonical maker key (1:1 with NanoHarness `model_picker.zig:maker`),
+        /// used for the row's logo and the reasoning slider's brand accent.
+        var makerKey: String {
+            if let rawMaker, !rawMaker.isEmpty { return rawMaker.lowercased() }
+            let clean = bare.lowercased()
+            let prefixes: [(String, String)] = [
+                ("claude", "anthropic"), ("gpt", "openai"), ("codex", "openai"),
+                ("o1", "openai"), ("o3", "openai"), ("o4", "openai"),
+                ("grok", "xai"), ("gemini", "google"), ("gemma", "google"),
+                ("deepseek", "deepseek"), ("mimo", "xiaomi"),
+                ("kimi", "moonshot"), ("k2", "moonshot"), ("k3", "moonshot"),
+                ("glm", "zai"), ("qwen", "alibaba"), ("minimax", "minimax"),
+                ("mistral", "mistral"), ("codestral", "mistral"), ("devstral", "mistral"),
+                ("muse-spark", "meta"), ("llama", "meta"),
+            ]
+            for (prefix, lab) in prefixes where clean.hasPrefix(prefix) { return lab }
+            if let slash = name.firstIndex(of: "/") {
+                let vendor = String(name[..<slash]).lowercased()
+                if !vendor.isEmpty { return vendor }
+            }
+            let p = provider.lowercased()
+            if p == "codex" || p == "chatgpt-new" { return "openai" }
+            if p == "claude-agent" { return "anthropic" }
+            if p == "kimi" || p == "moonshot" { return "moonshot" }
+            return p
+        }
+
         /// Whose model it is, when a router carries it: "anthropic/…" is
         /// Anthropic's.
         var maker: String? {
             guard let slash = name.firstIndex(of: "/") else { return nil }
             return Model.said(String(name[..<slash]))
+        }
+
+        /// Subscription (`plan` / `plan*`) lead, then `local`, then `credits`/unknown,
+        /// then `api` — 1:1 with NanoHarness `model_picker.zig:billingRank`.
+        var billingRank: Int {
+            switch billing {
+            case "plan", "plan*": return 0
+            case "local": return 1
+            case "api": return 3
+            default: return 2
+            }
+        }
+
+        /// Billing tag in words (`model_picker.zig:billingLabel`).
+        var billingLabel: String? {
+            switch billing {
+            case "plan": return "Your plan"
+            case "plan*": return "Your plan · separate limit"
+            case "credits": return "Credits"
+            case "api": return "API usage"
+            case "local": return "Runs locally"
+            case let other?: return other
+            case nil: return nil
+            }
+        }
+
+        /// Whether this model uses a binary Off/On reasoning switch.
+        var binaryEffort: Bool {
+            effortLevels.count == 2 && effortLevels.contains("none") && effortLevels.contains("high")
+        }
+
+        /// Human-readable reasoning range ("Low – Ultra") from the catalog.
+        var reasoningRange: String? {
+            guard let first = effortLevels.first, let last = effortLevels.last else { return nil }
+            let a = Model.reasoningLabel(first, binary: binaryEffort)
+            let b = Model.reasoningLabel(last, binary: binaryEffort)
+            return a == b ? a : "\(a) – \(b)"
+        }
+
+        static func reasoningLabel(_ level: String, binary: Bool = false) -> String {
+            let low = level.lowercased()
+            if binary && low == "high" { return "On" }
+            switch low {
+            case "none", "off": return "Off"
+            case "minimal": return "Minimal"
+            case "low": return "Low"
+            case "medium": return "Medium"
+            case "high": return "High"
+            case "xhigh": return "XHigh"
+            case "max": return "Max"
+            case "ultra": return "Ultra"
+            case "ultracode": return "Ultracode"
+            case "ultrathink": return "Ultrathink"
+            default: return level.prefix(1).uppercased() + level.dropFirst()
+            }
+        }
+
+        /// Search ranking 1:1 with NanoHarness `model_picker.zig:searchRank`:
+        /// 0 = prefix on label/name, 1 = substring on label/name, 2 = match on
+        /// full `provider/name` id, route display name, or maker. Nil = no match.
+        func searchRank(for rawQuery: String) -> Int? {
+            let trimmed = rawQuery.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+            guard !trimmed.isEmpty else { return 0 }
+            let labelLow = label.lowercased()
+            let nameLow = name.lowercased()
+            if labelLow.hasPrefix(trimmed) || nameLow.hasPrefix(trimmed) { return 0 }
+            let words = trimmed.split(whereSeparator: \.isWhitespace).map(String.init)
+            if words.allSatisfy({ labelLow.contains($0) || nameLow.contains($0) }) { return 1 }
+            let hay = "\(id) \(Model.said(provider)) \(maker ?? "") \(makerKey)".lowercased()
+            if words.allSatisfy({ hay.contains($0) }) { return 2 }
+            return nil
         }
 
         /// "gpt-6-sol" as people say it: "GPT-6 Sol"; "claude-opus-4-8" is
@@ -189,12 +291,22 @@ final class Agent: ObservableObject {
             "openai": "OpenAI", "chatgpt": "ChatGPT", "gemma": "Gemma", "phi": "Phi",
         ]
 
-        /// Its window in words a person reads at a glance: "1M", "262K".
+        /// Its window in words a person reads at a glance: "1M", "1.05M", "270k"
+        /// (1:1 with NanoHarness `model_picker.zig:contextLabel`).
         var window: String? {
             guard context > 0 else { return nil }
-            if context >= 1_000_000 { return context % 1_000_000 < 100_000 ? "\(context / 1_000_000)M" : String(format: "%.1fM", Double(context) / 1_000_000) }
-            if context >= 1_000 { return "\(context / 1_000)K" }
-            return "\(context)"
+            if context >= 1024, (context & (context - 1)) == 0 {
+                return context >= (1 << 20) ? "\(context >> 20)M" : "\(context >> 10)k"
+            }
+            if context < 1_000 { return "\(context)" }
+            let thousands = (context + 500) / 1_000
+            if thousands < 1_000 { return "\(thousands)k" }
+            let hundredths = (context + 5_000) / 10_000
+            let whole = hundredths / 100
+            let frac = hundredths % 100
+            if frac == 0 { return "\(whole)M" }
+            if frac % 10 == 0 { return "\(whole).\(frac / 10)M" }
+            return String(format: "%d.%02dM", whole, frac)
         }
 
         /// Only for making pictures and sounds, or for batch jobs: nothing to
@@ -205,15 +317,37 @@ final class Agent: ObservableObject {
                 .contains { lower.contains($0) }
         }
 
-        /// A provider or maker by the name it goes by.
+        /// A provider or maker by the name it goes by (1:1 with NanoHarness
+        /// `model_picker.zig:providerInfo`).
         static func said(_ key: String) -> String {
             let known = [
-                "codegraff": "Codegraff", "codex": "Codex", "openai": "OpenAI", "anthropic": "Anthropic",
-                "xai": "xAI", "x-ai": "xAI", "kimi": "Kimi", "moonshotai": "Moonshot", "deepseek": "DeepSeek",
-                "openrouter": "OpenRouter", "google": "Google", "meta-llama": "Meta", "mistralai": "Mistral",
-                "qwen": "Qwen", "z-ai": "Z.ai", "cerebras": "Cerebras", "mlx": "MLX", "lmstudio": "LM Studio",
-                "fugu": "Fugu", "nvidia": "NVIDIA", "microsoft": "Microsoft", "amazon": "Amazon", "cohere": "Cohere",
-                "minimax": "MiniMax", "baidu": "Baidu", "bytedance": "ByteDance", "ibm-granite": "IBM", "perplexity": "Perplexity",
+                "codegraff": "Codegraff",
+                "claude-agent": "Claude Agent",
+                "codex": "Codex / ChatGPT",
+                "chatgpt-new": "ChatGPT plan",
+                "openai": "OpenAI",
+                "anthropic": "Anthropic",
+                "xai": "xAI", "x-ai": "xAI",
+                "kimi": "Kimi", "moonshot": "Moonshot", "moonshotai": "Moonshot",
+                "deepseek": "DeepSeek",
+                "openrouter": "OpenRouter",
+                "google": "Google",
+                "meta-llama": "Meta", "meta": "Meta",
+                "mistralai": "Mistral", "mistral": "Mistral",
+                "qwen": "Qwen", "alibaba": "Qwen",
+                "z-ai": "Z.ai", "zai": "Z.ai",
+                "cerebras": "Cerebras",
+                "groq": "Groq",
+                "kilo": "Kilo Gateway",
+                "vercel": "Vercel AI Gateway",
+                "fireworks": "Fireworks",
+                "mlx": "MLX", "lmstudio": "LM Studio", "omlx": "oMLX",
+                "fugu": "Sakana",
+                "xiaomi": "Xiaomi",
+                "nvidia": "NVIDIA", "microsoft": "Microsoft",
+                "amazon": "Amazon", "cohere": "Cohere",
+                "minimax": "MiniMax", "baidu": "Baidu",
+                "bytedance": "ByteDance", "ibm-granite": "IBM", "perplexity": "Perplexity",
             ]
             if let name = known[key.lowercased()] { return name }
             return key.split(separator: "-").map { $0.prefix(1).uppercased() + $0.dropFirst() }.joined(separator: " ")
@@ -610,7 +744,14 @@ final class Agent: ObservableObject {
         }
     }
 
-    func choose(_ model: Model) {
+    func choose(_ model: Model, effort wantedEffort: String? = nil) {
+        if let wantedEffort {
+            prefs.agentEffort = wantedEffort
+            if model == self.model {
+                choose(effort: wantedEffort)
+                return
+            }
+        }
         guard model != self.model else { return }
         var recent = Store.settings.stringArray(forKey: "agent.recent") ?? []
         if let leaving = self.model?.id { recent.removeAll { $0 == leaving }; recent.insert(leaving, at: 0) }
@@ -621,8 +762,26 @@ final class Agent: ObservableObject {
         let carried = session
         shutDown()
         resuming = carried
-        entries.append(Entry(kind: .note, text: "Now \(model.name)"))
+        entries.append(Entry(kind: .note, text: "Now \(model.label)"))
         start()
+    }
+
+    /// Starred model ids, persisted across launches (1:1 with NanoHarness favorites).
+    var favoriteModelIDs: Set<String> {
+        Set(Store.settings.stringArray(forKey: "agent.favorites") ?? [])
+    }
+
+    var preferredEffort: String { prefs.agentEffort }
+
+    func toggleFavorite(_ model: Model) {
+        var list = Store.settings.stringArray(forKey: "agent.favorites") ?? []
+        if let idx = list.firstIndex(of: model.id) {
+            list.remove(at: idx)
+        } else {
+            list.insert(model.id, at: 0)
+        }
+        Store.settings.set(list, forKey: "agent.favorites")
+        objectWillChange.send()
     }
 
     private func start() {
@@ -759,7 +918,21 @@ final class Agent: ObservableObject {
                       let provider = row["provider"] as? String, let name = row["name"] as? String,
                       !provider.isEmpty, !name.isEmpty
                 else { return nil }
-                let model = Model(provider: provider, name: name, context: row["context"] as? Int ?? 0)
+                let rawMaker = (row["maker"] as? String).flatMap { $0.isEmpty ? nil : $0 }
+                let cost = (row["cost"] as? String).flatMap { $0.isEmpty ? nil : $0 }
+                let separate = row["separateQuota"] as? Bool == true
+                let billing = (cost == "plan" && separate) ? "plan*" : cost
+                let effortLevels = (row["effortLevels"] as? [Any] ?? []).compactMap { $0 as? String }
+                let fast = row["fastSupported"] as? Bool == true
+                let model = Model(
+                    provider: provider,
+                    name: name,
+                    context: row["context"] as? Int ?? 0,
+                    rawMaker: rawMaker,
+                    billing: billing,
+                    effortLevels: effortLevels,
+                    fastSupported: fast
+                )
                 // Pictures, video, batch-only: nothing to have a chat with.
                 guard model.talks else { return nil }
                 return seen.insert(model.id).inserted ? model : nil
