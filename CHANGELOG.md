@@ -11,6 +11,8 @@ in [ROADMAP.md](ROADMAP.md).
 
 ## Unreleased
 
+## 1.6.1 — 22 November 2026
+
 ### Added
 
 - Rich Markdown & native LaTeX rendering in Codegraff replies: GFM tables with alignment and horizontal scrolling, fenced code blocks with language headers and Copy button, heading hierarchy, blockquotes, task checkboxes, horizontal rules, inline math (`$...$`, `\(...\)`), and display math (`$$...$$`, `\[...\]` with stacked fractions, roots, big-operator limits, matrices, and Copy TeX).
