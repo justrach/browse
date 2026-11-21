@@ -34,6 +34,7 @@ struct BrowseMCP {
             name: "browse",
             version: "1.5.0",
             capabilities: .init(
+                resources: .init(subscribe: false, listChanged: false),
                 tools: .init(listChanged: false)
             )
         )
@@ -56,6 +57,27 @@ struct BrowseMCP {
                     isError: true
                 )
             }
+        }
+
+        await server.withMethodHandler(ListResources.self) { _ in
+            .init(resources: [
+                Resource(
+                    name: "Open Tabs",
+                    uri: "browse://tabs",
+                    description: "JSON list of open browser tabs and this agent's pages (ids, titles, URLs, frontmost tab).",
+                    mimeType: "application/json"
+                ),
+                Resource(
+                    name: "Active Tab (Markdown)",
+                    uri: "browse://active",
+                    description: "Structured Markdown of the user's currently active browser tab (requires “Read and act in your tabs” scope).",
+                    mimeType: "text/markdown"
+                ),
+            ])
+        }
+
+        await server.withMethodHandler(ReadResource.self) { params in
+            try await bridge.readResource(uri: params.uri)
         }
 
         let transport = StdioTransport()
@@ -279,9 +301,53 @@ private actor BrowseBridge {
             guard let name = item["name"] as? String else { return nil }
             let description = item["description"] as? String ?? ""
             let schema = Self.toMCPValue(item["inputSchema"] ?? ["type": "object"])
-            return Tool(name: name, description: description, inputSchema: schema)
+            return Tool(
+                name: name,
+                description: description,
+                inputSchema: schema,
+                annotations: Self.annotations(for: name)
+            )
         }
         return .init(tools: tools)
+    }
+
+    func readResource(uri: String) async throws -> ReadResource.Result {
+        switch uri {
+        case "browse://tabs":
+            let reply = try await callTool(name: "tabs", arguments: nil)
+            let text = Self.extractText(reply)
+            return .init(contents: [.text(text, uri: uri, mimeType: "application/json")])
+        case "browse://active":
+            let reply = try await callTool(name: "read_markdown", arguments: ["page": .string("active")])
+            if reply.isError == true {
+                throw BridgeError.badResponse(Self.extractText(reply))
+            }
+            let text = Self.extractText(reply)
+            return .init(contents: [.text(text, uri: uri, mimeType: "text/markdown")])
+        default:
+            throw BridgeError.badResponse("Unknown resource URI: \(uri)")
+        }
+    }
+
+    private static func extractText(_ result: CallTool.Result) -> String {
+        result.content.compactMap { item -> String? in
+            if case .text(let text, _, _) = item { return text }
+            return nil
+        }.joined(separator: "\n")
+    }
+
+    private static func annotations(for tool: String) -> Tool.Annotations {
+        switch tool {
+        case "search", "read_pages", "read", "read_markdown", "page_info", "links", "tabs", "snapshot", "form_fields", "screenshot", "wait_for":
+            return .init(readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: true)
+        case "open", "open_tab", "go", "back", "forward", "reload", "scroll", "hover", "show":
+            return .init(readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: true)
+        case "close":
+            return .init(readOnlyHint: false, destructiveHint: true, idempotentHint: false, openWorldHint: false)
+        default:
+            // click, click_at, type, fill, press_key, submit, drive, run_js
+            return .init(readOnlyHint: false, destructiveHint: true, idempotentHint: false, openWorldHint: true)
+        }
     }
 
     func callTool(name: String, arguments: [String: Value]?) async throws -> CallTool.Result {
@@ -332,13 +398,27 @@ private actor BrowseBridge {
             "params": params,
         ]
         let body = try JSONSerialization.data(withJSONObject: message)
-        let (reply, trusted) = try await signedPOST("/mcp", body: body, endpoint: endpoint)
+        let reply: HTTPReply
+        let trusted: Bool
+        do {
+            (reply, trusted) = try await signedPOST("/mcp", body: body, endpoint: endpoint)
+        } catch {
+            // If browse restarted on a new port, re-read connect.json and retry once.
+            if !retried {
+                try? await Task.sleep(nanoseconds: 250_000_000)
+                return try await forwardRPC(method: method, params: params, retried: true)
+            }
+            throw BridgeError.notRunning
+        }
         if reply.status == 401, !retried {
             state.clientID = nil
             Self.persist(state, to: config.clientStateFile)
             return try await forwardRPC(method: method, params: params, retried: true)
         }
         guard trusted else { throw BridgeError.untrustedResponse }
+        if reply.status == 403, let dict = reply.json, let err = dict["error"] as? String {
+            throw BridgeError.httpError(403, Self.explainRefusal(err, dict))
+        }
         guard reply.status == 200, let dict = reply.json else {
             let text = String(data: reply.body, encoding: .utf8) ?? "status \(reply.status)"
             throw BridgeError.httpError(reply.status, text)
@@ -351,6 +431,27 @@ private actor BrowseBridge {
             throw BridgeError.badResponse("missing result")
         }
         return result
+    }
+
+    private static func explainRefusal(_ code: String, _ payload: [String: Any]) -> String {
+        switch code {
+        case "out_of_scope":
+            let scope = payload["scope"] as? String ?? ""
+            let setting: String
+            switch scope {
+            case "act-user-tabs": setting = "“Read and act in your tabs”"
+            case "act-own-pages": setting = "“Open pages of its own and act in them”"
+            case "run-js": setting = "“Run scripts in its pages”"
+            default: setting = "the required scope (\(scope))"
+            }
+            return "Permission required: enable \(setting) for this client in browse → Settings › Agent › Connected apps."
+        case "declined":
+            return "The user declined access to their open tabs for this session."
+        case "connected_apps_off":
+            return "Connected apps is turned off. Turn it on in browse → Settings › Agent › Connected apps."
+        default:
+            return code
+        }
     }
 
     // MARK: - HTTP + ECDSA signing

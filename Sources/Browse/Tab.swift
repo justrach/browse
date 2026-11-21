@@ -1338,6 +1338,15 @@ final class MiddleRelay: NSObject, WKScriptMessageHandler {
 
 /// A web view that reads the two-finger swipe for itself.
 final class PageView: WKWebView {
+    /// True while a Split View divider is being dragged or animated, so
+    /// WebKit's drawing area treats frame updates as an asynchronous live
+    /// resize instead of blocking the main thread on DidUpdateGeometry IPC.
+    var splitLiveResizing = false
+
+    override var inLiveResize: Bool {
+        splitLiveResizing || super.inLiveResize
+    }
+
     /// What extensions added to the right-click menu, at the end of it.
     override func willOpenMenu(_ menu: NSMenu, with event: NSEvent) {
         super.willOpenMenu(menu, with: event)

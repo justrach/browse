@@ -1173,6 +1173,45 @@ final class Bench {
             }
             answer(["shown": true, "rows": rows, "spot": [list.spot.minX, list.spot.minY, list.spot.width, list.spot.height]])
 
+        case "split-drag":
+            // Hill-climb benchmark for Split View divider dragging at 120 Hz:
+            // moves the divider STEPS times, 8.33 ms apart, measuring main-thread
+            // + Core Animation commit latency per frame (8.33 ms = 120 FPS budget).
+            guard Store.testing else { answer(["error": "split-drag only works on a --test run"]); return }
+            if browser.shownSplit == nil { browser.toggleSplit() }
+            guard browser.shownSplit != nil else { answer(["error": "split-drag needs two tabs in Split View"]); return }
+            let steps = min(max(request["steps"] as? Int ?? 60, 10), 240)
+            var times: [Double] = []
+            SplitDragBench.begin()
+            @MainActor func step(_ n: Int) {
+                guard n < steps else {
+                    SplitDragBench.end()
+                    let sorted = times.sorted()
+                    let p50 = sorted[sorted.count / 2]
+                    let p95 = sorted[min(sorted.count - 1, sorted.count * 95 / 100)]
+                    let maxMs = sorted.last ?? 0
+                    let over8 = times.filter { $0 > 8.33 }.count
+                    let over16 = times.filter { $0 > 16.67 }.count
+                    answer([
+                        "steps": steps, "p50Ms": p50, "p95Ms": p95, "maxMs": maxMs,
+                        "over8ms": over8, "over16ms": over16,
+                        "mode": SplitDragBench.mode,
+                    ])
+                    return
+                }
+                let start = CACurrentMediaTime()
+                let t = Double(n % 60 < 30 ? n % 30 : 60 - n % 30) / 30.0
+                let frac = CGFloat(0.28 + t * 0.44)
+                if !SplitDragBench.move(to: frac) {
+                    browser.split?.fraction = frac
+                }
+                Bench.whenResting(since: start) { ms in
+                    times.append(ms)
+                    DispatchQueue.main.asyncAfter(deadline: .now() + 0.00833) { step(n + 1) }
+                }
+            }
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.15) { step(0) }
+
         case "fill":
             // What the window spends on the page scrolling: the page's report
             // of where it is, STEPS times, 8 ms apart, each timed until the

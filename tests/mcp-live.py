@@ -157,39 +157,62 @@ def run_checks():
         mcp_proc.stdin.flush()
         print("PASS MCP initialize via swift-sdk StdioTransport")
 
-        # 2. tools/list (triggers automatic P-256 pairing!)
+        # 2. tools/list (triggers automatic P-256 pairing!) + annotations
         listed = rpc("tools/list", {})
-        names = {t["name"] for t in listed["tools"]}
+        by_name = {t["name"]: t for t in listed["tools"]}
+        names = set(by_name.keys())
         if not names:
             mcp_proc.stdin.close()
             raise AssertionError(f"Empty tools list; browse-mcp stderr:\n{mcp_proc.stderr.read()}")
-        for expected in ("open", "snapshot", "scroll", "press_key", "hover", "wait_for", "screenshot", "click", "type"):
+        for expected in (
+            "open", "open_tab", "snapshot", "page_info", "read_markdown",
+            "scroll", "press_key", "hover", "wait_for", "screenshot", "click", "click_at", "type",
+        ):
             assert expected in names, f"Missing tool {expected} in {names}"
+        assert by_name["snapshot"].get("annotations", {}).get("readOnlyHint") is True, by_name["snapshot"]
+        assert by_name["click"].get("annotations", {}).get("readOnlyHint") is False, by_name["click"]
         stop_accept.set()
-        print(f"PASS Auto-paired & listed {len(names)} MCP tools")
+        print(f"PASS Auto-paired & listed {len(names)} MCP tools with annotations")
 
-        # 3. open + snapshot (verifying secret redaction!)
+        # 2b. resources/list & resources/read (browse://tabs)
+        res_list = rpc("resources/list", {})
+        uris = {r["uri"] for r in res_list.get("resources", [])}
+        assert "browse://tabs" in uris and "browse://active" in uris, res_list
+        tabs_res = rpc("resources/read", {"uri": "browse://tabs"})
+        tabs_json = json.loads(tabs_res["contents"][0]["text"])
+        assert "the user's tabs" in tabs_json, tabs_json
+        print("PASS MCP resources/list and resources/read (browse://tabs) work")
+
+        # 3. open + snapshot (secret redaction) + page_info + read_markdown
         opened = rpc("tools/call", {"name": "open", "arguments": {"url": url}})
         assert not opened.get("isError"), opened
         snap = rpc("tools/call", {"name": "snapshot", "arguments": {}})
         snap_text = snap["content"][0]["text"]
         assert "[button]" in snap_text and "Run Action" in snap_text, snap_text
         assert "[secret]" in snap_text and "supersecret123" not in snap_text, snap_text
-        print("PASS snapshot lists interactive elements & redacts password values")
+        info = rpc("tools/call", {"name": "page_info", "arguments": {}})
+        info_data = json.loads(info["content"][0]["text"])
+        assert info_data.get("title") == "MCP Test Page" and info_data.get("viewportWidth", 0) > 0, info_data
+        md = rpc("tools/call", {"name": "read_markdown", "arguments": {}})
+        md_text = md["content"][0]["text"]
+        assert "# MCP Playground" in md_text, md_text
+        print("PASS snapshot (with secret redaction), page_info, and read_markdown work")
 
-        # 4. type + press_key + click + wait_for + hover + scroll
+        # 4. type + press_key + click + click_at + wait_for + hover + scroll
         rpc("tools/call", {"name": "type", "arguments": {"selector": "#q", "text": "hello"}})
         rpc("tools/call", {"name": "press_key", "arguments": {"selector": "#q", "key": "Enter"}})
         rpc("tools/call", {"name": "click", "arguments": {"selector": "#btn"}})
         waited = rpc("tools/call", {"name": "wait_for", "arguments": {"selector": "#status", "text": "Clicked hello", "timeout": 5}})
         assert not waited.get("isError"), waited
+        clicked_xy = rpc("tools/call", {"name": "click_at", "arguments": {"x": 30, "y": 30}})
+        assert not clicked_xy.get("isError"), clicked_xy
         rpc("tools/call", {"name": "hover", "arguments": {"selector": "#box"}})
         waited_hover = rpc("tools/call", {"name": "wait_for", "arguments": {"selector": "#hoverState", "text": "Hovered", "timeout": 5}})
         assert not waited_hover.get("isError"), waited_hover
         scrolled = rpc("tools/call", {"name": "scroll", "arguments": {"direction": "down", "amount": 500}})
         scroll_data = json.loads(scrolled["content"][0]["text"])
         assert scroll_data.get("scrollY", 0) >= 400, scroll_data
-        print("PASS type, press_key, click, hover, wait_for, and scroll work end to end")
+        print("PASS type, press_key, click, click_at, hover, wait_for, and scroll work end to end")
 
         # 5. screenshot (element crop + save_to PNG + inline MCP image)
         with tempfile.TemporaryDirectory() as tmp:

@@ -354,13 +354,14 @@ final class AgentTools: ObservableObject {
     can open it. For research, `search` first, then `read_pages` with every promising link at \
     once — it loads them in parallel — rather than one page at a time. Pages read that way \
     are closed once read; `open` one to keep it. `open` a page to act on \
-    it (`snapshot`, `click`, `type`, `press_key`, `scroll`, `hover`, `wait_for`, `submit`, \
-    `run_js`, `screenshot`). Use `snapshot` to see interactive elements (buttons, links, tabs, \
-    inputs) with exact CSS selectors; password and card values are redacted. `screenshot` \
-    returns an image of the viewport, a `full_page`, a specific `selector`, or the whole \
-    `window` (`target: "window"`), and can also `save_to` a file path. `tabs` lists the user's \
-    own tabs too; pass a tab id or `page: "active"` to read or act on the tab in front. `show` \
-    puts a page in front of the user as a tab.
+    it (`snapshot`, `page_info`, `read_markdown`, `click`, `click_at`, `type`, `press_key`, \
+    `scroll`, `hover`, `wait_for`, `submit`, `run_js`, `screenshot`). Use `snapshot` to see \
+    interactive elements (buttons, links, tabs, inputs) with exact CSS selectors; password \
+    and card values are redacted. `screenshot` returns an image of the viewport, a `full_page`, \
+    a specific `selector`, or the whole `window` (`target: "window"`), and can also `save_to` \
+    a file path. `tabs` lists the user's own tabs too; pass a tab id or `page: "active"` to \
+    read or act on the tab in front. `open_tab` opens a visible tab directly in the browser, \
+    and `show` puts a page in front of the user as a tab.
     """
 
     private static func tool(_ name: String, _ description: String, _ properties: [String: [String: Any]] = [:], required: [String] = []) -> [String: Any] {
@@ -391,6 +392,13 @@ final class AgentTools: ObservableObject {
             "page": page,
             "limit": ["type": "integer", "description": "Most characters to return. 60000 unless asked."],
         ]),
+        tool("read_markdown", "Extract a page as clean structured Markdown (headings, paragraphs, lists, links, blockquotes and code blocks).", [
+            "page": page,
+            "limit": ["type": "integer", "description": "Most characters to return. 60000 unless asked."],
+        ]),
+        tool("page_info", "Fast page metadata: title, URL, loading state, viewport size, scroll position/height, and currently focused element.", [
+            "page": page,
+        ]),
         tool("links", "The links on a page: their words and where they go.", ["page": page]),
         tool("go", "Take a page to another address and wait for it to load.", [
             "url": ["type": "string", "description": "An address. Words that aren't one are searched for."],
@@ -403,6 +411,12 @@ final class AgentTools: ObservableObject {
             "selector": ["type": "string"],
             "page": page,
         ], required: ["selector"]),
+        tool("click_at", "Click at exact viewport coordinates (x, y) — useful for canvases, video scrubbers, maps, or custom controls without CSS selectors.", [
+            "x": ["type": "number", "description": "Horizontal viewport coordinate in CSS pixels."],
+            "y": ["type": "number", "description": "Vertical viewport coordinate in CSS pixels."],
+            "button": ["type": "string", "enum": ["left", "right", "middle"], "description": "Mouse button (default left)."],
+            "page": page,
+        ], required: ["x", "y"]),
         tool("type", "Type text into the field a CSS selector names, replacing what is there.", [
             "selector": ["type": "string"],
             "text": ["type": "string"],
@@ -481,6 +495,10 @@ final class AgentTools: ObservableObject {
             "save_to": ["type": "string", "description": "Optional absolute file path to also save the screenshot image (PNG if ending in .png, else JPEG)."],
         ]),
         tool("tabs", "Your pages and the user's own tabs: id, title, address, and which tab they have in front."),
+        tool("open_tab", "Open a URL directly as a visible tab in the user's browser window.", [
+            "url": ["type": "string", "description": "An address or search query."],
+            "foreground": ["type": "boolean", "description": "Whether to bring the new tab to the front (default true)."],
+        ], required: ["url"]),
         tool("show", "Put a page in front of the user as a tab of theirs, or bring one of their tabs to the front.", ["page": page], required: ["page"]),
         tool("close", "Close one of your pages, or a tab of the user's.", ["page": page], required: ["page"]),
     ]
@@ -542,6 +560,26 @@ final class AgentTools: ObservableObject {
                 if let error { return AgentTools.failed(error) }
                 let body = AgentTools.cut(text as? String ?? "", arguments["limit"] as? Int ?? 60_000)
                 return AgentTools.text("\(target.title)\n\(target.address)\n\n\(body)")
+            }
+
+        case "read_markdown":
+            return await on(arguments, browser, owner, caller) { target in
+                let (value, error) = await target.run(AgentTools.markdownScript)
+                if let error { return AgentTools.failed(error) }
+                let body = AgentTools.cut(value as? String ?? "", arguments["limit"] as? Int ?? 60_000)
+                return AgentTools.text("# \(target.title)\n\n<\(target.address)>\n\n\(body)")
+            }
+
+        case "page_info":
+            return await on(arguments, browser, owner, caller) { target in
+                let (value, error) = await target.run(AgentTools.pageInfoScript)
+                if let error { return AgentTools.failed(error) }
+                var info = (value as? [String: Any]) ?? [:]
+                info["page"] = target.id
+                info["title"] = target.title
+                info["url"] = target.address
+                info["loading"] = target.web.isLoading
+                return AgentTools.said(info)
             }
 
         case "links":
@@ -607,6 +645,26 @@ final class AgentTools: ObservableObject {
                 try? await Task.sleep(nanoseconds: 400_000_000)
                 await target.settled()
                 return AgentTools.said(["page": target.id, "title": target.title, "url": target.address])
+            }
+
+        case "click_at":
+            let x = (arguments["x"] as? Double) ?? (arguments["x"] as? Int).map(Double.init)
+            let y = (arguments["y"] as? Double) ?? (arguments["y"] as? Int).map(Double.init)
+            guard let x, let y else { return AgentTools.failed("click_at needs numeric x and y coordinates") }
+            let button = (arguments["button"] as? String ?? "left").lowercased()
+            return await on(arguments, browser, owner, caller) { target in
+                let (value, error) = await target.run(AgentTools.clickAtScript(x: x, y: y, button: button))
+                if let error { return AgentTools.failed(error) }
+                if let dict = value as? [String: Any], let err = dict["error"] as? String {
+                    return AgentTools.failed(err)
+                }
+                try? await Task.sleep(nanoseconds: 350_000_000)
+                await target.settled()
+                var out = (value as? [String: Any]) ?? [:]
+                out["page"] = target.id
+                out["title"] = target.title
+                out["url"] = target.address
+                return AgentTools.said(out)
             }
 
         case "drive":
@@ -767,6 +825,13 @@ final class AgentTools: ObservableObject {
             }
             return AgentTools.said(["your pages": pages.filter { $0.owner == owner }.map(describe), "the user's tabs": theirs])
 
+        case "open_tab":
+            guard let url = address(arguments["url"], browser) else { return AgentTools.failed("open_tab needs a url") }
+            if let refused = await refusedTabs(caller) { return refused }
+            let foreground = arguments["foreground"] as? Bool ?? true
+            let tab = browser.open(url, foreground: foreground, atEnd: true)
+            return AgentTools.said(["tab": AgentTools.short(tab), "url": url.absoluteString, "foreground": foreground])
+
         case "show":
             let ref = (arguments["page"] as? String ?? "").lowercased()
             if let sheet = pages.first(where: { $0.id == ref && $0.owner == owner }) {
@@ -835,10 +900,12 @@ final class AgentTools: ObservableObject {
         switch tool {
         case "screenshot": return "Taking screenshot…"
         case "snapshot": return "Reading page elements…"
+        case "page_info": return "Inspecting page…"
         case "search": return "Searching…"
-        case "read_pages", "read": return "Reading page…"
+        case "read_pages", "read", "read_markdown": return "Reading page…"
         case "open", "go": return "Loading page…"
-        case "click", "submit": return "Clicking…"
+        case "open_tab": return "Opening tab…"
+        case "click", "click_at", "submit": return "Clicking…"
         case "fill", "type": return "Filling form…"
         case "press_key": return "Pressing key…"
         case "scroll": return "Scrolling…"
@@ -1379,6 +1446,106 @@ final class AgentTools: ObservableObject {
         })()
         """
     }
+
+    private static func clickAtScript(x: Double, y: Double, button: String) -> String {
+        let btnCode = button == "right" ? 2 : (button == "middle" ? 1 : 0)
+        return """
+        (function () {
+          var x = \(x), y = \(y), btn = \(btnCode);
+          var el = document.elementFromPoint(x, y);
+          if (!el) return { error: 'No element at (' + x + ', ' + y + ')' };
+          var opts = { bubbles: true, cancelable: true, clientX: x, clientY: y, button: btn, buttons: btn === 2 ? 2 : (btn === 1 ? 4 : 1) };
+          el.dispatchEvent(new PointerEvent('pointerdown', opts));
+          el.dispatchEvent(new MouseEvent('mousedown', opts));
+          if (el.focus) try { el.focus(); } catch (e) {}
+          el.dispatchEvent(new PointerEvent('pointerup', opts));
+          el.dispatchEvent(new MouseEvent('mouseup', opts));
+          if (btn === 2) {
+            el.dispatchEvent(new MouseEvent('contextmenu', opts));
+          } else {
+            el.dispatchEvent(new MouseEvent('click', opts));
+          }
+          return {
+            clicked: el.tagName.toLowerCase(),
+            id: el.id || '',
+            text: (el.innerText || el.getAttribute('aria-label') || '').trim().slice(0, 80),
+            x: x, y: y
+          };
+        })()
+        """
+    }
+
+    private static let pageInfoScript = """
+    (function () {
+      var doc = document.documentElement, body = document.body;
+      var active = document.activeElement;
+      return {
+        scrollX: Math.round(window.scrollX),
+        scrollY: Math.round(window.scrollY),
+        scrollWidth: Math.round(Math.max(doc ? doc.scrollWidth : 0, body ? body.scrollWidth : 0)),
+        scrollHeight: Math.round(Math.max(doc ? doc.scrollHeight : 0, body ? body.scrollHeight : 0)),
+        viewportWidth: Math.round(window.innerWidth),
+        viewportHeight: Math.round(window.innerHeight),
+        readyState: document.readyState,
+        activeElement: active ? {
+          tag: active.tagName.toLowerCase(),
+          id: active.id || '',
+          role: active.getAttribute('role') || ''
+        } : null
+      };
+    })()
+    """
+
+    private static let markdownScript = """
+    (function () {
+      var root = document.querySelector('main, article, [role="main"]') || document.body;
+      if (!root) return '';
+      var skip = { SCRIPT: 1, STYLE: 1, NOSCRIPT: 1, SVG: 1, TEMPLATE: 1, IFRAME: 1 };
+      function clean(s) { return (s || '').replace(/\\s+/g, ' ').trim(); }
+      function walk(node, depth) {
+        if (!node) return '';
+        if (node.nodeType === 3) return node.nodeValue.replace(/\\s+/g, ' ');
+        if (node.nodeType !== 1 || skip[node.tagName]) return '';
+        var s = getComputedStyle(node);
+        if (s.display === 'none' || s.visibility === 'hidden') return '';
+        var tag = node.tagName;
+        if (tag === 'PRE') {
+          var code = (node.innerText || '').trim();
+          return code ? '\\n\\n```\\n' + code + '\\n```\\n\\n' : '';
+        }
+        if (tag === 'CODE' && node.parentElement && node.parentElement.tagName !== 'PRE') {
+          var c = clean(node.textContent);
+          return c ? '`' + c + '`' : '';
+        }
+        if (tag === 'A') {
+          var txt = clean(node.innerText);
+          var href = node.href || '';
+          return txt && href && !href.startsWith('javascript:') ? '[' + txt + '](' + href + ')' : txt;
+        }
+        var kids = '';
+        for (var i = 0; i < node.childNodes.length; i++) kids += walk(node.childNodes[i], depth + (tag === 'UL' || tag === 'OL' ? 1 : 0));
+        if (/^H[1-6]$/.test(tag)) {
+          var h = clean(kids);
+          return h ? '\\n\\n' + '#'.repeat(parseInt(tag[1], 10)) + ' ' + h + '\\n\\n' : '';
+        }
+        if (tag === 'LI') {
+          var li = clean(kids);
+          return li ? '\\n' + '  '.repeat(Math.max(0, depth - 1)) + '- ' + li : '';
+        }
+        if (tag === 'BLOCKQUOTE') {
+          var bq = clean(kids);
+          return bq ? '\\n\\n> ' + bq + '\\n\\n' : '';
+        }
+        if (tag === 'P' || tag === 'DIV' || tag === 'SECTION' || tag === 'ARTICLE' || tag === 'TR') {
+          var block = kids.trim();
+          return block ? '\\n\\n' + block + '\\n\\n' : '';
+        }
+        if (tag === 'BR') return '\\n';
+        return kids;
+      }
+      return walk(root, 0).replace(/\\n{3,}/g, '\\n\\n').trim();
+    })()
+    """
 
     private static func waitCheckScript(selector: String?, text: String?) -> String {
         let selJS = selector.map { jsonLiteral($0) } ?? "null"

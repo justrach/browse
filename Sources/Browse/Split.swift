@@ -1,6 +1,24 @@
 import SwiftUI
 import AppKit
 
+/// Hook for `./bench split-drag` to drive the live split divider directly
+/// through whichever path the active SplitStage uses.
+@MainActor
+enum SplitDragBench {
+    static var onBegin: (() -> Void)?
+    static var onMove: ((CGFloat) -> Void)?
+    static var onEnd: (() -> Void)?
+    static var mode: String { onMove != nil ? "appkit-direct" : "swiftui-published" }
+
+    static func begin() { onBegin?() }
+    static func move(to fraction: CGFloat) -> Bool {
+        guard let onMove else { return false }
+        onMove(fraction)
+        return true
+    }
+    static func end() { onEnd?() }
+}
+
 /// Two tabs side by side, as Arc's Split View has them.
 ///
 /// The pair is kept, not the view: pick either tab and both come up, the one
@@ -192,43 +210,34 @@ extension Browser {
 /// that names it, the gap between and around them the same glass and
 /// colour as the sidebar, so the column and the frame read as one surface
 /// the pages sit in.
-struct SplitStage<Pane: View>: View {
+///
+/// Resizing runs directly in AppKit (`SplitDeck` / `SplitContainerView`) with
+/// cached `CALayer.shadowPath` and zero `@Published` mutations during drag,
+/// committing the final fraction to `Browser` once on release so ProMotion
+/// displays stay locked at 120 Hz.
+struct SplitStage<Overlay: View>: View {
     @ObservedObject var browser: Browser
-    let left: Tab
-    let right: Tab
-    let pane: (Tab) -> Pane
+    @ObservedObject var left: Tab
+    @ObservedObject var right: Tab
+    let overlay: (Tab) -> Overlay
 
     @Environment(\.colorScheme) private var scheme
-    /// The share the left page had when the gap was picked up.
-    @State private var grabbed: CGFloat?
-    @State private var onHandle = false
 
     var body: some View {
-        GeometryReader { geo in
-            let gap = Split.gap
-            let usable = max(1, geo.size.width - gap * 3)
-            let fraction = min(0.8, max(0.2, browser.split?.fraction ?? 0.5))
-            HStack(spacing: 0) {
-                column(left, width: usable * fraction, usable: usable)
-                handle(usable: usable, fraction: fraction).frame(width: gap)
-                column(right, width: nil, usable: usable)
-            }
-            .padding(.horizontal, gap)
-            .padding(.bottom, gap)
-            // A share while the gap is held, where it'll be let go.
-            .overlay(alignment: .top) {
-                if grabbed != nil {
-                    Text("\(Int((fraction * 100).rounded())) : \(Int(((1 - fraction) * 100).rounded()))")
-                        .font(.system(size: 11, weight: .medium, design: .rounded).monospacedDigit())
-                        .foregroundStyle(ink.opacity(0.8))
-                        .padding(.horizontal, 8)
-                        .padding(.vertical, 3)
-                        .background(.regularMaterial, in: Capsule())
-                        .offset(x: gap + usable * fraction + gap / 2 - geo.size.width / 2, y: Split.header + 12)
-                        .transition(.opacity)
+        SplitDeck(
+            browser: browser,
+            left: left,
+            right: right,
+            fraction: min(0.8, max(0.2, browser.split?.fraction ?? 0.5)),
+            activeID: browser.activeID,
+            darkChrome: darkChrome,
+            overlay: overlay,
+            onCommit: { final in
+                if browser.split?.fraction != final {
+                    browser.split?.fraction = final
                 }
             }
-        }
+        )
         .background { ground }
         .environment(\.colorScheme, tint.map { $0.dark ? .dark : .light } ?? scheme)
     }
@@ -237,10 +246,8 @@ struct SplitStage<Pane: View>: View {
         browser.prefs.sideTint ? PageTint(browser.activeHue, over: scheme) : nil
     }
 
-    /// Lines and words drawn on the frame: light on a dark page's colour,
-    /// dark on any other.
-    private var ink: Color {
-        (tint?.dark ?? (scheme == .dark)) ? .white : .black
+    private var darkChrome: Bool {
+        tint?.dark ?? (scheme == .dark)
     }
 
     /// The same surface as the sidebar's (SideBar's background): the
@@ -252,63 +259,788 @@ struct SplitStage<Pane: View>: View {
         }
         .animation(Motion.glide, value: tint)
     }
+}
 
-    private func column(_ tab: Tab, width: CGFloat?, usable: CGFloat) -> some View {
-        VStack(spacing: 0) {
-            PaneHeader(browser: browser, tab: tab, ink: ink, width: width ?? usable / 2)
-                .frame(height: Split.header)
-            card(tab)
+/// AppKit bridge hosting both split panes directly (`StageView` + pure AppKit
+/// headers, divider and ratio pill) so 120 Hz drags run with zero SwiftUI
+/// layout passes.
+private struct SplitDeck<Overlay: View>: NSViewRepresentable {
+    let browser: Browser
+    let left: Tab
+    let right: Tab
+    let fraction: CGFloat
+    let activeID: Tab.ID?
+    let darkChrome: Bool
+    let overlay: (Tab) -> Overlay
+    let onCommit: (CGFloat) -> Void
+
+    func makeNSView(context: Context) -> SplitContainerView<Overlay> {
+        SplitContainerView(
+            leftOverlay: overlay(left),
+            rightOverlay: overlay(right),
+            fraction: fraction
+        )
+    }
+
+    func updateNSView(_ view: SplitContainerView<Overlay>, context: Context) {
+        view.onCommit = onCommit
+        view.update(
+            browser: browser,
+            left: left,
+            leftOverlay: overlay(left),
+            leftFront: left.id == activeID,
+            right: right,
+            rightOverlay: overlay(right),
+            rightFront: right.id == activeID,
+            fraction: fraction,
+            darkChrome: darkChrome
+        )
+    }
+}
+
+@MainActor
+private final class SplitContainerView<Overlay: View>: NSView {
+    private let leftSlot: SplitPaneSlot<Overlay>
+    private let rightSlot: SplitPaneSlot<Overlay>
+    private let divider = SplitDividerView()
+    private let ratioPill = SplitRatioPill()
+
+    private var liveFraction: CGFloat
+    private var dragStartFraction: CGFloat = 0.5
+    private var isDragging = false
+    private var snappedStop: CGFloat?
+
+    // 120 Hz display-link animation for double-click snap back to 50 : 50.
+    private var snapLink: CADisplayLink?
+    private var snapFrom: CGFloat = 0.5
+    private var snapTarget: CGFloat = 0.5
+    private var snapStarted: CFTimeInterval = 0
+    private let snapDuration: CFTimeInterval = 0.24
+
+    var onCommit: ((CGFloat) -> Void)?
+
+    override var isFlipped: Bool { true }
+
+    init(
+        leftOverlay: Overlay,
+        rightOverlay: Overlay,
+        fraction: CGFloat
+    ) {
+        self.liveFraction = fraction
+        self.leftSlot = SplitPaneSlot(overlay: leftOverlay, isLeft: true)
+        self.rightSlot = SplitPaneSlot(overlay: rightOverlay, isLeft: false)
+        super.init(frame: .zero)
+        wantsLayer = true
+
+        addSubview(leftSlot)
+        addSubview(rightSlot)
+        addSubview(divider)
+        addSubview(ratioPill)
+
+        divider.onDragBegin = { [weak self] in self?.beginDrag() }
+        divider.onDragDelta = { [weak self] dx in self?.dragBy(dx) }
+        divider.onDragEnd = { [weak self] in self?.endDrag() }
+        divider.onDoubleClick = { [weak self] in self?.animateSnap(to: 0.5) }
+    }
+
+    @available(*, unavailable)
+    required init?(coder: NSCoder) { fatalError() }
+
+    override func viewDidMoveToWindow() {
+        super.viewDidMoveToWindow()
+        if window != nil {
+            SplitDragBench.onBegin = { [weak self] in self?.beginDrag() }
+            SplitDragBench.onMove = { [weak self] fraction in self?.applyLiveFraction(fraction, showPill: true) }
+            SplitDragBench.onEnd = { [weak self] in self?.endDrag() }
+        } else {
+            stopSnap()
+            SplitDragBench.onBegin = nil
+            SplitDragBench.onMove = nil
+            SplitDragBench.onEnd = nil
         }
-        .frame(width: width)
     }
 
-    private func card(_ tab: Tab) -> some View {
-        let front = tab.id == browser.activeID
-        let shape = RoundedRectangle(cornerRadius: Split.corner, style: .continuous)
-        return pane(tab)
-            .clipShape(shape)
-            // A click anywhere in the page puts it in front; the click still
-            // goes on to the page.
-            .overlay { PaneClick { if tab.id != browser.activeID { browser.select(tab) } } }
-            // The page in front, ringed; the other only edged.
-            .overlay {
-                shape.strokeBorder(ink.opacity(front ? 0.28 : 0.08), lineWidth: front ? 1.5 : 1)
-                    .allowsHitTesting(false)
-            }
-            .shadow(color: .black.opacity(front ? 0.16 : 0.06), radius: front ? 10 : 4, y: 2)
-            .animation(Motion.quick, value: front)
+    func update(
+        browser: Browser,
+        left: Tab,
+        leftOverlay: Overlay,
+        leftFront: Bool,
+        right: Tab,
+        rightOverlay: Overlay,
+        rightFront: Bool,
+        fraction: CGFloat,
+        darkChrome: Bool
+    ) {
+        leftSlot.update(browser: browser, tab: left, overlay: leftOverlay, front: leftFront, darkChrome: darkChrome)
+        rightSlot.update(browser: browser, tab: right, overlay: rightOverlay, front: rightFront, darkChrome: darkChrome)
+        divider.setChrome(dark: darkChrome)
+        ratioPill.setChrome(dark: darkChrome)
+        if !isDragging && snapLink == nil && abs(liveFraction - fraction) > 0.0005 {
+            liveFraction = fraction
+            layoutPanes(fraction: liveFraction, live: false)
+        }
     }
 
-    /// The gap between the two: pulled to give one page more room — settling
-    /// on a third, a half or two thirds when let go near one — and
-    /// double-clicked to share it evenly again.
-    private func handle(usable: CGFloat, fraction: CGFloat) -> some View {
-        Capsule()
-            .fill(ink.opacity(onHandle || grabbed != nil ? 0.4 : 0.12))
-            .frame(width: onHandle || grabbed != nil ? 4 : 3, height: 44)
-            .frame(maxWidth: .infinity, maxHeight: .infinity)
-            .padding(.top, Split.header)
-            .contentShape(Rectangle())
-            .onHover { over in
-                onHandle = over
-                if over { NSCursor.resizeLeftRight.push() } else { NSCursor.pop() }
+    override func layout() {
+        super.layout()
+        layoutPanes(fraction: liveFraction, live: isDragging || snapLink != nil)
+    }
+
+    private func beginDrag() {
+        stopSnap()
+        isDragging = true
+        dragStartFraction = liveFraction
+        snappedStop = nil
+        divider.setDragging(true)
+        leftSlot.startLiveResize()
+        rightSlot.startLiveResize()
+        ratioPill.setVisible(true)
+        layoutPanes(fraction: liveFraction, live: true)
+    }
+
+    private func dragBy(_ dx: CGFloat) {
+        let usable = max(1, bounds.width - Split.gap * 3)
+        var wanted = dragStartFraction + dx / usable
+        if let stop = Split.stops.first(where: { abs($0 - wanted) < 0.018 }) {
+            wanted = stop
+            if snappedStop != stop {
+                snappedStop = stop
+                NSHapticFeedbackManager.defaultPerformer.perform(.alignment, performanceTime: .now)
             }
-            .gesture(
-                DragGesture(minimumDistance: 1, coordinateSpace: .global)
-                    .onChanged { value in
-                        if grabbed == nil { withAnimation(Motion.quick) { grabbed = fraction } }
-                        var wanted = (grabbed ?? fraction) + value.translation.width / usable
-                        // A little pull towards the stops, so they're easy to
-                        // land on and easy to leave.
-                        if let stop = Split.stops.first(where: { abs($0 - wanted) < 0.02 }) { wanted = stop }
-                        browser.split?.fraction = min(0.8, max(0.2, wanted))
-                    }
-                    .onEnded { _ in withAnimation(Motion.quick) { grabbed = nil } }
-            )
-            .modifier(OneClick(double: true) {
-                withAnimation(Motion.settle) { browser.split?.fraction = 0.5 }
-            })
-            .animation(Motion.quick, value: onHandle)
+        } else {
+            snappedStop = nil
+        }
+        applyLiveFraction(wanted, showPill: true)
+    }
+
+    private func applyLiveFraction(_ wanted: CGFloat, showPill: Bool) {
+        let clamped = min(0.8, max(0.2, wanted))
+        guard clamped != liveFraction || showPill else { return }
+        liveFraction = clamped
+        layoutPanes(fraction: clamped, live: true)
+    }
+
+    private func endDrag() {
+        guard isDragging else { return }
+        isDragging = false
+        snappedStop = nil
+        divider.setDragging(false)
+        ratioPill.setVisible(false)
+        leftSlot.endLiveResize()
+        rightSlot.endLiveResize()
+        layoutPanes(fraction: liveFraction, live: false)
+        onCommit?(liveFraction)
+    }
+
+    private func animateSnap(to target: CGFloat) {
+        stopSnap()
+        snapFrom = liveFraction
+        snapTarget = target
+        guard abs(snapFrom - snapTarget) > 0.001 else { return }
+        snapStarted = CACurrentMediaTime()
+        leftSlot.startLiveResize()
+        rightSlot.startLiveResize()
+        let link = displayLink(target: self, selector: #selector(stepSnap(_:)))
+        link.preferredFrameRateRange = CAFrameRateRange(minimum: 60, maximum: 120, preferred: 120)
+        link.add(to: .main, forMode: .common)
+        snapLink = link
+    }
+
+    @objc private func stepSnap(_ link: CADisplayLink) {
+        let elapsed = CACurrentMediaTime() - snapStarted
+        let t = min(1, max(0, elapsed / snapDuration))
+        let eased = 1 - pow(1 - t, 3)
+        let current = snapFrom + (snapTarget - snapFrom) * eased
+        applyLiveFraction(current, showPill: false)
+        if t >= 1 {
+            stopSnap()
+            layoutPanes(fraction: snapTarget, live: false)
+            NSHapticFeedbackManager.defaultPerformer.perform(.alignment, performanceTime: .now)
+            onCommit?(snapTarget)
+        }
+    }
+
+    private func stopSnap() {
+        guard snapLink != nil else { return }
+        snapLink?.invalidate()
+        snapLink = nil
+        leftSlot.endLiveResize()
+        rightSlot.endLiveResize()
+    }
+
+    private func layoutPanes(fraction: CGFloat, live: Bool) {
+        let width = bounds.width
+        let height = bounds.height
+        guard width > 0, height > 0 else { return }
+
+        let gap = Split.gap
+        let usable = max(1, width - gap * 3)
+        let leftWidth = (usable * fraction).rounded()
+        let rightWidth = max(1, usable - leftWidth)
+        let paneHeight = max(0, height - gap)
+
+        leftSlot.layoutSlot(frame: CGRect(x: gap, y: 0, width: leftWidth, height: paneHeight), live: live)
+        rightSlot.layoutSlot(frame: CGRect(x: gap * 2 + leftWidth, y: 0, width: rightWidth, height: paneHeight), live: live)
+
+        let hitWidth = gap + 4
+        let dividerX = gap + leftWidth + gap / 2 - hitWidth / 2
+        divider.frame = CGRect(x: dividerX, y: Split.header, width: hitWidth, height: max(0, paneHeight - Split.header))
+
+        if isDragging {
+            let leftPct = Int((fraction * 100).rounded())
+            ratioPill.update(text: "\(leftPct) : \(100 - leftPct)")
+            let pillSize = ratioPill.intrinsicContentSize
+            let pillCenterX = gap + leftWidth + gap / 2
+            let pillX = min(max(gap, pillCenterX - pillSize.width / 2), width - gap - pillSize.width)
+            ratioPill.frame = CGRect(x: pillX.rounded(), y: Split.header + 12, width: pillSize.width, height: pillSize.height)
+        }
+    }
+}
+
+/// Hosting view for rare page overlays (FindBar, LinkBubble, FormPill, errors)
+/// that passes clicks on empty regions straight through to the WKWebView below.
+private final class PassThroughHostingView<Content: View>: NSHostingView<Content> {
+    override func hitTest(_ point: NSPoint) -> NSView? {
+        let hit = super.hitTest(point)
+        return hit === self ? nil : hit
+    }
+}
+
+/// One half of a split: pure AppKit header above, hardware-shadowed rounded
+/// card hosting `StageView` directly below (zero SwiftUI in the 120 Hz loop).
+@MainActor
+private final class SplitPaneSlot<Overlay: View>: NSView {
+    private let headerView: SplitHeaderView
+    private let shadowView = NSView()
+    private let clipView = NSView()
+    private let stageView = StageView()
+    private let overlayHost: PassThroughHostingView<Overlay>
+    private let borderLayer = CALayer()
+
+    private var onFocus: (() -> Void)?
+    private var clickMonitor: Any?
+    private var lastCardSize: CGSize = .zero
+    private var lastFront: Bool?
+    private var lastDarkChrome: Bool?
+
+    override var isFlipped: Bool { true }
+
+    init(overlay: Overlay, isLeft: Bool) {
+        self.headerView = SplitHeaderView(isLeft: isLeft)
+        self.overlayHost = PassThroughHostingView(rootView: overlay)
+        super.init(frame: .zero)
+
+        overlayHost.sizingOptions = []
+        stageView.round(0)
+
+        let noAnim: [String: CAAction] = [
+            "position": NSNull(),
+            "bounds": NSNull(),
+            "frame": NSNull(),
+            "shadowPath": NSNull(),
+            "cornerRadius": NSNull(),
+        ]
+
+        shadowView.wantsLayer = true
+        shadowView.layer?.masksToBounds = false
+        shadowView.layer?.shadowColor = NSColor.black.cgColor
+        shadowView.layer?.shadowOffset = CGSize(width: 0, height: -2)
+        shadowView.layer?.actions = noAnim
+
+        clipView.wantsLayer = true
+        clipView.layer?.cornerRadius = Split.corner
+        clipView.layer?.cornerCurve = .continuous
+        clipView.layer?.masksToBounds = true
+        clipView.layer?.actions = noAnim
+
+        borderLayer.cornerRadius = Split.corner
+        borderLayer.cornerCurve = .continuous
+        borderLayer.zPosition = 100
+        borderLayer.actions = noAnim
+
+        addSubview(headerView)
+        addSubview(shadowView)
+        shadowView.addSubview(clipView)
+        clipView.addSubview(stageView)
+        clipView.addSubview(overlayHost)
+        clipView.layer?.addSublayer(borderLayer)
+    }
+
+    @available(*, unavailable)
+    required init?(coder: NSCoder) { fatalError() }
+
+    override func viewDidMoveToWindow() {
+        super.viewDidMoveToWindow()
+        if let clickMonitor { NSEvent.removeMonitor(clickMonitor) }
+        clickMonitor = nil
+        guard window != nil else { return }
+        clickMonitor = NSEvent.addLocalMonitorForEvents(matching: [.leftMouseDown, .rightMouseDown]) { [weak self] event in
+            guard let self, event.window === self.window else { return event }
+            let pt = self.shadowView.convert(event.locationInWindow, from: nil)
+            if self.shadowView.bounds.contains(pt) { self.onFocus?() }
+            return event
+        }
+    }
+
+    deinit {
+        if let clickMonitor { NSEvent.removeMonitor(clickMonitor) }
+    }
+
+    func update(browser: Browser, tab: Tab, overlay: Overlay, front: Bool, darkChrome: Bool) {
+        self.onFocus = { [weak browser, weak tab] in
+            guard let browser, let tab, tab.id != browser.activeID else { return }
+            browser.select(tab)
+        }
+        stageView.show(tab.isBlank || tab.asleep || tab.floating ? nil : tab.web)
+        overlayHost.rootView = overlay
+        headerView.update(browser: browser, tab: tab, front: front, darkChrome: darkChrome)
+
+        if lastFront != front || lastDarkChrome != darkChrome {
+            lastFront = front
+            lastDarkChrome = darkChrome
+            let inkColor: NSColor = darkChrome ? .white : .black
+            CATransaction.begin()
+            CATransaction.setAnimationDuration(0.14)
+            shadowView.layer?.shadowOpacity = front ? 0.18 : 0.07
+            shadowView.layer?.shadowRadius = front ? 10 : 4
+            borderLayer.borderWidth = front ? 1.5 : 1.0
+            borderLayer.borderColor = inkColor.withAlphaComponent(front ? 0.28 : 0.08).cgColor
+            CATransaction.commit()
+        }
+    }
+
+    func startLiveResize() {
+        stageView.startLiveResize()
+    }
+
+    func endLiveResize() {
+        stageView.endLiveResize()
+    }
+
+    func layoutSlot(frame newFrame: CGRect, live: Bool) {
+        if frame != newFrame { frame = newFrame }
+        let width = newFrame.width
+        let cardHeight = max(0, newFrame.height - Split.header)
+
+        let headerRect = CGRect(x: 0, y: 0, width: width, height: Split.header)
+        if headerView.frame != headerRect { headerView.frame = headerRect }
+
+        let cardRect = CGRect(x: 0, y: Split.header, width: width, height: cardHeight)
+        if shadowView.frame != cardRect { shadowView.frame = cardRect }
+
+        let localCard = CGRect(origin: .zero, size: cardRect.size)
+        if clipView.frame != localCard { clipView.frame = localCard }
+        if stageView.frame != localCard { stageView.frame = localCard }
+        if !live, overlayHost.frame != localCard { overlayHost.frame = localCard }
+        if borderLayer.frame != localCard { borderLayer.frame = localCard }
+
+        if lastCardSize != cardRect.size {
+            lastCardSize = cardRect.size
+            if cardRect.width > 0, cardRect.height > 0 {
+                let r = min(Split.corner, min(cardRect.width, cardRect.height) / 2)
+                shadowView.layer?.shadowPath = CGPath(
+                    roundedRect: localCard,
+                    cornerWidth: r,
+                    cornerHeight: r,
+                    transform: nil
+                )
+            } else {
+                shadowView.layer?.shadowPath = nil
+            }
+        }
+    }
+}
+
+/// Pure AppKit header strip over each split card: favicon/monogram, title,
+/// hover-revealed swap/expand/close buttons, drag-to-swap, and context menu.
+@MainActor
+private final class SplitHeaderView: NSView {
+    private let isLeft: Bool
+    private let iconView = NSImageView()
+    private let monogramField = NSTextField(labelWithString: "")
+    private let titleField = NSTextField(labelWithString: "")
+    private let swapBtn = NSButton()
+    private let aloneBtn = NSButton()
+    private let closeBtn = NSButton()
+
+    private weak var browser: Browser?
+    private weak var tab: Tab?
+    private var front = false
+    private var darkChrome = false
+    private var hovering = false
+    private var tracking: NSTrackingArea?
+    private var dragStartX: CGFloat?
+    private var dragTravel: CGFloat = 0
+
+    override var isFlipped: Bool { true }
+    override var mouseDownCanMoveWindow: Bool { false }
+
+    init(isLeft: Bool) {
+        self.isLeft = isLeft
+        super.init(frame: .zero)
+        wantsLayer = true
+
+        iconView.imageScaling = .scaleProportionallyUpOrDown
+
+        monogramField.alignment = .center
+        monogramField.font = NSFont.systemFont(ofSize: 9.5, weight: .semibold)
+        monogramField.drawsBackground = false
+        monogramField.isBezeled = false
+        monogramField.wantsLayer = true
+        monogramField.layer?.cornerRadius = 3.5
+
+        titleField.lineBreakMode = .byTruncatingTail
+        titleField.maximumNumberOfLines = 1
+        titleField.drawsBackground = false
+        titleField.isBezeled = false
+
+        configureButton(swapBtn, symbol: "arrow.left.arrow.right", help: "Swap Sides", action: #selector(swapSides))
+        configureButton(aloneBtn, symbol: "arrow.up.left.and.arrow.down.right", help: "Just This One", action: #selector(justThisOne))
+        configureButton(closeBtn, symbol: "xmark", help: "Close This Side — the tab stays open", action: #selector(closeSide))
+
+        addSubview(iconView)
+        addSubview(monogramField)
+        addSubview(titleField)
+        addSubview(swapBtn)
+        addSubview(aloneBtn)
+        addSubview(closeBtn)
+    }
+
+    @available(*, unavailable)
+    required init?(coder: NSCoder) { fatalError() }
+
+    private func configureButton(_ btn: NSButton, symbol: String, help: String, action: Selector) {
+        btn.isBordered = false
+        btn.bezelStyle = .regularSquare
+        btn.imagePosition = .imageOnly
+        btn.image = NSImage(systemSymbolName: symbol, accessibilityDescription: help)?
+            .withSymbolConfiguration(.init(pointSize: 10, weight: .semibold))
+        btn.toolTip = help
+        btn.target = self
+        btn.action = action
+    }
+
+    func update(browser: Browser, tab: Tab, front: Bool, darkChrome: Bool) {
+        self.browser = browser
+        self.tab = tab
+        self.front = front
+        self.darkChrome = darkChrome
+
+        let ink: NSColor = darkChrome ? .white : .black
+        titleField.stringValue = tab.label
+        titleField.font = NSFont.systemFont(ofSize: 12, weight: front ? .semibold : .regular)
+        titleField.textColor = ink.withAlphaComponent(front ? 0.9 : 0.6)
+
+        if tab.isBlank {
+            iconView.isHidden = true
+            monogramField.isHidden = true
+        } else if let icon = tab.icon {
+            iconView.image = icon
+            iconView.isHidden = false
+            monogramField.isHidden = true
+        } else {
+            iconView.isHidden = true
+            monogramField.isHidden = false
+            monogramField.stringValue = tab.monogram
+            monogramField.textColor = ink.withAlphaComponent(0.75)
+            monogramField.layer?.backgroundColor = ink.withAlphaComponent(0.08).cgColor
+        }
+
+        let btnTint = ink.withAlphaComponent(0.55)
+        for btn in [swapBtn, aloneBtn, closeBtn] {
+            btn.contentTintColor = btnTint
+            btn.alphaValue = (hovering || front) ? 1 : 0
+        }
+        needsLayout = true
+    }
+
+    override func updateTrackingAreas() {
+        super.updateTrackingAreas()
+        if let tracking { removeTrackingArea(tracking) }
+        let area = NSTrackingArea(
+            rect: bounds,
+            options: [.mouseEnteredAndExited, .activeInKeyWindow, .inVisibleRect],
+            owner: self,
+            userInfo: nil
+        )
+        addTrackingArea(area)
+        tracking = area
+    }
+
+    override func mouseEntered(with event: NSEvent) {
+        hovering = true
+        updateButtonAlpha()
+    }
+
+    override func mouseExited(with event: NSEvent) {
+        hovering = false
+        updateButtonAlpha()
+    }
+
+    private func updateButtonAlpha() {
+        let target: CGFloat = (hovering || front) ? 1 : 0
+        for btn in [swapBtn, aloneBtn, closeBtn] { btn.alphaValue = target }
+    }
+
+    override func layout() {
+        super.layout()
+        let w = bounds.width
+        let h = bounds.height
+        let btnW: CGFloat = 22
+        let btnGap: CGFloat = 2
+        let rightPad: CGFloat = 6
+        let buttonsWidth = btnW * 3 + btnGap * 2
+        let buttonsX = max(6, w - rightPad - buttonsWidth)
+
+        let btnY = ((h - btnW) / 2).rounded()
+        swapBtn.frame = CGRect(x: buttonsX, y: btnY, width: btnW, height: btnW)
+        aloneBtn.frame = CGRect(x: buttonsX + btnW + btnGap, y: btnY, width: btnW, height: btnW)
+        closeBtn.frame = CGRect(x: buttonsX + (btnW + btnGap) * 2, y: btnY, width: btnW, height: btnW)
+
+        var x: CGFloat = 6 + dragTravel
+        if !iconView.isHidden || !monogramField.isHidden {
+            let iconRect = CGRect(x: x, y: ((h - 14) / 2).rounded(), width: 14, height: 14)
+            iconView.frame = iconRect
+            monogramField.frame = iconRect
+            x += 21
+        }
+        let titleH: CGFloat = 16
+        let titleW = max(0, buttonsX - 4 - x)
+        titleField.frame = CGRect(x: x, y: ((h - titleH) / 2).rounded(), width: titleW, height: titleH)
+    }
+
+    override func mouseDown(with event: NSEvent) {
+        dragStartX = event.locationInWindow.x
+        dragTravel = 0
+    }
+
+    override func mouseDragged(with event: NSEvent) {
+        guard let start = dragStartX else { return }
+        let dx = event.locationInWindow.x - start
+        if abs(dx) >= 6 {
+            dragTravel = dx
+            needsLayout = true
+        }
+    }
+
+    override func mouseUp(with event: NSEvent) {
+        defer {
+            dragStartX = nil
+            if dragTravel != 0 {
+                dragTravel = 0
+                needsLayout = true
+            }
+        }
+        if abs(dragTravel) < 6 {
+            if let browser, let tab, !front { browser.select(tab) }
+            return
+        }
+        let across = isLeft ? dragTravel : -dragTravel
+        if across > 120 { browser?.swapSplit() }
+    }
+
+    override func menu(for event: NSEvent) -> NSMenu? {
+        let menu = NSMenu()
+        menu.addItem(withTitle: "Swap Sides", action: #selector(swapSides), keyEquivalent: "").target = self
+        menu.addItem(withTitle: "Just This One", action: #selector(justThisOne), keyEquivalent: "").target = self
+        menu.addItem(withTitle: "Close This Side", action: #selector(closeSide), keyEquivalent: "").target = self
+        menu.addItem(.separator())
+        menu.addItem(withTitle: "Leave Split View", action: #selector(leaveSplit), keyEquivalent: "").target = self
+        return menu
+    }
+
+    @objc private func swapSides() { browser?.swapSplit() }
+    @objc private func justThisOne() { if let tab { browser?.alone(tab) } }
+    @objc private func closeSide() { if let tab { browser?.dropSide(tab) } }
+    @objc private func leaveSplit() { browser?.unsplit() }
+}
+
+/// Native AppKit split handle: hover feedback, cursor rects, direct mouse
+/// tracking and double-click snap back to 50 : 50.
+@MainActor
+private final class SplitDividerView: NSView {
+    var onDragBegin: (() -> Void)?
+    var onDragDelta: ((CGFloat) -> Void)?
+    var onDragEnd: (() -> Void)?
+    var onDoubleClick: (() -> Void)?
+
+    private let pill = CALayer()
+    private var darkChrome = false
+    private var hovering = false
+    private var dragging = false
+    private var dragStartX: CGFloat = 0
+    private var tracking: NSTrackingArea?
+
+    override var isFlipped: Bool { true }
+    override var mouseDownCanMoveWindow: Bool { false }
+
+    override init(frame frameRect: NSRect) {
+        super.init(frame: frameRect)
+        wantsLayer = true
+        layer?.addSublayer(pill)
+        stylePill(animated: false)
+    }
+
+    @available(*, unavailable)
+    required init?(coder: NSCoder) { fatalError() }
+
+    func setChrome(dark: Bool) {
+        guard darkChrome != dark else { return }
+        darkChrome = dark
+        stylePill(animated: true)
+    }
+
+    func setDragging(_ on: Bool) {
+        guard dragging != on else { return }
+        dragging = on
+        stylePill(animated: true)
+    }
+
+    override func updateTrackingAreas() {
+        super.updateTrackingAreas()
+        if let tracking { removeTrackingArea(tracking) }
+        let area = NSTrackingArea(
+            rect: bounds,
+            options: [.mouseEnteredAndExited, .activeInKeyWindow, .inVisibleRect],
+            owner: self,
+            userInfo: nil
+        )
+        addTrackingArea(area)
+        tracking = area
+    }
+
+    override func resetCursorRects() {
+        addCursorRect(bounds, cursor: .resizeLeftRight)
+    }
+
+    override func layout() {
+        super.layout()
+        positionPill()
+    }
+
+    override func mouseEntered(with event: NSEvent) {
+        hovering = true
+        stylePill(animated: true)
+    }
+
+    override func mouseExited(with event: NSEvent) {
+        hovering = false
+        stylePill(animated: true)
+    }
+
+    override func mouseDown(with event: NSEvent) {
+        if event.clickCount == 2 {
+            onDoubleClick?()
+            return
+        }
+        dragStartX = event.locationInWindow.x
+        onDragBegin?()
+    }
+
+    override func mouseDragged(with event: NSEvent) {
+        onDragDelta?(event.locationInWindow.x - dragStartX)
+    }
+
+    override func mouseUp(with event: NSEvent) {
+        onDragEnd?()
+    }
+
+    private func positionPill() {
+        let active = hovering || dragging
+        let w: CGFloat = active ? 4.5 : 3.0
+        let h: CGFloat = active ? 52 : 44
+        pill.frame = CGRect(
+            x: ((bounds.width - w) / 2).rounded(.toNearestOrAwayFromZero),
+            y: ((bounds.height - h) / 2).rounded(),
+            width: w,
+            height: h
+        )
+        pill.cornerRadius = w / 2
+    }
+
+    private func stylePill(animated: Bool) {
+        let base: NSColor = darkChrome ? .white : .black
+        let alpha: CGFloat = dragging ? 0.55 : (hovering ? 0.38 : 0.14)
+        CATransaction.begin()
+        CATransaction.setAnimationDuration(animated ? 0.14 : 0)
+        pill.backgroundColor = base.withAlphaComponent(alpha).cgColor
+        positionPill()
+        CATransaction.commit()
+    }
+}
+
+/// Floating translucent ratio capsule (`50 : 50`) updated directly in AppKit
+/// during live divider drags without withinWindow backdrop blur overhead.
+@MainActor
+private final class SplitRatioPill: NSView {
+    private let label = NSTextField(labelWithString: "50 : 50")
+
+    override init(frame frameRect: NSRect) {
+        super.init(frame: frameRect)
+        wantsLayer = true
+        layer?.cornerRadius = 11
+        layer?.cornerCurve = .continuous
+        layer?.masksToBounds = true
+        layer?.borderWidth = 0.5
+        alphaValue = 0
+        isHidden = true
+
+        label.font = NSFont.monospacedDigitSystemFont(ofSize: 11, weight: .medium)
+        label.alignment = .center
+        label.drawsBackground = false
+        label.isBezeled = false
+        label.isEditable = false
+        label.isSelectable = false
+        addSubview(label)
+        setChrome(dark: false)
+    }
+
+    @available(*, unavailable)
+    required init?(coder: NSCoder) { fatalError() }
+
+    override func hitTest(_ point: NSPoint) -> NSView? { nil }
+
+    override var intrinsicContentSize: NSSize {
+        NSSize(width: 62, height: 22)
+    }
+
+    override func layout() {
+        super.layout()
+        let text = label.intrinsicContentSize
+        label.frame = CGRect(
+            x: 0,
+            y: ((bounds.height - text.height) / 2).rounded(),
+            width: bounds.width,
+            height: text.height
+        )
+    }
+
+    func setChrome(dark: Bool) {
+        let base: NSColor = dark ? .white : .black
+        let fill: NSColor = dark
+            ? NSColor(calibratedWhite: 0.14, alpha: 0.92)
+            : NSColor(calibratedWhite: 0.97, alpha: 0.92)
+        layer?.backgroundColor = fill.cgColor
+        label.textColor = base.withAlphaComponent(0.88)
+        layer?.borderColor = base.withAlphaComponent(0.14).cgColor
+    }
+
+    func update(text: String) {
+        if label.stringValue != text {
+            label.stringValue = text
+        }
+    }
+
+    func setVisible(_ visible: Bool) {
+        if visible { isHidden = false }
+        NSAnimationContext.runAnimationGroup { ctx in
+            ctx.duration = visible ? 0.12 : 0.16
+            self.animator().alphaValue = visible ? 1 : 0
+        } completionHandler: { [weak self] in
+            MainActor.assumeIsolated {
+                if !visible, self?.alphaValue == 0 { self?.isHidden = true }
+            }
+        }
     }
 }
 
@@ -319,7 +1051,6 @@ private struct PaneHeader: View {
     @ObservedObject var browser: Browser
     @ObservedObject var tab: Tab
     let ink: Color
-    let width: CGFloat
 
     @State private var hovering = false
     @State private var travel: CGFloat = 0
@@ -355,10 +1086,10 @@ private struct PaneHeader: View {
             DragGesture(minimumDistance: 6)
                 .onChanged { travel = $0.translation.width }
                 .onEnded { value in
-                    // Past a third of the page towards the other side: they
-                    // change places.
+                    // Pulled past a clear threshold towards the other side:
+                    // they change places.
                     let across = onLeft ? value.translation.width : -value.translation.width
-                    if across > width / 3 { browser.swapSplit() }
+                    if across > 120 { browser.swapSplit() }
                     withAnimation(Motion.settle) { travel = 0 }
                 }
         )
@@ -421,38 +1152,5 @@ struct SplitDropZone: View {
             .onChange(of: frame) { _, new in browser.stageFrame = new }
         }
         .allowsHitTesting(false)
-    }
-}
-
-/// Hears a click inside its bounds without taking it: the page underneath
-/// still gets every click, and this only learns there was one.
-private struct PaneClick: NSViewRepresentable {
-    let act: () -> Void
-
-    func makeNSView(context: Context) -> Watcher { Watcher() }
-    func updateNSView(_ view: Watcher, context: Context) { view.act = act }
-
-    final class Watcher: NSView {
-        var act: () -> Void = {}
-        private var monitor: Any?
-
-        override func hitTest(_ point: NSPoint) -> NSView? { nil }
-
-        override func viewDidMoveToWindow() {
-            super.viewDidMoveToWindow()
-            if let monitor { NSEvent.removeMonitor(monitor) }
-            monitor = nil
-            guard window != nil else { return }
-            monitor = NSEvent.addLocalMonitorForEvents(matching: [.leftMouseDown, .rightMouseDown]) { [weak self] event in
-                guard let self, event.window === self.window else { return event }
-                let point = self.convert(event.locationInWindow, from: nil)
-                if self.bounds.contains(point) { self.act() }
-                return event
-            }
-        }
-
-        deinit {
-            if let monitor { NSEvent.removeMonitor(monitor) }
-        }
     }
 }

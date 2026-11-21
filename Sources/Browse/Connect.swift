@@ -90,9 +90,9 @@ final class Connect: ObservableObject {
     /// Which scope a tool is in. Nil for one no connected app may use.
     static func scope(of tool: String) -> Scope? {
         switch tool {
-        case "search", "read_pages", "tabs", "read", "links", "snapshot": return .read
-        case "open", "go", "back", "forward", "reload", "form_fields", "fill", "click", "type", "submit",
-             "drive", "screenshot", "scroll", "press_key", "hover", "wait_for", "close", "show":
+        case "search", "read_pages", "tabs", "read", "read_markdown", "page_info", "links", "snapshot": return .read
+        case "open", "open_tab", "go", "back", "forward", "reload", "form_fields", "fill", "click", "click_at",
+             "type", "submit", "drive", "screenshot", "scroll", "press_key", "hover", "wait_for", "close", "show":
             return .ownPages
         case "run_js": return .runJS
         default: return nil
@@ -101,6 +101,7 @@ final class Connect: ObservableObject {
 
     @Published private(set) var on: Bool
     @Published private(set) var clients: [Client]
+    @Published private(set) var listeningPort: UInt16?
 
     /// The app driving right now, for the pill over the page.
     struct Driving: Equatable {
@@ -135,6 +136,7 @@ final class Connect: ObservableObject {
             Task { await serve() }
         } else {
             Connect.withdraw()
+            listeningPort = nil
             pairing = nil
         }
     }
@@ -142,6 +144,7 @@ final class Connect: ObservableObject {
     /// The server up, and where it is written down for apps to find.
     private func serve() async {
         guard on, await AgentTools.shared.listening(), let port = AgentTools.shared.listeningPort else { return }
+        listeningPort = port
         let found: [String: Any] = [
             "protocol": [Connect.version],
             "port": Int(port),
@@ -537,14 +540,23 @@ final class Connect: ObservableObject {
 /// Settings › Agent › Connected apps.
 struct ConnectCard: View {
     @ObservedObject private var connect = Connect.shared
-    @State private var copied = false
+    @State private var copiedKind: String?
 
     private var mcpBinary: String {
         let bundled = Bundle.main.bundleURL.appendingPathComponent("Contents/MacOS/browse-mcp").path
         return FileManager.default.isExecutableFile(atPath: bundled) ? bundled : "/Applications/browse.app/Contents/MacOS/browse-mcp"
     }
 
-    private func copyMCPConfig() {
+    private func copy(_ text: String, kind: String) {
+        NSPasteboard.general.clearContents()
+        NSPasteboard.general.setString(text, forType: .string)
+        copiedKind = kind
+        DispatchQueue.main.asyncAfter(deadline: .now() + 2) {
+            if copiedKind == kind { copiedKind = nil }
+        }
+    }
+
+    private func copyJSON() {
         let json = """
         {
           "mcpServers": {
@@ -555,10 +567,24 @@ struct ConnectCard: View {
           }
         }
         """
-        NSPasteboard.general.clearContents()
-        NSPasteboard.general.setString(json, forType: .string)
-        copied = true
-        DispatchQueue.main.asyncAfter(deadline: .now() + 2) { copied = false }
+        copy(json, kind: "json")
+    }
+
+    private func copyClaudeCommand() {
+        copy("claude mcp add browse -- \"\(mcpBinary)\" --name \"Claude Code\"", kind: "claude")
+    }
+
+    private func copyCodexCommand() {
+        copy("codex mcp add browse -- \"\(mcpBinary)\" --name \"Codex\"", kind: "codex")
+    }
+
+    private var statusLine: String {
+        let count = connect.clients.count
+        let apps = count == 0 ? "No paired apps yet" : "\(count) paired app\(count == 1 ? "" : "s")"
+        if let port = connect.listeningPort {
+            return "Listening on 127.0.0.1:\(port) · \(apps)"
+        }
+        return "Starting local MCP bridge… · \(apps)"
     }
 
     var body: some View {
@@ -571,11 +597,26 @@ struct ConnectCard: View {
             }
             if connect.on {
                 Rule()
+                HStack(spacing: 8) {
+                    PulseDot(color: connect.listeningPort != nil ? .green.opacity(0.85) : .orange.opacity(0.85), size: 6, active: connect.driving != nil)
+                    Text(statusLine)
+                        .font(.system(size: 11.5, weight: .medium))
+                        .foregroundStyle(Palette.muted)
+                        .contentTransition(.numericText())
+                    Spacer(minLength: 0)
+                }
+                .padding(.horizontal, 14)
+                .padding(.vertical, 9)
+                Rule()
                 Line(
                     "MCP server (stdio)",
-                    "Add browse-mcp to Claude Code, Antigravity, Codex or Cursor; pairs once with a 6-digit code"
+                    "Pairs once with a 6-digit code. Enable “Read and act in your tabs” on a paired client to let it inspect or screenshot your open tabs"
                 ) {
-                    Pill(copied ? "Copied" : "Copy MCP config") { copyMCPConfig() }
+                    HStack(spacing: 6) {
+                        Pill(copiedKind == "json" ? "Copied" : "Copy JSON") { copyJSON() }
+                        Pill(copiedKind == "claude" ? "Copied" : "Claude Code") { copyClaudeCommand() }
+                        Pill(copiedKind == "codex" ? "Copied" : "Codex") { copyCodexCommand() }
+                    }
                 }
                 ForEach(connect.clients) { client in
                     Rule()
@@ -594,7 +635,7 @@ struct ConnectCard: View {
                 }
                 if connect.clients.isEmpty {
                     Rule()
-                    Line("None yet", "Copy the MCP config into your agent, or connect from Harness › Settings › Use browse for web tasks") { EmptyView() }
+                    Line("None yet", "Copy the MCP config or CLI command into your agent, or connect from Harness › Settings › Use browse for web tasks") { EmptyView() }
                 }
             }
         }

@@ -24,7 +24,19 @@ struct Page: View {
             // the stage was never told to take it back when it landed, and
             // the tab stayed empty. Nothing, then the page, is a change.
             WebStage(page: tab.isBlank || tab.asleep || tab.floating ? nil : tab.web, corner: corner)
+            PageOverlays(tab: tab)
+        }
+    }
+}
 
+/// Everything layered over a tab's WKWebView: wake cover, floating notice,
+/// load failure and swipe-back disc. Split View mounts StageView directly in
+/// AppKit and layers these overlays separately so resizing never runs SwiftUI.
+struct PageOverlays: View {
+    @ObservedObject var tab: Tab
+
+    var body: some View {
+        ZStack {
             if let cover = tab.cover {
                 // The page as it was left, while it is rebuilt underneath —
                 // anchored where the page itself starts, and never in the
@@ -160,6 +172,10 @@ final class StageView: NSView {
     /// Now there is one fact and one rule: show `wanted`, and put that right on
     /// every layout. Nothing to fall out of step with.
     private weak var wanted: NSView?
+    private weak var backedWeb: WKWebView?
+    private weak var liveResizingWeb: WKWebView?
+    private var unback: DispatchWorkItem?
+    private var lastSize: CGSize = .zero
 
     /// The Web Inspector each page off show had docked beside it. WebKit
     /// docks it once, on show; a page coming back without it was laid out
@@ -168,18 +184,91 @@ final class StageView: NSView {
     /// is open, never by this.
     private static let docks = NSMapTable<NSView, NSView>.weakToWeakObjects()
 
+    override func viewWillMove(toWindow newWindow: NSWindow?) {
+        super.viewWillMove(toWindow: newWindow)
+        if newWindow == nil {
+            endLiveResize()
+            unbackPage()
+        }
+    }
+
     override func layout() {
         super.layout()
+        let size = bounds.size
+        if size != lastSize {
+            if lastSize.width > 0, lastSize.height > 0, size.width > 0, size.height > 0 {
+                backPage()
+            }
+            lastSize = size
+        }
         settle()
     }
 
     func show(_ page: NSView?) {
-        if let leaving = wanted, leaving !== page, let dock = subviews.first(where: Self.isInspector) {
-            Self.docks.setObject(dock, forKey: leaving)
-            dock.removeFromSuperview()
+        if let leaving = wanted, leaving !== page {
+            endLiveResize()
+            unbackPage()
+            if let dock = subviews.first(where: Self.isInspector) {
+                Self.docks.setObject(dock, forKey: leaving)
+                dock.removeFromSuperview()
+            }
         }
         wanted = page
         settle()
+    }
+
+    /// Tell WebKit a live split drag has started so it switches its drawing
+    /// area to async live-resize instead of blocking the main thread on
+    /// synchronous WebContent presentation updates at every 120 Hz step.
+    func startLiveResize() {
+        backPage()
+        guard let web = wanted as? WKWebView, liveResizingWeb !== web else { return }
+        endLiveResize()
+        (web as? PageView)?.splitLiveResizing = true
+        web.viewWillStartLiveResize()
+        liveResizingWeb = web
+    }
+
+    func endLiveResize() {
+        guard let web = liveResizingWeb else { return }
+        liveResizingWeb = nil
+        (web as? PageView)?.splitLiveResizing = false
+        web.viewDidEndLiveResize()
+    }
+
+    /// Keep the page's own background colour behind WebKit during live resize
+    /// so newly exposed strips never flash grey or black while the web process
+    /// catches up, then hand drawing back to WebKit half a second after resize
+    /// settles.
+    func backPage() {
+        guard let web = wanted as? WKWebView else { return }
+        wantsLayer = true
+        layer?.backgroundColor = web.underPageBackgroundColor.cgColor
+        if backedWeb !== web {
+            if let prev = backedWeb { Self.setDrawsBackground(prev, true) }
+            Self.setDrawsBackground(web, false)
+            backedWeb = web
+        }
+        unback?.cancel()
+        let work = DispatchWorkItem { [weak self] in self?.unbackPage() }
+        unback = work
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.5, execute: work)
+    }
+
+    private func unbackPage() {
+        unback?.cancel()
+        unback = nil
+        if let web = backedWeb {
+            Self.setDrawsBackground(web, true)
+            backedWeb = nil
+        }
+        layer?.backgroundColor = nil
+    }
+
+    private static func setDrawsBackground(_ web: WKWebView, _ on: Bool) {
+        let sel = NSSelectorFromString("_setDrawsBackground:")
+        guard web.responds(to: sel) else { return }
+        web.setValue(on, forKey: "drawsBackground")
     }
 
     private func settle() {
@@ -189,6 +278,13 @@ final class StageView: NSView {
         // taking the page back then left the screen black with the sound
         // still playing. WebKit puts it back itself on the way out.
         if let web = wanted as? WKWebView, web.fullscreenState != .notInFullscreen { return }
+
+        // Fast path during live 120 Hz resize: the wanted page is already the
+        // sole subview, so skip inspector reflection and subview scans.
+        if let wanted, window != nil, wanted.superview === self, subviews.count == 1 {
+            if wanted.frame != bounds { wanted.frame = bounds }
+            return
+        }
 
         // Anything here that isn't wanted, out. Only ever what is actually
         // ours: a page may be somewhere else on purpose. Except the Web
@@ -226,7 +322,7 @@ final class StageView: NSView {
         // side as this view changes size; setting the page's frame here would
         // cover the inspector.
         if !(docked && subviews.contains(where: Self.isInspector)) {
-            wanted.frame = bounds
+            if wanted.frame != bounds { wanted.frame = bounds }
         }
     }
 

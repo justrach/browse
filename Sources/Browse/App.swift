@@ -398,9 +398,10 @@ struct ContentView: View {
     @ViewBuilder
     private var page: some View {
         if let pair = browser.shownSplit {
-            // Two tabs side by side (Split.swift).
+            // Two tabs side by side (Split.swift). StageView lives directly in
+            // AppKit; SwiftUI only supplies overlays for Find, links and forms.
             SplitStage(browser: browser, left: pair.left, right: pair.right) { tab in
-                pane(tab, corner: Split.corner)
+                paneOverlays(tab)
             }
             .transition(.opacity)
         } else if let tab = browser.active {
@@ -413,28 +414,34 @@ struct ContentView: View {
     /// A tab's page, with what goes over the page in front: the link under
     /// the pointer, Find, the offer to fill a form, saved sign-ins.
     private func pane(_ tab: Tab, corner: CGFloat = 0) -> some View {
+        Page(tab: tab, corner: corner)
+            .overlay { paneOverlays(tab, includePageOverlays: false) }
+    }
+
+    @ViewBuilder
+    private func paneOverlays(_ tab: Tab, includePageOverlays: Bool = true) -> some View {
         let front = tab.id == browser.activeID
-        return Page(tab: tab, corner: corner)
-            .overlay {
-                if front, browser.prefs.showsLinks { LinkBubble(status: browser.linkStatus) }
+        ZStack {
+            if includePageOverlays { PageOverlays(tab: tab) }
+            if front, browser.prefs.showsLinks { LinkBubble(status: browser.linkStatus) }
+        }
+        .overlay(alignment: .topTrailing) {
+            if front, browser.finding {
+                FindBar(browser: browser)
+                    .transition(.move(edge: .top).combined(with: .opacity))
             }
-            .overlay(alignment: .topTrailing) {
-                if front, browser.finding {
-                    FindBar(browser: browser)
-                        .transition(.move(edge: .top).combined(with: .opacity))
-                }
+        }
+        // A form on the page: Codegraff offered to fill it in.
+        .overlay(alignment: .bottomTrailing) {
+            if front { FormPill(browser: browser, tab: tab) }
+        }
+        .overlay(alignment: .topLeading) {
+            if let asked = browser.suggesting, asked.tab == tab.id {
+                AccountList(browser: browser, asked: asked)
+                    .transition(.opacity)
             }
-            // A form on the page: Codegraff offered to fill it in.
-            .overlay(alignment: .bottomTrailing) {
-                if front { FormPill(browser: browser, tab: tab) }
-            }
-            .overlay(alignment: .topLeading) {
-                if let asked = browser.suggesting, asked.tab == tab.id {
-                    AccountList(browser: browser, asked: asked)
-                        .transition(.opacity)
-                }
-            }
-            .animation(Motion.quick, value: browser.suggesting)
+        }
+        .animation(Motion.quick, value: browser.suggesting)
     }
 
     /// What the column and the strip take from the page right now: animated
