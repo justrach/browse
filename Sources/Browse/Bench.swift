@@ -1160,6 +1160,19 @@ final class Bench {
                 }
             }
 
+        case "accounts":
+            // The list under the sign-in box the caret is in — passkeys, then
+            // passwords — and, with "pick", a click on its row by number,
+            // counted from 0. Only on a SEARCH_PROBE run: it would sign in.
+            guard Store.testing else { answer(["error": "accounts only works on a --test run"]); return }
+            guard let list = browser.suggesting else { answer(["shown": false]); return }
+            let rows = list.passkeys.map { ["passkey": $0.name] } + list.logins.map { ["login": $0.user] }
+            if let pick = request["pick"] as? Int {
+                guard rows.indices.contains(pick) else { answer(["error": "no row \(pick)"]); return }
+                if pick < list.passkeys.count { browser.choose(list.passkeys[pick]) } else { browser.choose(list.logins[pick - list.passkeys.count]) }
+            }
+            answer(["shown": true, "rows": rows, "spot": [list.spot.minX, list.spot.minY, list.spot.width, list.spot.height]])
+
         case "fill":
             // What the window spends on the page scrolling: the page's report
             // of where it is, STEPS times, 8 ms apart, each timed until the
@@ -1746,7 +1759,7 @@ final class Bench {
 
         default:
             answer(["error": "unknown command “\(verb)”", "commands": [
-                "tabs", "open", "go", "close", "wait", "sleep", "tidy", "shield", "sources", "acp", "agent-context", "select", "text", "eval", "click", "type", "submit", "shot", "probe", "key", "resize", "hit", "film", "window", "pages", "picture", "place", "field", "bookmark", "import", "menu", "keyeq", "fill", "middle", "pull", "space", "strip", "column", "fold", "consent", "site", "little", "ui",
+                "tabs", "open", "go", "close", "wait", "sleep", "tidy", "shield", "sources", "acp", "agent-context", "select", "text", "eval", "click", "type", "submit", "shot", "probe", "key", "resize", "hit", "film", "window", "pages", "picture", "place", "field", "bookmark", "import", "menu", "keyeq", "accounts", "fill", "middle", "pull", "space", "strip", "column", "fold", "consent", "site", "little", "ui",
             ]])
         }
     }
