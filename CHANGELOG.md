@@ -11,8 +11,6 @@ in [ROADMAP.md](ROADMAP.md).
 
 ## Unreleased
 
-## 1.6.1 — 22 November 2026
-
 ### Added
 
 - Rich Markdown & native LaTeX rendering in Codegraff replies: GFM tables with alignment and horizontal scrolling, fenced code blocks with language headers and Copy button, heading hierarchy, blockquotes, task checkboxes, horizontal rules, inline math (`$...$`, `\(...\)`), and display math (`$$...$$`, `\[...\]` with stacked fractions, roots, big-operator limits, matrices, and Copy TeX).
@@ -28,6 +26,10 @@ in [ROADMAP.md](ROADMAP.md).
 - Model picker now opens in a single opaque popover with search, inline reasoning slider, and 1-click model selection (no hidden second step or translucent bleed across the sidebar edge).
 - Citation rewriting skips Markdown table rows and display math blocks so links inside tables no longer lose their closing parenthesis.
 - PDFs zoom up to 600% with `⌘+` (matching WebKit's PDF bar) without altering the host site's saved zoom; Clear › Cache also clears service-worker Cache Storage (`WKWebsiteDataTypeFetchCache`).
+
+## 1.6.1 — 22 November 2026
+
+Tagged but not published. These changes shipped in 1.6.2.
 
 ## 1.6.0 — 21 November 2026
 

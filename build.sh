@@ -102,7 +102,7 @@ else
   # builds from older ones without parsing version strings.
   BUILD="$(date +%Y%m%d%H%M)"
   if [ "$CONFIG" = "release" ]; then
-    swift build -c release -Xswiftc -Osize -Xswiftc -lto=llvm-thin -Xlinker -dead_strip
+    swift build -c release -Xswiftc -Osize -Xlinker -dead_strip
   else
     swift build -c "$CONFIG"
   fi
