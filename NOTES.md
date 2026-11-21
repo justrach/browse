@@ -1,3 +1,5 @@
+Aside-style compact top address bar with page tint and top-right Ask pill, redesigned full-height Agent Sidebar with unified docked composer and streamlined header, BrowserBench/Speedometer DOM performance fixes, smoother ⌘S sidebar fold, sideways scroll Back-swipe guard, and embedded MCP read-only tool annotations.
+
 Always-visible model picker with 1-click opaque popover, rich Markdown tables and native LaTeX math in Codegraff replies, Sync with iCloud, Handoff, Reddit ad blocking, 600% PDF zoom, 10 more browser imports, faster animations, and smaller release binaries.
 
 Always-visible model picker with 1-click opaque popover, rich Markdown tables and native LaTeX math in Codegraff replies, Sync with iCloud, Handoff, Reddit ad blocking, 600% PDF zoom, 10 more browser imports, faster animations, and smaller release binaries.

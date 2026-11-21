@@ -11,6 +11,8 @@ in [ROADMAP.md](ROADMAP.md).
 
 ## Unreleased
 
+## 1.7.0 — 22 November 2026
+
 ### Added
 
 - **Compact top address bar (Aside style)**: single-row top bar in sidebar and folded modes showing sidebar toggle (`⌘S`), navigation buttons, clickable `domain | page title` (`⌘L`), Passwords (`🔑`), Extensions (`🧩`), and a pinned top-right **`✦ Ask [⌘;]`** pill that adapts to page tint (toggleable in Settings › Tabs).
