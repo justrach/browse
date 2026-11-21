@@ -168,35 +168,46 @@ enum Metrics {
 // When macOS Reduce Motion is on in System Settings, transitions become
 // immediate so the interface does not jump or slide.
 enum Motion {
-    /// Whether interface transitions should be immediate, following the
-    /// Mac's own accessibility setting.
+    /// Whether interface transitions should avoid spatial movement, following
+    /// the Mac's own Reduce Motion accessibility setting.
     static var reduced: Bool {
         NSWorkspace.shared.accessibilityDisplayShouldReduceMotion
     }
 
+    /// Fast, interruptible spring under 300 ms for layout/drawer movement.
     static var glide: Animation? {
-        reduced ? nil : .spring(response: 0.34, dampingFraction: 0.82)
+        reduced ? .easeOut(duration: 0.14) : .spring(response: 0.24, dampingFraction: 0.88)
     }
 
+    /// Snappy spring for list rows and arriving/departing cards.
     static var settle: Animation? {
-        reduced ? nil : .spring(response: 0.30, dampingFraction: 0.86)
+        reduced ? .easeOut(duration: 0.14) : .spring(response: 0.24, dampingFraction: 0.88)
     }
 
+    /// Crisp tactile spring for button presses and sliders.
     static var snappy: Animation? {
-        reduced ? nil : .spring(response: 0.24, dampingFraction: 0.84)
+        reduced ? .easeOut(duration: 0.12) : .spring(response: 0.18, dampingFraction: 0.86)
     }
 
+    /// Slightly softer spring for full-stage transitions, still under 300 ms.
     static var gentle: Animation? {
-        reduced ? nil : .spring(response: 0.42, dampingFraction: 0.88)
+        reduced ? .easeOut(duration: 0.16) : .spring(response: 0.28, dampingFraction: 0.90)
     }
 
+    /// Fast ease-out for hover states and micro-feedback.
     static var quick: Animation? {
-        reduced ? nil : .easeOut(duration: 0.14)
+        .easeOut(duration: 0.14)
+    }
+
+    /// Opacity-only crossfade that stays smooth even under Reduce Motion.
+    static var fade: Animation {
+        .easeOut(duration: reduced ? 0.14 : 0.18)
     }
 }
 
 /// Live breathing status dot for active agent runs and connected MCP sessions.
-/// Renders static under macOS Reduce Motion.
+/// Animates GPU-composited scale + opacity only (zero per-frame layout work)
+/// and stays static under macOS Reduce Motion.
 struct PulseDot: View {
     var color: Color = Palette.accent
     var size: CGFloat = 6
@@ -207,8 +218,10 @@ struct PulseDot: View {
         ZStack {
             if active && !Motion.reduced {
                 Circle()
-                    .fill(color.opacity(breathing ? 0.0 : 0.42))
-                    .frame(width: size * (breathing ? 2.4 : 1.15), height: size * (breathing ? 2.4 : 1.15))
+                    .fill(color)
+                    .frame(width: size, height: size)
+                    .scaleEffect(breathing ? 2.3 : 1.05)
+                    .opacity(breathing ? 0.0 : 0.42)
                     .animation(.easeOut(duration: 1.35).repeatForever(autoreverses: false), value: breathing)
             }
             Circle()

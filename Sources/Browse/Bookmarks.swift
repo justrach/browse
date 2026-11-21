@@ -305,6 +305,7 @@ final class Bookmarks: ObservableObject {
 
     private func save() {
         Sync.shared.nudge()
+        ICloudSync.shared.bookmarksChanged()
         let snapshot = roots
         // One after another, the newest last (see Disk).
         Disk.write(Bookmarks.file) { try? JSONEncoder().encode(snapshot) }

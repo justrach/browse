@@ -28,6 +28,8 @@ struct Suggestion: Identifiable, Equatable {
         case google
         /// The same words, for Codegraff instead (see Agent.swift).
         case ask
+        /// A tab open on another device synced through iCloud.
+        case elsewhere
     }
 
     /// The words to ask Codegraff, as a row. It goes nowhere of its own; the

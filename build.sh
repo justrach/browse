@@ -101,7 +101,11 @@ else
   # A build number that only ever goes up, so the updater can tell newer
   # builds from older ones without parsing version strings.
   BUILD="$(date +%Y%m%d%H%M)"
-  swift build -c "$CONFIG"
+  if [ "$CONFIG" = "release" ]; then
+    swift build -c release -Xswiftc -Osize -Xswiftc -lto=llvm-thin -Xlinker -dead_strip
+  else
+    swift build -c "$CONFIG"
+  fi
   BINARY=".build/$CONFIG/Browse"
   MCP_BINARY=".build/$CONFIG/browse-mcp"
 
@@ -113,16 +117,15 @@ else
   cp docs/legal/upstream-mit.txt "$APP/Contents/Resources/LICENSE.MIT"
 
 # Symbols stay out of the app. The linker leaves every function's name and a
-# map back to the source in the binary — 15,000 entries, more than half of
-# what the app weighed (6.5 MB of binary, 2.7 without them), and nothing the
-# app reads while it runs. They are kept beside the build instead, as a dSYM
-# that turns the addresses in a crash report back into names (Console, or
-# atos -o "build/browse.app.dSYM/Contents/Resources/DWARF/Browse").
+# map back to the source in the binary — more than half of what the app weighs,
+# and nothing the app reads while it runs. They are kept beside the build
+# instead, as a dSYM that turns addresses in a crash report back into names
+# (Console, or atos -o "build/browse.app.dSYM/Contents/Resources/DWARF/Browse").
 if [ "$CONFIG" = "release" ]; then
   rm -rf "$APP.dSYM"
   dsymutil "$BINARY" -o "$APP.dSYM" 2>/dev/null || echo "no dSYM this time" >&2
-  strip -x "$APP/Contents/MacOS/Browse"
-  if [ -f "$APP/Contents/MacOS/browse-mcp" ]; then strip -x "$APP/Contents/MacOS/browse-mcp"; fi
+  strip "$APP/Contents/MacOS/Browse"
+  if [ -f "$APP/Contents/MacOS/browse-mcp" ]; then strip "$APP/Contents/MacOS/browse-mcp"; fi
 fi
 
 # Build the macOS icon from the mark used in the app — browse's own, the
@@ -142,7 +145,7 @@ for POINTS in 16 32 128 256 512; do
   done
 done
 iconutil -c icns "$ICONSET" -o "$APP/Contents/Resources/AppIcon.icns"
-cp "$SOURCE_ICON" "$APP/Contents/Resources/BrandMark.png"
+sips -s format png -z 256 256 "$SOURCE_ICON" --out "$APP/Contents/Resources/BrandMark.png" >/dev/null
 mkdir -p "$APP/Contents/Resources/PreviewFavicons"
 cp Assets/PreviewFavicons/*.png "$APP/Contents/Resources/PreviewFavicons/"
 mkdir -p "$APP/Contents/Resources/ProviderMarks"
@@ -211,6 +214,8 @@ cat > "$APP/Contents/Info.plist" <<PLIST
   <string>Websites you visit can ask to use your microphone. browse asks you the first time each site does and keeps your answer; Settings › Privacy forgets them.</string>
   <key>NSDownloadsFolderUsageDescription</key>
   <string>Files you download are saved to your Downloads folder.</string>
+  <key>NSUserActivityTypes</key>
+  <array><string>NSUserActivityTypeBrowsingWeb</string></array>
 </dict>
 </plist>
 PLIST
@@ -241,6 +246,22 @@ if [ -n "$IDENTITY" ] && [ -f "$PROFILE" ]; then
     cp "$PROFILE" "$APP/Contents/embedded.provisionprofile"
     ENTITLEMENTS="Browse.passkeys.entitlements"
     echo "passkeys: $PROFILE embedded"
+    PROFILE_PLIST="$(mktemp -t browse-profile)"
+    printf '%s' "$DECODED" > "$PROFILE_PLIST"
+    profile_has() { /usr/libexec/PlistBuddy -c "Print :Entitlements:$1" "$PROFILE_PLIST" >/dev/null 2>&1; }
+    if /usr/libexec/PlistBuddy -c "Print :Entitlements:com.apple.developer.icloud-container-identifiers" "$PROFILE_PLIST" 2>/dev/null \
+        | grep -q "iCloud.com.codegraff.search"; then
+      ENTITLEMENTS="build/Browse.icloud.entitlements"
+      mkdir -p build
+      cp "Browse.icloud.entitlements" "$ENTITLEMENTS"
+      for key in com.apple.developer.icloud-container-environment com.apple.developer.aps-environment; do
+        profile_has "$key" || /usr/libexec/PlistBuddy -c "Delete :$key" "$ENTITLEMENTS" >/dev/null
+      done
+      echo "iCloud: $PROFILE carries iCloud.com.codegraff.search, Sync with iCloud enabled"
+    else
+      echo "iCloud: $PROFILE has no iCloud container — built with passkeys (add iCloud.com.codegraff.search to profile to enable CloudKit)"
+    fi
+    rm -f "$PROFILE_PLIST"
   else
     echo "note: $PROFILE isn't a Developer ID profile for com.codegraff.search with passkeys (app id: ${APPID:-none}, passkeys: ${PASSKEYS:-no}) — signing without passkeys" >&2
   fi

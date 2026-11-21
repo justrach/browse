@@ -200,6 +200,13 @@ final class Links: NSObject, NSApplicationDelegate {
         }
     }
 
+    func application(_ application: NSApplication, continue userActivity: NSUserActivity,
+                     restorationHandler: @escaping ([any NSUserActivityRestoring]) -> Void) -> Bool {
+        guard !Store.testing, let url = Handoff.incoming(userActivity) else { return false }
+        Links.take(url)
+        return true
+    }
+
     /// A link that launches the app arrives as an Apple Event, taken above,
     /// and SwiftUI — seeing a launch that came to open something rather than
     /// a plain one — leaves its window for that event to open. It never sees
