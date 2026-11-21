@@ -7,7 +7,7 @@ struct AgentGuide: View {
           VStack(alignment: .leading, spacing: 18) {
             Text("Get started with Codegraff")
                 .font(.system(size: 17, weight: .semibold))
-            Text("Open a page → press . → ask a question → press Return. Use ⌘; to open or close the expanded conversation.")
+            Text("Press ⌘; to toggle the agent sidebar beside any page, ⇧⌘; to expand full screen, or . while reading to ask right away.")
                 .font(.system(size: 13)).fixedSize(horizontal: false, vertical: true)
             step("doc.text", "Choose the context", "Press . while reading. The page title and domain above the input show what will be included. Use × to exclude it, + to include it, or the pin to keep that page attached as you change tabs.")
             step("text.quote", "Ask about a passage", "Enable “Ask about selected text” in Settings › Agent. Right-click a passage, review the selected-text preview and its source, then send. Remove the page context to send just the excerpt.")

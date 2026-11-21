@@ -14,6 +14,7 @@ struct AgentColumn: View {
     @ObservedObject var browser: Browser
     @ObservedObject var agent: Agent
     @ObservedObject var prefs: Preferences
+    @ObservedObject private var shortcuts = ShortcutStore.shared
 
     /// The whole stage rather than a column beside it (see Browser.agentFull).
     var full = false
@@ -292,13 +293,42 @@ struct AgentColumn: View {
                     .fixedSize(horizontal: false, vertical: true)
                 AgentStarters(agent: agent, page: browser.active, compact: true, focus: browser.focusAgent)
                     .padding(.top, 8)
-                Text("Press . while reading to open Codegraff here.")
-                    .font(.system(size: 11))
-                    .foregroundStyle(Palette.muted)
-                    .padding(.top, 8)
+                agentShortcutHints
+                    .padding(.top, 10)
             }
         }
         .padding(.top, 28)
+    }
+
+    private var agentShortcutHints: some View {
+        let toggle = shortcuts.key(for: .toggleAgent)?.display
+        let expand = shortcuts.key(for: .expandAgent)?.display
+        return VStack(alignment: .leading, spacing: 6) {
+            HStack(spacing: 12) {
+                if let toggle {
+                    HStack(spacing: 5) {
+                        ShortcutBadge(keys: toggle)
+                        Text("Sidebar")
+                            .font(.system(size: 11))
+                            .foregroundStyle(Palette.muted)
+                    }
+                }
+                if let expand {
+                    HStack(spacing: 5) {
+                        ShortcutBadge(keys: expand)
+                        Text("Full view")
+                            .font(.system(size: 11))
+                            .foregroundStyle(Palette.muted)
+                    }
+                }
+                HStack(spacing: 5) {
+                    ShortcutBadge(keys: ".")
+                    Text("Quick ask")
+                        .font(.system(size: 11))
+                        .foregroundStyle(Palette.muted)
+                }
+            }
+        }
     }
 
     /// Everything the talk draws is held to one measure and centred on the
@@ -1499,7 +1529,7 @@ struct AgentPage: View {
         Card {
             Line(
                 "Codegraff",
-                "Ask beside a page with . while reading. ⌘; opens or closes chat; ⌘↩ asks from the address field."
+                "Toggle the agent sidebar with ⌘;, expand full screen with ⇧⌘;, or press . while reading. ⌘↩ asks from the address field."
             ) {
                 Switch(on: $prefs.usesAgent)
             }

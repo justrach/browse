@@ -104,9 +104,9 @@ struct BrowseApp: App {
                 Button("Enter Full Screen") { browser.toggleFullScreen() }
                     .shortcut(shortcuts.key(for: .fullScreen))
                 Divider()
-                Button(browser.consulting && browser.prefs.usesAgent ? "Hide Codegraff" : "Show Codegraff") { browser.toggleAgent() }
+                Button(browser.consulting && browser.prefs.usesAgent ? "Hide Agent Sidebar" : "Show Agent Sidebar") { browser.toggleAgent() }
                     .shortcut(shortcuts.key(for: .toggleAgent))
-                Button(browser.talkOnStage ? "Codegraff Beside Page" : "Expand Codegraff") { browser.toggleAgentFull() }
+                Button(browser.talkOnStage ? "Move Agent to Sidebar" : "Expand Agent Full Screen") { browser.toggleAgentFull() }
                     .shortcut(shortcuts.key(for: .expandAgent))
                 Divider()
                 Button("Hide Elements…") { browser.toggleHiding() }

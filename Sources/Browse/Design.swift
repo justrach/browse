@@ -366,3 +366,28 @@ struct SideGlass: NSViewRepresentable {
         view.appearance = dark.map { NSAppearance(named: $0 ? .darkAqua : .aqua) } ?? nil
     }
 }
+
+/// A crisp, high-contrast keyboard keycap badge — legible in light mode, dark
+/// mode, and over page-tinted sidebars alike.
+struct ShortcutBadge: View {
+    let keys: String
+    var active: Bool = false
+
+    var body: some View {
+        Text(keys)
+            .font(.system(size: 10.5, weight: .semibold, design: .rounded))
+            .foregroundStyle(active ? Palette.ink : Palette.ink.opacity(0.84))
+            .padding(.horizontal, 5.5)
+            .padding(.vertical, 2)
+            .frame(minWidth: 20, minHeight: 19)
+            .background(
+                Palette.ink.opacity(active ? 0.13 : 0.085),
+                in: RoundedRectangle(cornerRadius: 5, style: .continuous)
+            )
+            .overlay(
+                RoundedRectangle(cornerRadius: 5, style: .continuous)
+                    .strokeBorder(Palette.ink.opacity(active ? 0.26 : 0.18), lineWidth: 0.75)
+            )
+            .fixedSize()
+    }
+}

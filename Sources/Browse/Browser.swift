@@ -114,8 +114,8 @@ final class Browser: NSObject, ObservableObject {
     /// in front (see AskTab in TabBar.swift).
     var talkOnStage: Bool { consulting && agentFull && prefs.usesAgent }
 
-    /// ⌘;. Codegraff over the whole tab, or — if it is up, on the stage or
-    /// down the side — gone again. Settings › Agent turns it off for good.
+    /// ⌘;. Toggle Codegraff's agent sidebar beside the current page — or close
+    /// it if it is already open (beside the page or on the full stage).
     func toggleAgent() {
         if !prefs.usesAgent { prefs.usesAgent = true }
         if consulting {
@@ -124,7 +124,7 @@ final class Browser: NSObject, ObservableObject {
                 consulting = false
             }
         } else {
-            takeStage()
+            talkToColumn()
         }
     }
 
@@ -132,7 +132,7 @@ final class Browser: NSObject, ObservableObject {
     func toggleAgentFull() {
         if !prefs.usesAgent { prefs.usesAgent = true }
         if talkOnStage {
-            leaveStage()
+            talkToColumn()
         } else {
             takeStage()
         }

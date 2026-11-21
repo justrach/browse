@@ -264,8 +264,8 @@ struct BrowserCommand: Identifiable {
         BrowserCommand(.jsConsole, .view, "JavaScript Console", KeyCombo("j", command: true, option: true)),
         BrowserCommand(.inspectElement, .view, "Inspect Element", KeyCombo("c", command: true, option: true)),
         // Codegraff
-        BrowserCommand(.toggleAgent, .agent, "Show / Hide Codegraff", KeyCombo(";", command: true), alwaysOurs: true),
-        BrowserCommand(.expandAgent, .agent, "Expand Codegraff Full View", KeyCombo(";", command: true, shift: true), alwaysOurs: true),
+        BrowserCommand(.toggleAgent, .agent, "Toggle Agent Sidebar", KeyCombo(";", command: true), alwaysOurs: true),
+        BrowserCommand(.expandAgent, .agent, "Expand / Collapse Full-Screen Agent", KeyCombo(";", command: true, shift: true), alwaysOurs: true),
         BrowserCommand(.fillFormWithAgent, .agent, "Fill In This Form with Codegraff", KeyCombo("f", command: true, option: true)),
         // Tabs
         BrowserCommand(.back, .tabs, "Back", KeyCombo("[", command: true)),
@@ -473,8 +473,8 @@ enum Shortcuts {
         Shortcut(keys: "⌘T", what: "New tab"),
         Shortcut(keys: "⌘L", what: "Open address"),
         Shortcut(keys: "⌘K", what: "Search open tabs"),
-        Shortcut(keys: "⇧⌘T", what: "Reopen closed tab"),
-        Shortcut(keys: "⇧⌘N", what: "New private tab"),
+        Shortcut(keys: "⌘;", what: "Toggle agent sidebar"),
+        Shortcut(keys: "⇧⌘;", what: "Expand full-screen agent"),
         Shortcut(keys: "⌘/", what: "All keyboard shortcuts"),
     ]
 }
@@ -485,12 +485,16 @@ struct ShortcutLine: View {
     var body: some View {
         HStack(spacing: 9) {
             Text(shortcut.keys)
-                .font(.system(size: 12, weight: .medium, design: .rounded))
+                .font(.system(size: 11.5, weight: .semibold, design: .rounded))
                 .foregroundStyle(Palette.ink)
                 .padding(.horizontal, 7)
                 .padding(.vertical, 3)
-                .background(Palette.wash, in: RoundedRectangle(cornerRadius: 6, style: .continuous))
-                .frame(minWidth: 64)
+                .background(Palette.ink.opacity(0.08), in: RoundedRectangle(cornerRadius: 6, style: .continuous))
+                .overlay(
+                    RoundedRectangle(cornerRadius: 6, style: .continuous)
+                        .strokeBorder(Palette.ink.opacity(0.16), lineWidth: 0.75)
+                )
+                .frame(minWidth: 68)
             Text(shortcut.what)
                 .font(.system(size: 12.5))
                 .foregroundStyle(Palette.muted)
