@@ -5,17 +5,27 @@ import SwiftUI
 ///
 ///   [Sidebar ⌘S]  [< > ↻]  mail.google.com | Inbox — Gmail         [🔑] [🧩]  [✦ Ask ⌘;]
 ///
-/// Clicking the domain/title opens the address bar (`⌘L`), dragging empty space
-/// moves the window, and the top-right `Ask` pill stays pinned right above
-/// where the Agent Sidebar slides out — even when tabs are folded.
+/// Adapts to the active page's tint just like SideBar so the chrome reads as
+/// one unified surface. Clicking the domain/title opens the address bar (`⌘L`),
+/// dragging empty space moves the window, and the top-right `Ask` pill stays
+/// pinned right above where the Agent Sidebar slides out.
 struct AsideBar: View {
     @ObservedObject var browser: Browser
     @ObservedObject private var shortcuts = ShortcutStore.shared
+    @Environment(\.colorScheme) private var scheme
     /// True when the left tab sidebar is visible beside this bar.
     let sidebarOpen: Bool
 
     @State private var addressHover = false
     @State private var askHover = false
+
+    private var tint: PageTint? {
+        browser.prefs.sideTint ? PageTint(browser.activeHue, over: scheme) : nil
+    }
+
+    private var seam: Color {
+        tint.map { $0.dark ? Color.white.opacity(0.10) : Color.black.opacity(0.08) } ?? Palette.hairline
+    }
 
     var body: some View {
         let agentOpen = browser.consulting && browser.prefs.usesAgent
@@ -40,30 +50,34 @@ struct AsideBar: View {
                 ) {
                     browser.toggleFold()
                 }
+                .fixedSize()
 
-                // When the sidebar is folded, show Back / Forward / Reload here
-                // so navigation stays one click away.
+                // When the sidebar is folded, show Back / Forward / Reload here.
                 if !sidebarOpen {
                     Helm(browser: browser)
+                        .fixedSize()
                 }
 
-                // Domain | Page Title — click anywhere to edit address (⌘L).
-                if let tab = browser.active {
-                    AddressSummaryButton(tab: tab, browser: browser, hovering: $addressHover)
-                } else {
-                    Button { browser.edit() } label: {
-                        Text("Search or enter website name")
-                            .font(.system(size: 12.5))
-                            .foregroundStyle(Palette.muted)
-                            .padding(.horizontal, 8)
-                            .padding(.vertical, 4)
+                // Domain | Page Title — shrinks gracefully so right-side controls never clip.
+                Group {
+                    if let tab = browser.active {
+                        AddressSummaryButton(tab: tab, browser: browser, hovering: $addressHover)
+                    } else {
+                        Button { browser.edit() } label: {
+                            Text("Search or enter website name")
+                                .font(.system(size: 12.5))
+                                .foregroundStyle(Palette.muted)
+                                .lineLimit(1)
+                                .padding(.horizontal, 8)
+                                .padding(.vertical, 4)
+                        }
+                        .buttonStyle(.plain)
                     }
-                    .buttonStyle(.plain)
                 }
+                .frame(minWidth: 0, maxWidth: .infinity, alignment: .leading)
+                .layoutPriority(-1)
 
-                Spacer(minLength: 8)
-
-                // Right-side utility doors + top-right Ask pill.
+                // Right-side utility doors + top-right Ask pill (always visible, never clipped).
                 HStack(spacing: 4) {
                     Door(
                         icon: "key",
@@ -74,17 +88,12 @@ struct AsideBar: View {
 
                     ExtensionSlot()
 
-                    Door(icon: "puzzlepiece.extension", help: "Extensions") {
-                        Store.settings.set(SettingsPanel.Page.extensions.rawValue, forKey: "settings.page")
-                        browser.tuning = true
-                    }
-
                     if browser.prefs.usesAgent {
                         Button { browser.toggleAgent() } label: {
                             HStack(spacing: 5) {
                                 Image(systemName: "sparkle")
                                     .font(.system(size: 10.5, weight: .semibold))
-                                    .foregroundStyle(agentOpen ? Palette.accent : Palette.ink.opacity(0.8))
+                                    .foregroundStyle(agentOpen ? Palette.accent : Palette.ink.opacity(0.82))
                                 Text("Ask")
                                     .font(.system(size: 12.5, weight: .medium))
                                     .foregroundStyle(Palette.ink)
@@ -97,12 +106,12 @@ struct AsideBar: View {
                             .frame(height: 28)
                             .background(
                                 Capsule()
-                                    .fill(agentOpen ? Palette.wash : (askHover ? Palette.hover : Palette.ink.opacity(0.055)))
+                                    .fill(agentOpen ? Palette.wash : (askHover ? Palette.hover : Palette.ink.opacity(0.06)))
                             )
                             .overlay(
                                 Capsule()
                                     .strokeBorder(
-                                        agentOpen ? Palette.accent.opacity(0.35) : Palette.hairline,
+                                        agentOpen ? Palette.accent.opacity(0.35) : Palette.ink.opacity(0.14),
                                         lineWidth: 0.75
                                     )
                             )
@@ -114,15 +123,26 @@ struct AsideBar: View {
                         .padding(.leading, 4)
                     }
                 }
+                .fixedSize()
             }
             .padding(.leading, 12)
             .padding(.trailing, 12)
         }
+        .frame(maxWidth: .infinity)
         .frame(height: Metrics.strip)
-        .background(Palette.ground)
-        .overlay(alignment: .bottom) {
-            Rectangle().fill(Palette.hairline).frame(height: 1)
+        .clipped()
+        .background {
+            if let tint {
+                Color(nsColor: tint.color)
+            } else {
+                Palette.ground
+            }
         }
+        .overlay(alignment: .bottom) {
+            Rectangle().fill(seam).frame(height: 1)
+        }
+        .environment(\.colorScheme, tint.map { $0.dark ? .dark : .light } ?? scheme)
+        .animation(Motion.glide, value: tint)
     }
 }
 
@@ -132,7 +152,13 @@ private struct AddressSummaryButton: View {
     @Binding var hovering: Bool
 
     var body: some View {
-        let host = tab.address.map(Address.pretty) ?? ""
+        let host: String = {
+            guard let url = tab.address else { return "" }
+            if let h = url.host(), !h.isEmpty {
+                return h.hasPrefix("www.") ? String(h.dropFirst(4)) : h
+            }
+            return Address.pretty(url)
+        }()
         let title = tab.title.trimmingCharacters(in: .whitespacesAndNewlines)
 
         Button { browser.edit() } label: {
@@ -153,16 +179,17 @@ private struct AddressSummaryButton: View {
                         .font(.system(size: 12.5, weight: .medium))
                         .foregroundStyle(Palette.ink)
                         .lineLimit(1)
-                        .fixedSize(horizontal: true, vertical: false)
+                        .truncationMode(.tail)
                     if !title.isEmpty && title != host {
                         Rectangle()
-                            .fill(Palette.hairline)
+                            .fill(Palette.ink.opacity(0.16))
                             .frame(width: 1, height: 12)
                         Text(title)
                             .font(.system(size: 12.5))
                             .foregroundStyle(Palette.muted)
                             .lineLimit(1)
                             .truncationMode(.tail)
+                            .layoutPriority(-1)
                     }
                 }
             }
@@ -170,7 +197,7 @@ private struct AddressSummaryButton: View {
             .padding(.vertical, 5)
             .background(
                 RoundedRectangle(cornerRadius: 8, style: .continuous)
-                    .fill(hovering ? Palette.hover : .clear)
+                    .fill(hovering ? Palette.ink.opacity(0.06) : .clear)
             )
             .contentShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
         }
