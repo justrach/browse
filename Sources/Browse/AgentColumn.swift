@@ -303,30 +303,28 @@ struct AgentColumn: View {
     private var agentShortcutHints: some View {
         let toggle = shortcuts.key(for: .toggleAgent)?.display
         let expand = shortcuts.key(for: .expandAgent)?.display
-        return VStack(alignment: .leading, spacing: 6) {
-            HStack(spacing: 12) {
-                if let toggle {
-                    HStack(spacing: 5) {
-                        ShortcutBadge(keys: toggle)
-                        Text("Sidebar")
-                            .font(.system(size: 11))
-                            .foregroundStyle(Palette.muted)
-                    }
-                }
-                if let expand {
-                    HStack(spacing: 5) {
-                        ShortcutBadge(keys: expand)
-                        Text("Full view")
-                            .font(.system(size: 11))
-                            .foregroundStyle(Palette.muted)
-                    }
-                }
-                HStack(spacing: 5) {
-                    ShortcutBadge(keys: ".")
-                    Text("Quick ask")
+        return HStack(spacing: 8) {
+            if let toggle {
+                HStack(spacing: 4) {
+                    ShortcutBadge(keys: toggle)
+                    Text("Sidebar")
                         .font(.system(size: 11))
                         .foregroundStyle(Palette.muted)
                 }
+            }
+            if let expand {
+                HStack(spacing: 4) {
+                    ShortcutBadge(keys: expand)
+                    Text("Full")
+                        .font(.system(size: 11))
+                        .foregroundStyle(Palette.muted)
+                }
+            }
+            HStack(spacing: 4) {
+                ShortcutBadge(keys: ".")
+                Text("Ask")
+                    .font(.system(size: 11))
+                    .foregroundStyle(Palette.muted)
             }
         }
     }
@@ -409,11 +407,15 @@ struct ModelPicker: View {
                     .font(.system(size: 7.5, weight: .semibold))
                     .foregroundStyle(Palette.muted)
             }
-            .padding(.horizontal, 7)
+            .padding(.horizontal, 8)
             .frame(height: 26)
             .background(
                 RoundedRectangle(cornerRadius: 8, style: .continuous)
-                    .fill(hovering || open ? Palette.hover : .clear)
+                    .fill(hovering || open ? Palette.hover : Palette.ink.opacity(0.055))
+            )
+            .overlay(
+                RoundedRectangle(cornerRadius: 8, style: .continuous)
+                    .strokeBorder(hovering || open ? Palette.ink.opacity(0.18) : Palette.hairline, lineWidth: 0.75)
             )
             .contentShape(Rectangle())
         }
@@ -436,19 +438,10 @@ private struct NanoModelPopover: View {
     let current: Agent.Model
     let done: () -> Void
 
-    enum Step: Equatable {
-        case compact
-        case list
-        case stage(Agent.Model)
-    }
-
     @Environment(\.colorScheme) private var scheme
-    @State private var step: Step = .list
-    @State private var canReturnCompact = false
     @State private var query = ""
     @State private var starredOnly = false
     @State private var highlightedID: String?
-    @State private var stagedEffort: String = ""
     @FocusState private var searchFocused: Bool
 
     private var dark: Bool { scheme == .dark }
@@ -459,33 +452,18 @@ private struct NanoModelPopover: View {
     }
 
     var body: some View {
-        Group {
-            switch step {
-            case .compact:
-                compactCard
-            case .list:
-                catalogList
-            case .stage(let model):
-                stagePage(for: model)
-            }
-        }
-        .animation(Motion.snappy, value: step)
-        .onAppear {
-            if currentLevels.count > 1 {
-                step = .compact
-                canReturnCompact = true
-            } else {
-                step = .list
-                canReturnCompact = false
+        catalogList
+            .background(Palette.ground)
+            .onAppear {
                 highlightedID = current.id
                 DispatchQueue.main.async { searchFocused = true }
             }
-        }
     }
 
-    // MARK: - Step 0: Compact thinking tier card (276pt)
-
-    private var compactCard: some View {
+    /// Compact inline reasoning effort bar pinned right under the search box
+    /// so users can adjust effort or pick a new model in one popover without
+    /// extra step clicks or popover resize jumps.
+    private var reasoningBar: some View {
         let levels = currentLevels
         let binary = current.binaryEffort
         let accent = ProviderMark.brandAccent(for: current.makerKey, dark: dark)
@@ -493,88 +471,53 @@ private struct NanoModelPopover: View {
         let activeIndex = levels.firstIndex(of: activeValue) ?? 0
         let levelText = Agent.Model.reasoningLabel(activeValue, binary: binary)
 
-        return VStack(alignment: .leading, spacing: 0) {
-            Button {
-                canReturnCompact = true
-                highlightedID = current.id
-                step = .list
-                DispatchQueue.main.async { searchFocused = true }
-            } label: {
-                HStack(spacing: 8) {
-                    ProviderMark(provider: current.makerKey, size: 15)
-                    VStack(alignment: .leading, spacing: 1) {
-                        Text(current.label)
-                            .font(.system(size: 13, weight: .medium))
-                            .foregroundStyle(Palette.ink)
-                            .lineLimit(1)
-                        Text("via \(Agent.Model.said(current.provider))")
-                            .font(.system(size: 10.5))
-                            .foregroundStyle(Palette.muted)
-                            .lineLimit(1)
-                    }
-                    Spacer(minLength: 6)
-                    Image(systemName: "chevron.down")
-                        .font(.system(size: 10, weight: .semibold))
+        return VStack(alignment: .leading, spacing: 8) {
+            HStack(spacing: 6) {
+                Text(binary ? "THINKING" : "REASONING")
+                    .font(.system(size: 10, weight: .semibold, design: .monospaced))
+                    .foregroundStyle(Palette.muted)
+                Text(levelText)
+                    .font(.system(size: 11, weight: .semibold))
+                    .foregroundStyle(Palette.ink)
+                    .padding(.horizontal, 6.5)
+                    .padding(.vertical, 1.5)
+                    .background(accent.opacity(0.16), in: RoundedRectangle(cornerRadius: 5, style: .continuous))
+                    .overlay(RoundedRectangle(cornerRadius: 5, style: .continuous).strokeBorder(accent.opacity(0.32), lineWidth: 0.75))
+                    .contentTransition(.numericText())
+                Spacer(minLength: 4)
+                if let ctx = current.window {
+                    Text(ctx)
+                        .font(.system(size: 10, weight: .medium, design: .monospaced))
                         .foregroundStyle(Palette.muted)
+                        .padding(.horizontal, 5.5)
+                        .padding(.vertical, 1.5)
+                        .background(Palette.wash, in: RoundedRectangle(cornerRadius: 4, style: .continuous))
                 }
-                .padding(.horizontal, 10)
-                .padding(.vertical, 8)
-                .background(RoundedRectangle(cornerRadius: 8, style: .continuous).fill(Palette.hover.opacity(0.55)))
-                .contentShape(Rectangle())
             }
-            .buttonStyle(.plain)
-            .padding(6)
 
-            Rectangle().fill(Palette.hairline).frame(height: 1).padding(.horizontal, 8)
-
-            VStack(alignment: .leading, spacing: 10) {
-                HStack(alignment: .firstTextBaseline) {
-                    VStack(alignment: .leading, spacing: 2) {
-                        Text(binary ? "THINKING" : "REASONING")
-                            .font(.system(size: 10, weight: .medium, design: .monospaced))
-                            .foregroundStyle(Palette.muted.opacity(0.75))
-                        Text(levelText)
-                            .font(.system(size: 13, weight: .semibold))
-                            .foregroundStyle(Palette.ink)
-                            .contentTransition(.numericText())
-                    }
-                    Spacer(minLength: 0)
-                    if let ctx = current.window {
-                        Text(ctx)
-                            .font(.system(size: 10, weight: .medium, design: .monospaced))
-                            .foregroundStyle(Palette.muted)
-                            .padding(.horizontal, 6)
-                            .padding(.vertical, 2)
-                            .background(Palette.wash, in: RoundedRectangle(cornerRadius: 5, style: .continuous))
-                    }
-                }
-
-                EffortCapsuleSlider(
-                    count: levels.count,
-                    index: activeIndex,
-                    accent: accent,
-                    compact: true
-                ) { next in
-                    guard levels.indices.contains(next) else { return }
-                    agent.choose(effort: levels[next])
-                }
-
-                HStack {
-                    Text(binary ? "Off" : "Faster")
-                    Spacer()
-                    Text(binary ? "On" : "Deeper")
-                }
-                .font(.system(size: 10.5, weight: .medium))
-                .foregroundStyle(Palette.muted)
+            EffortCapsuleSlider(
+                count: levels.count,
+                index: activeIndex,
+                accent: accent,
+                compact: true
+            ) { next in
+                guard levels.indices.contains(next) else { return }
+                agent.choose(effort: levels[next])
             }
-            .padding(.horizontal, 12)
-            .padding(.top, 10)
-            .padding(.bottom, 12)
+
+            HStack {
+                Text(binary ? "Off" : "Faster")
+                Spacer()
+                Text(binary ? "On" : "Deeper")
+            }
+            .font(.system(size: 10, weight: .medium))
+            .foregroundStyle(Palette.muted)
         }
-        .frame(width: 276)
+        .padding(.horizontal, 12)
+        .padding(.vertical, 10)
     }
 
-    // MARK: - Step 1: Full searchable model catalog (356pt)
+    // MARK: - Searchable model catalog (352pt)
 
     private struct SectionGroup: Identifiable {
         let id: String
@@ -655,17 +598,6 @@ private struct NanoModelPopover: View {
 
         return VStack(spacing: 0) {
             HStack(spacing: 8) {
-                if canReturnCompact {
-                    Button { step = .compact } label: {
-                        Image(systemName: "chevron.left")
-                            .font(.system(size: 11, weight: .semibold))
-                            .foregroundStyle(Palette.muted)
-                            .frame(width: 22, height: 22)
-                            .background(Palette.wash, in: RoundedRectangle(cornerRadius: 6, style: .continuous))
-                    }
-                    .buttonStyle(.plain)
-                    .help("Back to reasoning slider")
-                }
                 Image(systemName: "magnifyingglass")
                     .font(.system(size: 11, weight: .medium))
                     .foregroundStyle(Palette.muted)
@@ -674,7 +606,7 @@ private struct NanoModelPopover: View {
                     .font(.system(size: 13))
                     .focused($searchFocused)
                     .onSubmit {
-                        if let pick = highlighted { openStageOrCommit(pick) }
+                        if let pick = highlighted { commitModel(pick) }
                     }
                     .onKeyPress(.downArrow) {
                         moveHighlight(in: flat, delta: 1)
@@ -687,8 +619,6 @@ private struct NanoModelPopover: View {
                     .onKeyPress(.escape) {
                         if !query.isEmpty {
                             query = ""
-                        } else if canReturnCompact {
-                            step = .compact
                         } else {
                             done()
                         }
@@ -722,6 +652,11 @@ private struct NanoModelPopover: View {
             .padding(.vertical, 9)
 
             Rectangle().fill(Palette.hairline).frame(height: 1)
+
+            if currentLevels.count > 1 && trimmedQuery.isEmpty {
+                reasoningBar
+                Rectangle().fill(Palette.hairline).frame(height: 1)
+            }
 
             ScrollViewReader { reader in
                 ScrollView {
@@ -758,7 +693,7 @@ private struct NanoModelPopover: View {
                                     .padding(.horizontal, 12)
                                     .padding(.top, 9)
                                     .padding(.bottom, 4)
-                                    .background(.regularMaterial)
+                                    .background(Palette.ground)
                                 }
                             }
                         }
@@ -777,14 +712,14 @@ private struct NanoModelPopover: View {
                     if let now { reader.scrollTo(now) }
                 }
             }
-            .frame(height: 380)
+            .frame(height: 320)
 
             if let info = highlighted {
                 Rectangle().fill(Palette.hairline).frame(height: 1)
                 detailFooter(for: info)
             }
         }
-        .frame(width: 356)
+        .frame(width: 352)
         .onChange(of: query) { _, _ in
             highlightedID = catalogRows.flat.first?.id
         }
@@ -861,7 +796,7 @@ private struct NanoModelPopover: View {
         )
         .padding(.horizontal, 6)
         .contentShape(Rectangle())
-        .onTapGesture { openStageOrCommit(model) }
+        .onTapGesture { commitModel(model) }
         .onHover { over in if over { highlightedID = model.id } }
         .accessibilityElement(children: .combine)
         .accessibilityValue(Agent.Model.said(model.provider))
@@ -904,144 +839,23 @@ private struct NanoModelPopover: View {
         highlightedID = flat[next].id
     }
 
-    private func openStageOrCommit(_ model: Agent.Model) {
+    private func commitModel(_ model: Agent.Model) {
         let levels = model.effortLevels
+        let chosenEffort: String?
         if levels.count > 1 {
             let preferred = agent.preferredEffort
             if levels.contains(preferred) {
-                stagedEffort = preferred
+                chosenEffort = preferred
             } else if levels.contains("medium") {
-                stagedEffort = "medium"
+                chosenEffort = "medium"
             } else {
-                stagedEffort = levels.last ?? ""
+                chosenEffort = levels.last
             }
-            step = .stage(model)
         } else {
-            done()
-            agent.choose(model)
+            chosenEffort = nil
         }
-    }
-
-    // MARK: - Step 2: Model reasoning stage (356pt, 1:1 with NanoHarness `page`)
-
-    private func stagePage(for model: Agent.Model) -> some View {
-        let levels = model.effortLevels
-        let binary = model.binaryEffort
-        let accent = ProviderMark.brandAccent(for: model.makerKey, dark: dark)
-        let idx = levels.firstIndex(of: stagedEffort) ?? max(0, levels.count - 1)
-        let currentName = levels.indices.contains(idx)
-            ? Agent.Model.reasoningLabel(levels[idx], binary: binary)
-            : "Default"
-
-        return VStack(alignment: .leading, spacing: 14) {
-            HStack {
-                Button {
-                    step = .list
-                    DispatchQueue.main.async { searchFocused = true }
-                } label: {
-                    HStack(spacing: 5) {
-                        Image(systemName: "arrow.left")
-                            .font(.system(size: 11, weight: .semibold))
-                        Text("Models")
-                            .font(.system(size: 12, weight: .medium))
-                    }
-                    .foregroundStyle(Palette.ink)
-                    .padding(.horizontal, 8)
-                    .frame(height: 26)
-                    .background(Palette.wash, in: RoundedRectangle(cornerRadius: 6, style: .continuous))
-                }
-                .buttonStyle(.plain)
-                Spacer()
-                Text("esc")
-                    .font(.system(size: 10, weight: .medium, design: .monospaced))
-                    .foregroundStyle(Palette.muted)
-                    .padding(.horizontal, 6)
-                    .padding(.vertical, 2)
-                    .background(Palette.wash, in: RoundedRectangle(cornerRadius: 4, style: .continuous))
-            }
-
-            HStack(spacing: 12) {
-                ProviderMark(provider: model.makerKey, size: 20)
-                    .frame(width: 38, height: 38)
-                    .background(Palette.wash, in: RoundedRectangle(cornerRadius: 10, style: .continuous))
-                    .overlay(RoundedRectangle(cornerRadius: 10, style: .continuous).strokeBorder(Palette.hairline, lineWidth: 1))
-                VStack(alignment: .leading, spacing: 2) {
-                    Text(model.label)
-                        .font(.system(size: 15.5, weight: .semibold))
-                        .foregroundStyle(Palette.ink)
-                        .lineLimit(1)
-                    Text("via \(Agent.Model.said(model.provider))")
-                        .font(.system(size: 11, weight: .medium))
-                        .foregroundStyle(Palette.muted)
-                }
-                Spacer(minLength: 0)
-            }
-
-            if model.window != nil || model.billingLabel != nil || model.fastSupported {
-                HStack(spacing: 6) {
-                    if let ctx = model.window { factChip("\(ctx) context") }
-                    if let billing = model.billingLabel { factChip(billing) }
-                    if model.fastSupported { factChip("Fast supported") }
-                }
-            }
-
-            VStack(alignment: .leading, spacing: 10) {
-                HStack {
-                    Text(binary ? "Thinking" : "Reasoning")
-                        .font(.system(size: 13, weight: .medium))
-                        .foregroundStyle(Palette.ink)
-                    Spacer()
-                    Text(currentName)
-                        .font(.system(size: 12, weight: .semibold))
-                        .foregroundStyle(Palette.ink)
-                        .padding(.horizontal, 8)
-                        .padding(.vertical, 2.5)
-                        .background(accent.opacity(0.16), in: RoundedRectangle(cornerRadius: 6, style: .continuous))
-                        .overlay(RoundedRectangle(cornerRadius: 6, style: .continuous).strokeBorder(accent.opacity(0.32), lineWidth: 1))
-                        .contentTransition(.numericText())
-                }
-
-                if levels.count > 1 {
-                    EffortCapsuleSlider(
-                        count: levels.count,
-                        index: idx,
-                        accent: accent,
-                        compact: false
-                    ) { next in
-                        guard levels.indices.contains(next) else { return }
-                        stagedEffort = levels[next]
-                    }
-                    HStack {
-                        Text(binary ? "Off" : "Faster")
-                        Spacer()
-                        Text(binary ? "On" : "Deeper")
-                    }
-                    .font(.system(size: 11, weight: .medium))
-                    .foregroundStyle(Palette.muted)
-                }
-            }
-
-            Button {
-                done()
-                agent.choose(model, effort: levels.indices.contains(idx) ? levels[idx] : nil)
-            } label: {
-                Text("Use model")
-                    .font(.system(size: 13, weight: .medium))
-                    .foregroundStyle(Palette.onAccent)
-                    .frame(maxWidth: .infinity)
-                    .frame(height: 36)
-                    .background(Palette.accent, in: RoundedRectangle(cornerRadius: 8, style: .continuous))
-            }
-            .buttonStyle(TactilePress())
-            .keyboardShortcut(.return, modifiers: [])
-        }
-        .padding(16)
-        .frame(width: 356)
-        .onKeyPress(.escape) {
-            step = .list
-            DispatchQueue.main.async { searchFocused = true }
-            return .handled
-        }
+        done()
+        agent.choose(model, effort: chosenEffort)
     }
 }
 
@@ -1365,100 +1179,13 @@ struct EntryRow: View {
     }
 }
 
-/// A reply's markdown a block at a time — paragraphs, lists, headings, code —
-/// with bold, code and links inside each line (Agent.rich). SwiftUI's own
-/// reading of markdown is inline only, and a list read that way is a run of
-/// dashes.
+/// A reply's markdown and LaTeX rendered via MarkdownReplyView (MarkdownView.swift).
 private struct ReplyText: View {
     let text: String
     var size: CGFloat = 13
 
-    enum Block {
-        case words(String)
-        case item(String, mark: String, depth: Int)
-        case heading(String)
-        case code(String)
-    }
-
     var body: some View {
-        // Citations as small numbers, their sources under the reply once
-        // (Citations.swift).
-        let marked = Citations.mark(text)
-        VStack(alignment: .leading, spacing: size * 0.7) {
-            ForEach(Array(Self.blocks(marked.text).enumerated()), id: \.offset) { _, block in
-                switch block {
-                case .words(let words):
-                    Text(Citations.style(Agent.rich(words), size: size))
-                        .lineSpacing(size * 0.2)
-                case .item(let words, let mark, let depth):
-                    HStack(alignment: .firstTextBaseline, spacing: 8) {
-                        Text(mark)
-                            .foregroundStyle(Palette.muted)
-                            .frame(minWidth: 10, alignment: .trailing)
-                        Text(Citations.style(Agent.rich(words), size: size))
-                            .lineSpacing(size * 0.2)
-                    }
-                    .padding(.leading, 4 + CGFloat(depth) * 16)
-                case .heading(let words):
-                    Text(Citations.style(Agent.rich(words), size: size))
-                        .font(.system(size: size + 1, weight: .semibold))
-                case .code(let code):
-                    Text(code)
-                        .font(.system(size: size - 1.5, design: .monospaced))
-                        .padding(10)
-                        .frame(maxWidth: .infinity, alignment: .leading)
-                        .background(Palette.wash, in: RoundedRectangle(cornerRadius: 8, style: .continuous))
-                }
-            }
-            if !marked.sources.isEmpty {
-                SourcesRow(sources: marked.sources, size: size)
-                    .padding(.top, 2)
-            }
-        }
-        .font(.system(size: size))
-        .foregroundStyle(Palette.ink)
-        .textSelection(.enabled)
-        .fixedSize(horizontal: false, vertical: true)
-    }
-
-    static func blocks(_ text: String) -> [Block] {
-        var out: [Block] = []
-        var words: [String] = []
-        var code: [String]?
-        func flush() {
-            if !words.isEmpty { out.append(.words(words.joined(separator: "\n"))) }
-            words = []
-        }
-        for raw in text.components(separatedBy: "\n") {
-            let line = raw.trimmingCharacters(in: .whitespaces)
-            if code != nil {
-                if line.hasPrefix("```") {
-                    out.append(.code((code ?? []).joined(separator: "\n")))
-                    code = nil
-                } else {
-                    code?.append(raw)
-                }
-                continue
-            }
-            if line.hasPrefix("```") { flush(); code = []; continue }
-            if line.isEmpty || line == "---" || line == "***" { flush(); continue }
-            let depth = raw.prefix { $0 == " " }.count / 2
-            if let mark = line.range(of: #"^[-*•+]\s+"#, options: .regularExpression) {
-                flush()
-                out.append(.item(String(line[mark.upperBound...]), mark: "•", depth: depth))
-            } else if let mark = line.range(of: #"^\d+[.)]\s+"#, options: .regularExpression) {
-                flush()
-                out.append(.item(String(line[mark.upperBound...]), mark: line[..<mark.upperBound].trimmingCharacters(in: .whitespaces), depth: depth))
-            } else if let mark = line.range(of: #"^#{1,6}\s+"#, options: .regularExpression) {
-                flush()
-                out.append(.heading(String(line[mark.upperBound...])))
-            } else {
-                words.append(line.hasPrefix("> ") ? String(line.dropFirst(2)) : line)
-            }
-        }
-        if let code { out.append(.code(code.joined(separator: "\n"))) }
-        flush()
-        return out
+        MarkdownReplyView(text: text, size: size)
     }
 }
 

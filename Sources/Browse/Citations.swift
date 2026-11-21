@@ -46,9 +46,16 @@ enum Citations {
         var sources: [Source] = []
         var numbers: [String: Int] = [:]
         var inCode = false
+        var inMath = false
         let lines = text.components(separatedBy: "\n").map { line -> String in
-            if line.trimmingCharacters(in: .whitespaces).hasPrefix("```") { inCode.toggle(); return line }
+            let trimmed = line.trimmingCharacters(in: .whitespaces)
+            if trimmed.hasPrefix("```") { inCode.toggle(); return line }
             if inCode { return line }
+            if trimmed == "$$" || trimmed == "\\[" || trimmed == "\\]" { inMath.toggle(); return line }
+            if inMath || trimmed.hasPrefix("$$") || trimmed.hasPrefix("\\[") { return line }
+            // Keep pipe table rows untouched so links inside table cells stay
+            // clean clickable links instead of losing their closing parenthesis.
+            if trimmed.hasPrefix("|") { return line }
             return rewrite(line, sources: &sources, numbers: &numbers)
         }
         return (lines.joined(separator: "\n"), sources)
