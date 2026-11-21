@@ -47,6 +47,29 @@ enum Swipe {
       window.__officeSwipe = true;
 
       var was = null, said = 0;
+      // Track when each horizontally scrollable box last moved sideways, so a
+      // swipe that pushes a box to its edge isn't mistaken for Back (#1219).
+      var moved = new WeakMap(), at = new WeakMap();
+      function mark(el) {
+        if (!el) return;
+        var root = el === document.documentElement, vv = window.visualViewport;
+        var x = root ? (vv ? vv.pageLeft : window.scrollX) : el.scrollLeft;
+        var max = root
+          ? document.documentElement.scrollWidth - (vv ? vv.width : window.innerWidth)
+          : el.scrollWidth - el.clientWidth;
+        x = Math.max(0, Math.min(Math.max(0, max), x));
+        if (at.has(el) && Math.abs(at.get(el) - x) < 1) return;
+        at.set(el, x);
+        moved.set(el, Date.now());
+      }
+      window.addEventListener('scroll', function (e) {
+        var t = e.target;
+        mark(t === document || t === document.body ? document.documentElement : t);
+      }, { passive: true, capture: true });
+      if (window.visualViewport) {
+        window.visualViewport.addEventListener('scroll', function () { mark(document.documentElement); }, { passive: true });
+      }
+      var edges = [];
 
       function rootCanScroll() {
         var html = getComputedStyle(document.documentElement).overflowX;
@@ -56,6 +79,7 @@ enum Swipe {
       }
 
       function taken(e) {
+        edges = [];
         var el = e.target;
         if (el && el.nodeType !== 1) el = el.parentElement;
         while (el) {
@@ -73,10 +97,16 @@ enum Swipe {
           }
           if (can && max > 1) {
             if (e.deltaX > 0 ? left < max - 1 : left > 1) return true;
+            edges.push(root ? document.documentElement : el);
           }
           el = el.parentElement;
         }
         return false;
+      }
+
+      function resting(list) {
+        var now = Date.now();
+        return list.every(function (el) { return now - (moved.get(el) || 0) > 400; });
       }
 
       function say(t) {
@@ -88,7 +118,7 @@ enum Swipe {
 
       window.addEventListener('wheel', function (e) {
         if (Math.abs(e.deltaX) <= Math.abs(e.deltaY)) return;
-        if (taken(e)) return say(true);
+        if (taken(e) || !resting(edges)) return say(true);
         // A whiteboard or a map pans with its own wheel handler and nothing
         // under it has overflow to scroll. Its preventDefault is its claim,
         // as Safari and Chrome read it; it can only be seen once every

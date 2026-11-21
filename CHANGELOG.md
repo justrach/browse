@@ -11,8 +11,17 @@ in [ROADMAP.md](ROADMAP.md).
 
 ## Unreleased
 
+### Added
+
+- **Compact top address bar (Aside style)**: single-row top bar in sidebar and folded modes showing sidebar toggle (`⌘S`), navigation buttons, clickable `domain | page title` (`⌘L`), Passwords (`🔑`), Extensions (`🧩`), and a pinned top-right **`✦ Ask [⌘;]`** pill right above the Agent Sidebar (toggleable in Settings › Tabs).
+
+### Performance
+
+- **BrowserBench / Speedometer 3.1 optimizations**: replaced the per-iframe `MutationObserver` in `Frames.swift` with a single pure CSS rule (zero JS per DOM mutation), debounced `Forms.swift`'s password-form observer with an O(1) `liveInputs.length` guard and skipped `pair()` on non-input focus/scroll/click events, and fast-exited `PasskeyRelay` on non-`http(s)` subframes.
+
 ### Fixed
 
+- Sideways swipe navigation checks whether horizontally scrollable elements were recently moving before triggering Back (preventing accidental Back navigation on Google Sheets and wide tables).
 - Embedded HTTP MCP server (`AgentTools`) now emits standard MCP `annotations` (`readOnlyHint`, `destructiveHint`, `idempotentHint`, `openWorldHint`) on `tools/list`, allowing Codegraff's read-only planning phase to use `search`, `read_pages`, `read`, `read_markdown`, `page_info`, `links`, `tabs`, `snapshot`, `form_fields`, `screenshot`, and `wait_for`.
 
 ## 1.6.2 — 22 November 2026

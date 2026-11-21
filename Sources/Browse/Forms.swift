@@ -131,9 +131,15 @@ final class FormRelay: NSObject, WKScriptMessageHandler {
     (function () {
       if (window.__officeForms) return;
 
+      // Live HTMLCollection for O(1) check before touching querySelectorAll or
+      // layout APIs — keeps DOM-heavy pages and benchmarks (Speedometer) fast.
+      var liveInputs = document.getElementsByTagName('input');
+
       // The password box, and the last box before it that could hold a name.
       function pair() {
+        if (!liveInputs.length) return null;
         var boxes = document.querySelectorAll('input[type="password"]');
+        if (!boxes.length) return null;
         var pass = null;
         for (var p = 0; p < boxes.length; p++) {
           var b = boxes[p];
@@ -246,11 +252,16 @@ final class FormRelay: NSObject, WKScriptMessageHandler {
       // password step of a sign-in that asks for the name first.
       setTimeout(tell, 700);
       setTimeout(tell, 2200);
-      // The boxes going away without a new page — a sign-in done in place —
-      // is the other way a sign-in shows it took.
+      // Debounced so high-frequency DOM mutations (SPAs, Speedometer) never
+      // trigger synchronous querySelectorAll + getBoundingClientRect per edit.
       var settling = null;
-      new MutationObserver(function () {
-        if (!told) { tell(); return; }
+      var scanTimer = null;
+      function scanMutation() {
+        scanTimer = null;
+        if (!told) {
+          if (liveInputs.length) tell();
+          return;
+        }
         if (pair()) return;
         told = false;
         clearTimeout(settling);
@@ -258,6 +269,10 @@ final class FormRelay: NSObject, WKScriptMessageHandler {
           if (pair()) return;
           window.webkit.messageHandlers.officeForms.postMessage({ kind: 'settled' });
         }, 400);
+      }
+      new MutationObserver(function () {
+        if (scanTimer || (!told && !liveInputs.length)) return;
+        scanTimer = setTimeout(scanMutation, 250);
       }).observe(document.documentElement, { childList: true, subtree: true });
 
       // Whether the caret is somewhere on the page that takes typing.
@@ -293,10 +308,11 @@ final class FormRelay: NSObject, WKScriptMessageHandler {
       }
       function caret(scrolled) {
         var el = document.activeElement;
-        var both = pair();
+        var isInput = !!(el && (el.tagName || '').toLowerCase() === 'input');
+        var both = isInput ? pair() : null;
         var rect = null;
-        var passwords = !!(both && el && (el === both.user || el === both.pass));
-        if (passwords || forPasskeys(el)) {
+        var passwords = !!(both && (el === both.user || el === both.pass));
+        if (passwords || (isInput && forPasskeys(el))) {
           var r = el.getBoundingClientRect();
           if (r.width > 0 && r.height > 0) rect = { x: r.left, y: r.top, w: r.width, h: r.height };
         }

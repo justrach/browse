@@ -377,6 +377,12 @@ struct ContentView: View {
                     .transition(.move(edge: .top).combined(with: .opacity))
             }
 
+            if asideBarShown {
+                AsideBar(browser: browser, sidebarOpen: sidebar)
+                    .padding(.leading, chrome.width)
+                    .transition(.opacity)
+            }
+
             // The bookmarks bar, under the strip or beside the column's top.
             if barShown {
                 BookmarksBar(browser: browser, bookmarks: browser.bookmarks)
@@ -854,11 +860,20 @@ struct ContentView: View {
         browser.prefs.sidebar && !browser.folded && browser.active?.immersed != true
     }
 
-    /// The column has its own corner for the lights, so the page beside it
-    /// starts at the very top; the strip needs a band.
+    /// True when the compact Aside-style top bar is showing (tabs in sidebar
+    /// or folded away, and not in full-screen video).
+    private var asideBarShown: Bool {
+        browser.prefs.compactTopBar
+            && (browser.prefs.sidebar || browser.folded)
+            && browser.active?.immersed != true
+    }
+
+    /// The column has its own corner for the lights; the top strip or Aside
+    /// address bar takes a band across the top of the page.
     private var band: CGFloat {
         guard browser.active?.immersed != true else { return 0 }
-        // Folded, the strip is out of the window and the page has its height.
+        if asideBarShown { return Metrics.strip }
+        // Folded without the compact top bar: the page takes the full height.
         return browser.prefs.sidebar || browser.folded ? 0 : Metrics.strip
     }
 

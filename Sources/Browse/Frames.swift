@@ -15,30 +15,21 @@ import WebKit
 // could put one behind a frame that is dark on purpose.
 
 enum Frames {
+    /// Pure CSS rule instead of a subtree MutationObserver: zero JavaScript
+    /// execution on DOM mutations across iframes (important for Speedometer
+    /// and heavy React/SPA apps), while still eliminating the white backdrop
+    /// behind Google's Sign-In card on dark pages.
     static let script = """
     (() => {
-      const signIn = /^https:\\/\\/accounts\\.google\\.com\\/gsi\\//;
-      const fix = (frame) => {
-        if (frame.tagName === 'IFRAME' && signIn.test(frame.src || '')) {
-          frame.style.setProperty('color-scheme', 'light', 'important');
-        }
-      };
-      const sweep = (node) => {
-        if (node.nodeType !== 1) return;
-        fix(node);
-        if (node.querySelectorAll) node.querySelectorAll('iframe').forEach(fix);
-      };
-      new MutationObserver((changes) => {
-        for (const change of changes) {
-          if (change.type === 'attributes') fix(change.target);
-          else change.addedNodes.forEach(sweep);
-        }
-      }).observe(document, { childList: true, subtree: true, attributes: true, attributeFilter: ['src'] });
+      if (document.getElementById('__browse_gsi_fix')) return;
+      const s = document.createElement('style');
+      s.id = '__browse_gsi_fix';
+      s.textContent = 'iframe[src^="https://accounts.google.com/gsi/"]{color-scheme:light!important;}';
+      (document.head || document.documentElement).appendChild(s);
     })();
     """
 
-    /// At the start of every document, in the browser's own world, so a page
-    /// can't see it or undo it by replacing the observer.
+    /// At the start of every document, in the browser's own world.
     static var userScript: WKUserScript {
         WKUserScript(source: script, injectionTime: .atDocumentStart, forMainFrameOnly: false, in: .defaultClient)
     }

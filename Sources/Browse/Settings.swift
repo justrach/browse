@@ -327,6 +327,10 @@ struct SettingsPanel: View {
                 }
             }
             Rule()
+            Line("Compact top address bar", "Aside-style bar with domain | page title, sidebar toggle, passwords, extensions, and top-right Ask pill when tabs are in the sidebar or folded away") {
+                Switch(on: $prefs.compactTopBar)
+            }
+            Rule()
             Line("Tabs show", "Beside the title, and on a pinned square") {
                 Segmented(options: Glyph.allCases.map { ($0, $0.title) }, selection: $prefs.glyph)
             }
