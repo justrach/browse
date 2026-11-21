@@ -214,6 +214,11 @@ final class Preferences: ObservableObject {
     @Published var littleLinks: Bool {
         didSet { store.set(littleLinks, forKey: "links.little") }
     }
+    /// Offer the active page to your iPhone, iPad, and other Macs via Handoff.
+    /// Off by default since the URL is broadcast to your Apple Account devices.
+    @Published var handoff: Bool {
+        didSet { store.set(handoff, forKey: "handoff") }
+    }
     /// The bookmarks bar above the page (see BookmarksBar.swift). Off
     /// unless asked for.
     @Published var bookmarksBar: Bool {
@@ -414,6 +419,7 @@ final class Preferences: ObservableObject {
         installsUpdates = store.object(forKey: Updater.installKey) as? Bool ?? true
         peeksLinks = store.bool(forKey: "links.peek")
         littleLinks = store.bool(forKey: "links.little")
+        handoff = store.bool(forKey: "handoff")
         bookmarksBar = store.bool(forKey: "bookmarks.bar")
         let links = store.bool(forKey: "links.show")
         showsLinks = links

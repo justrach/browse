@@ -7,23 +7,67 @@ struct SyncPage: View {
     @ObservedObject var browser: Browser
     @ObservedObject var prefs: Preferences
     @ObservedObject private var sync = Sync.shared
+    @ObservedObject private var icloud = ICloudSync.shared
     @State private var typed = ""
     @State private var said: String?
     @State private var shown = false
     @State private var sure = false
+    @State private var sureICloud = false
 
     var body: some View {
         VStack(alignment: .leading, spacing: 18) {
+            Card {
+                let locked = !icloud.on && (!icloud.available || prefs.sync)
+                Line(
+                    "Sync with iCloud",
+                    icloud.summary(codegraffSyncOn: prefs.sync)
+                ) {
+                    Switch(on: Binding(
+                        get: { icloud.on },
+                        set: { $0 ? icloud.turnOn() : icloud.turnOff() }
+                    ))
+                    .disabled(locked)
+                    .opacity(locked ? 0.4 : 1)
+                }
+                if icloud.on {
+                    Rule()
+                    Line("Sync now", "Fetch other devices' tabs and push your latest bookmarks, spaces, and settings") {
+                        Pill("Sync now") { icloud.syncNow() }
+                    }
+                    Rule()
+                    Line(
+                        "Delete from iCloud",
+                        sureICloud ? "Open tabs, spaces, bookmarks, and settings leave iCloud for every device. Local data stays." : "Remove Browse's data from your private iCloud database"
+                    ) {
+                        if sureICloud {
+                            HStack(spacing: 6) {
+                                Pill("Cancel") { sureICloud = false }
+                                Pill("Delete", filled: true) {
+                                    sureICloud = false
+                                    icloud.erase()
+                                    browser.announce("Browse data deleted from iCloud")
+                                }
+                            }
+                        } else {
+                            Pill("Delete…") { sureICloud = true }
+                        }
+                    }
+                }
+            }
             AccountCard(browser: browser)
             Card {
                 Line(
                     "Sync history and bookmarks",
-                    "Between the Macs you sign in to Codegraff on. Sealed on this Mac first, with a key only your Macs have: Codegraff keeps them without being able to read them, addresses included"
+                    icloud.on
+                        ? "Turn off Sync with iCloud above first"
+                        : "Between the Macs you sign in to Codegraff on. Sealed on this Mac first, with a key only your Macs have: Codegraff keeps them without being able to read them, addresses included"
                 ) {
                     Switch(on: Binding(
                         get: { prefs.sync },
                         set: { $0 ? sync.switchOn() : sync.switchOff() }
                     ))
+                    .disabled(icloud.on && !prefs.sync)
+                    .opacity(icloud.on && !prefs.sync ? 0.4 : 1)
                 }
                 if prefs.sync {
                     Rule()

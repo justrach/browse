@@ -184,6 +184,10 @@ struct Omnibox: View {
                         .fill(Palette.ink.opacity(0.55))
                         .frame(width: 5, height: 5)
                         .padding(.horizontal, 2)
+                case .elsewhere:
+                    Image(systemName: "laptopcomputer.and.iphone")
+                        .font(.system(size: 10, weight: .medium))
+                        .foregroundStyle(Palette.muted)
                 default:
                     EmptyView()
                 }

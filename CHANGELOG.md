@@ -14,12 +14,18 @@ in [ROADMAP.md](ROADMAP.md).
 ### Added
 
 - Rich Markdown & native LaTeX rendering in Codegraff replies: GFM tables with alignment and horizontal scrolling, fenced code blocks with language headers and Copy button, heading hierarchy, blockquotes, task checkboxes, horizontal rules, inline math (`$...$`, `\(...\)`), and display math (`$$...$$`, `\[...\]` with stacked fractions, roots, big-operator limits, matrices, and Copy TeX).
+- **Sync with iCloud** (Settings › Sync, off by default): `CKSyncEngine` private CloudKit sync for open tabs (shown in History › Tabs on Your Other Devices and omnibox suggestions), spaces, bookmarks, and shared settings; `build.sh` automatically enables CloudKit entitlements when the provisioning profile carries `iCloud.com.codegraff.search`.
+- **Handoff** (Settings › General, off by default): offers the active page to your iPhone, iPad, and other Macs over Continuity (never private tabs or isolated spaces), and receives incoming Handoff pages.
+- **More browser imports**: added Thorium, Naver Whale, Island, Sidekick, Yandex, ChatGPT Atlas, Floorp, LibreWolf, Waterfox, and Mullvad Browser, plus inode deduplication for case-insensitive Gecko profile paths.
+- **Shield upgrades**: hides Reddit promoted posts on `reddit.com` and holds first-launch page loads up to 1 second while the initial block list compiles.
+- **Smaller release binaries & faster animations**: release builds compile with `-Osize`, `-Xlinker -dead_strip`, full symbol stripping (keeping full `.dSYM` beside the build), and a resized 256 px `BrandMark.png`; `Motion` springs are tightened under 300 ms with opacity-only Reduce Motion fades and GPU-composited `PulseDot` scale/opacity animations.
 
 ### Fixed
 
 - Agent composer always keeps the model + reasoning button visible (instead of collapsing it when the text field loses focus), fixing the model picker popover disappearing when clicked or searched.
 - Model picker now opens in a single opaque popover with search, inline reasoning slider, and 1-click model selection (no hidden second step or translucent bleed across the sidebar edge).
 - Citation rewriting skips Markdown table rows and display math blocks so links inside tables no longer lose their closing parenthesis.
+- PDFs zoom up to 600% with `⌘+` (matching WebKit's PDF bar) without altering the host site's saved zoom; Clear › Cache also clears service-worker Cache Storage (`WKWebsiteDataTypeFetchCache`).
 
 ## 1.6.0 — 21 November 2026
 

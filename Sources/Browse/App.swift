@@ -8,6 +8,7 @@ import AppKit
 struct BrowseApp: App {
     @StateObject private var browser = Browser()
     @ObservedObject private var shortcuts = ShortcutStore.shared
+    @ObservedObject private var icloud = ICloudSync.shared
     /// Links from other apps, and the Dock icon.
     @NSApplicationDelegateAdaptor(Links.self) private var links
 
@@ -215,6 +216,26 @@ struct BrowseApp: App {
                                 browser.reopen(ghost)
                             } label: {
                                 MenuLine(title: ghost.label, url: ghost.url)
+                            }
+                        }
+                    }
+                }
+                if icloud.on, !icloud.devices.isEmpty {
+                    Section("Tabs on Your Other Devices") {
+                        ForEach(icloud.devices, id: \.id) { device in
+                            Menu(ICloudSync.title(device.tabs)) {
+                                ForEach(device.tabs.tabs, id: \.self) { page in
+                                    if let url = URL(string: page.url) {
+                                        Button {
+                                            browser.open(url, foreground: true)
+                                        } label: {
+                                            MenuLine(
+                                                title: page.title.isEmpty ? Address.pretty(url) : page.title,
+                                                url: url
+                                            )
+                                        }
+                                    }
+                                }
                             }
                         }
                     }
@@ -620,7 +641,17 @@ struct ContentView: View {
             // is pressed the page is on its way, and the field is not what
             // there is to watch.
             .animation(browser.fieldShowing ? Motion.settle : Motion.quick, value: browser.fieldShowing)
-            .background(WindowSetup { window = $0; dress($0) })
+            .background {
+                ZStack {
+                    WindowSetup { window = $0; dress($0) }
+                    if let tab = browser.active {
+                        Handoff(tab: tab, prefs: browser.prefs, window: window).id(tab.id)
+                    }
+                }
+                .onChange(of: browser.activeID) { _, id in
+                    if id == nil, let window { Handoff.offer(nil, in: window) }
+                }
+            }
             .onChange(of: browser.prefs.sidebar) { _, _ in
                 DispatchQueue.main.async { measureLights() }
             }
@@ -667,6 +698,7 @@ struct ContentView: View {
             // Anonymous stats, if they have been switched on (Stats.swift).
             Stats.shared.start(for: browser)
             Sync.shared.start(for: browser)
+            ICloudSync.shared.attach(browser: browser)
         }
     }
 
