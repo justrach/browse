@@ -3,6 +3,9 @@ import SwiftUI
 struct AgentPageContext: View {
     @ObservedObject var tab: Tab
     @ObservedObject var agent: Agent
+    /// True when docked directly into the top of the composer card as a single
+    /// slim header strip, avoiding stacked double borders.
+    var embedded = false
 
     @State private var hoverPin = false
     @State private var hoverToggle = false
@@ -13,6 +16,118 @@ struct AgentPageContext: View {
     private var host: String { tab.address?.host()?.replacingOccurrences(of: "www.", with: "") ?? "Local page" }
 
     var body: some View {
+        if embedded {
+            embeddedStrip
+        } else {
+            standaloneCard
+        }
+    }
+
+    private var embeddedStrip: some View {
+        HStack(spacing: 7) {
+            ZStack(alignment: .bottomTrailing) {
+                Mark(icon: tab.icon, letter: tab.monogram, size: 14)
+                    .opacity(included ? 1 : 0.4)
+                if pinned {
+                    Circle()
+                        .fill(Palette.accent)
+                        .frame(width: 5, height: 5)
+                        .overlay(Circle().strokeBorder(Palette.ground, lineWidth: 1))
+                        .offset(x: 2, y: 2)
+                }
+            }
+            .frame(width: 15, height: 15)
+
+            HStack(spacing: 5) {
+                Text(included ? title : "Page excluded")
+                    .font(.system(size: 11.5, weight: .medium))
+                    .foregroundStyle(included ? Palette.ink.opacity(0.88) : Palette.muted)
+                    .lineLimit(1)
+                    .truncationMode(.tail)
+                if pinned {
+                    Text("Pinned")
+                        .font(.system(size: 10, weight: .medium))
+                        .foregroundStyle(Palette.accent)
+                        .fixedSize()
+                } else if included {
+                    Text("·")
+                        .font(.system(size: 10.5))
+                        .foregroundStyle(Palette.muted.opacity(0.5))
+                    Text(host)
+                        .font(.system(size: 10.5))
+                        .foregroundStyle(Palette.muted.opacity(0.8))
+                        .lineLimit(1)
+                        .fixedSize(horizontal: true, vertical: false)
+                }
+            }
+            .frame(maxWidth: .infinity, alignment: .leading)
+
+            HStack(spacing: 2) {
+                if included {
+                    actionButton(
+                        icon: pinned ? "pin.fill" : "pin",
+                        active: pinned,
+                        hover: $hoverPin,
+                        help: pinned ? "Unpin: follow the page in front" : "Pin this page to the conversation",
+                        label: pinned ? "Unpin page context" : "Pin page context"
+                    ) {
+                        withAnimation(Motion.snappy) {
+                            agent.pin(pinned ? nil : tab)
+                            if !pinned { agent.withPage = true }
+                        }
+                    }
+                }
+                actionButton(
+                    icon: included ? "xmark" : "plus",
+                    active: false,
+                    hover: $hoverToggle,
+                    help: included ? "Exclude the page from your next message" : "Include this page with your next message",
+                    label: included ? "Exclude page context" : "Include page context"
+                ) {
+                    withAnimation(Motion.snappy) {
+                        if pinned { agent.pin(nil) }
+                        agent.withPage = !included
+                    }
+                }
+            }
+        }
+        .padding(.horizontal, 11)
+        .frame(height: 33)
+        .background(Palette.ink.opacity(included ? 0.025 : 0.01))
+        .overlay(alignment: .bottom) {
+            Rectangle().fill(Palette.hairline).frame(height: 0.75)
+        }
+        .animation(Motion.snappy, value: included)
+        .animation(Motion.snappy, value: pinned)
+        .help(title + "\n" + (tab.address?.absoluteString ?? ""))
+    }
+
+    private func actionButton(
+        icon: String,
+        active: Bool,
+        hover: Binding<Bool>,
+        help: String,
+        label: String,
+        action: @escaping () -> Void
+    ) -> some View {
+        Button(action: action) {
+            Image(systemName: icon)
+                .font(.system(size: 10, weight: .medium))
+                .foregroundStyle(active ? Palette.accent : (hover.wrappedValue ? Palette.ink : Palette.muted))
+                .frame(width: 22, height: 22)
+                .background(
+                    RoundedRectangle(cornerRadius: 6, style: .continuous)
+                        .fill(hover.wrappedValue ? Palette.hover : .clear)
+                )
+                .contentShape(Rectangle())
+        }
+        .buttonStyle(TactilePress())
+        .onHover { hover.wrappedValue = $0 }
+        .help(help)
+        .accessibilityLabel(label)
+    }
+
+    private var standaloneCard: some View {
         HStack(spacing: 8) {
             ZStack(alignment: .bottomTrailing) {
                 Mark(icon: tab.icon, letter: tab.monogram, size: 16)

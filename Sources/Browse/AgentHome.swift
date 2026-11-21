@@ -333,7 +333,14 @@ struct AgentStarters: View {
 
     var body: some View {
         if compact {
-            VStack(alignment: .leading, spacing: 8) { buttons }
+            VStack(alignment: .leading, spacing: 5) {
+                ForEach(prompts, id: \.0) { title, icon, prompt in
+                    CompactStarterRow(title: title, icon: icon, disabled: agent.asking?.isQuestion == true) {
+                        agent.prepareDraft(prompt)
+                        focus()
+                    }
+                }
+            }
         } else {
             ViewThatFits(in: .horizontal) {
                 HStack(spacing: 8) { buttons }
@@ -358,6 +365,50 @@ struct AgentStarters: View {
             .buttonStyle(.plain)
             .disabled(agent.asking?.isQuestion == true)
         }
+    }
+}
+
+private struct CompactStarterRow: View {
+    let title: String
+    let icon: String
+    let disabled: Bool
+    let action: () -> Void
+
+    @State private var hovering = false
+
+    var body: some View {
+        Button(action: action) {
+            HStack(spacing: 9) {
+                Image(systemName: icon)
+                    .font(.system(size: 12, weight: .medium))
+                    .foregroundStyle(hovering ? Palette.ink.opacity(0.85) : Palette.muted)
+                    .frame(width: 16)
+                Text(title)
+                    .font(.system(size: 12.5, weight: .medium))
+                    .foregroundStyle(hovering ? Palette.ink : Palette.ink.opacity(0.82))
+                    .lineLimit(1)
+                Spacer(minLength: 4)
+                Image(systemName: "arrow.up.right")
+                    .font(.system(size: 9.5, weight: .semibold))
+                    .foregroundStyle(Palette.muted.opacity(hovering ? 0.8 : 0.25))
+            }
+            .padding(.horizontal, 11)
+            .padding(.vertical, 9)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .background(
+                RoundedRectangle(cornerRadius: 10, style: .continuous)
+                    .fill(Palette.ink.opacity(hovering ? 0.075 : 0.03))
+            )
+            .overlay(
+                RoundedRectangle(cornerRadius: 10, style: .continuous)
+                    .strokeBorder(Palette.ink.opacity(hovering ? 0.12 : 0.055), lineWidth: 0.75)
+            )
+            .contentShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
+        }
+        .buttonStyle(TactilePress())
+        .disabled(disabled)
+        .onHover { hovering = $0 }
+        .animation(Motion.quick, value: hovering)
     }
 }
 

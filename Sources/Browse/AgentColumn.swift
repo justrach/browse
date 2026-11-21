@@ -18,12 +18,16 @@ struct AgentColumn: View {
 
     /// The whole stage rather than a column beside it (see Browser.agentFull).
     var full = false
+    /// True when sitting beside AsideBar at full window height (`y = 0`), so
+    /// the header matches `Metrics.strip` and acts as a window drag surface.
+    var fullHeight = false
 
     @FocusState private var typing: Bool
     @State private var confirmingReconnect = false
     @State private var showingGuide = false
     @State private var showingTasks = false
     @State private var showingBrowserChat = false
+    @State private var menuHover = false
 
     /// The width the column had when the edge was picked up.
     @State private var grabbed: CGFloat?
@@ -44,7 +48,16 @@ struct AgentColumn: View {
         .frame(width: full ? nil : prefs.agentWidth)
         .frame(maxWidth: full ? .infinity : nil, maxHeight: .infinity)
         .background(Palette.ground)
-        .overlay(alignment: .leading) { if !full { edge } }
+        .overlay(alignment: .leading) {
+            if !full {
+                ZStack(alignment: .leading) {
+                    Rectangle()
+                        .fill(Palette.hairline)
+                        .frame(width: 1)
+                    edge
+                }
+            }
+        }
         .animation(Motion.settle, value: agent.asking?.id)
         // A link in what graff said opens here, as a tab, not in whichever
         // browser the Mac would hand it to.
@@ -123,78 +136,104 @@ struct AgentColumn: View {
     // MARK: - the head
 
     private var head: some View {
-        HStack(spacing: 8) {
-            VStack(alignment: .leading, spacing: 3) {
-                HStack(spacing: 6) {
-                    Text("Codegraff")
-                        .font(.system(size: 12.5, weight: full ? .semibold : .medium))
-                        .foregroundStyle(Palette.ink)
-                        .lineLimit(1)
-                    if !full {
-                        PulseDot(color: light, size: 5, active: agent.phase == .starting || agent.phase == .working)
-                            .accessibilityLabel(status)
-                    }
-                }
-                if full || agent.asking != nil || !agent.phase.words.isEmpty {
-                    HStack(spacing: 4) {
-                        if full {
-                            PulseDot(color: light, size: 5, active: agent.phase == .starting || agent.phase == .working)
-                        }
-                        Text(status)
-                            .font(.system(size: 10.5))
-                            .foregroundStyle(Palette.muted)
+        let expandKey = shortcuts.key(for: .expandAgent)?.display
+        let toggleKey = shortcuts.key(for: .toggleAgent)?.display
+        return ZStack {
+            if fullHeight {
+                DragStrip()
+            }
+            HStack(spacing: 6) {
+                VStack(alignment: .leading, spacing: 2) {
+                    HStack(spacing: 6) {
+                        Text("Codegraff")
+                            .font(.system(size: 13, weight: .semibold))
+                            .foregroundStyle(Palette.ink)
                             .lineLimit(1)
-                            .contentTransition(.numericText())
+                            .fixedSize()
+                        if !full {
+                            PulseDot(color: light, size: 5.5, active: agent.phase == .starting || agent.phase == .working)
+                                .accessibilityLabel(status)
+                        }
+                    }
+                    if full || agent.asking != nil || !agent.phase.words.isEmpty {
+                        HStack(spacing: 4) {
+                            if full {
+                                PulseDot(color: light, size: 5, active: agent.phase == .starting || agent.phase == .working)
+                            }
+                            Text(status)
+                                .font(.system(size: 10.5))
+                                .foregroundStyle(Palette.muted)
+                                .lineLimit(1)
+                                .contentTransition(.numericText())
+                        }
                     }
                 }
-            }
-            .help(agent.entries.isEmpty ? status : "\(agent.title) — \(status)")
-            Spacer(minLength: 0)
-            if prefs.agentTasks {
-                Door(icon: "square.stack", help: "Task library — saved instructions") { showingTasks = true }
-                    .accessibilityLabel("Task library")
-            }
-            AgentHistoryButton(agent: agent, focus: browser.focusAgent)
-            Door(icon: "square.and.pencil", help: "New conversation") { agent.startOver(); browser.focusAgent() }
-                .disabled(agent.entries.isEmpty && agent.draft.isEmpty)
-            Menu {
-                Button("Continue in browser…") { showingBrowserChat = true }
-                Divider()
-                Button("How to use Codegraff…") { showingGuide = true }
-                Button("Report an agent problem…") { browser.reportAgentProblem() }
-                Divider()
-                Button("Reconnect…") { confirmingReconnect = true }
-            } label: {
-                Image(systemName: "ellipsis")
-                    .font(.system(size: 12, weight: .medium))
-                    .foregroundStyle(Palette.muted)
-                    .frame(width: 20, height: 24)
-                    .contentShape(Rectangle())
-            }
-            .menuStyle(.button)
-            .buttonStyle(.plain)
-            .menuIndicator(.hidden)
-            .help("Conversation options")
-            .accessibilityLabel("Conversation options")
-            Door(icon: "questionmark.circle", help: "How to use Codegraff") { showingGuide = true }
-                .accessibilityLabel("How to use Codegraff")
-                .popover(isPresented: $showingGuide, arrowEdge: .bottom) { AgentGuide() }
-            Door(
-                icon: full ? "sidebar.right" : "arrow.up.left.and.arrow.down.right",
-                help: (full ? "Beside the page" : "Expand conversation")
-                    + (ShortcutStore.shared.key(for: .expandAgent).map { "   \($0.display)" } ?? "")
-            ) {
-                withAnimation(Motion.gentle) {
-                    if full { browser.talkToColumn() } else { browser.takeStage() }
+                .help(agent.entries.isEmpty ? status : "\(agent.title) — \(status)")
+
+                Spacer(minLength: 4)
+
+                HStack(spacing: 2) {
+                    AgentHistoryButton(agent: agent, focus: browser.focusAgent)
+                    Door(icon: "square.and.pencil", help: "New conversation") { agent.startOver(); browser.focusAgent() }
+                        .disabled(agent.entries.isEmpty && agent.draft.isEmpty)
+                    Menu {
+                        Button {
+                            withAnimation(Motion.gentle) {
+                                if full { browser.talkToColumn() } else { browser.takeStage() }
+                            }
+                        } label: {
+                            Text((full ? "Beside the page" : "Expand full view") + (expandKey.map { "   \($0)" } ?? ""))
+                        }
+                        if prefs.agentTasks {
+                            Button("Task library…") { showingTasks = true }
+                        }
+                        Divider()
+                        Button("Continue in browser…") { showingBrowserChat = true }
+                        Button("How to use Codegraff…") { showingGuide = true }
+                        Button("Report an agent problem…") { browser.reportAgentProblem() }
+                        Divider()
+                        Button("Reconnect…") { confirmingReconnect = true }
+                    } label: {
+                        Image(systemName: "ellipsis")
+                            .font(.system(size: 12, weight: .medium))
+                            .foregroundStyle(menuHover ? Palette.ink : Palette.muted)
+                            .frame(width: 28, height: 28)
+                            .background(menuHover ? Palette.hover : .clear, in: RoundedRectangle(cornerRadius: 7, style: .continuous))
+                            .contentShape(Rectangle())
+                    }
+                    .menuStyle(.button)
+                    .buttonStyle(.plain)
+                    .menuIndicator(.hidden)
+                    .onHover { menuHover = $0 }
+                    .animation(Motion.quick, value: menuHover)
+                    .help("More options")
+                    .accessibilityLabel("Conversation options")
+                    .popover(isPresented: $showingGuide, arrowEdge: .bottom) { AgentGuide() }
+
+                    if full {
+                        Door(
+                            icon: "sidebar.right",
+                            help: "Beside the page" + (expandKey.map { "   \($0)" } ?? "")
+                        ) {
+                            withAnimation(Motion.gentle) { browser.talkToColumn() }
+                        }
+                    }
+
+                    Door(
+                        icon: "xmark",
+                        help: "Close" + (toggleKey.map { "   \($0)" } ?? "")
+                    ) { browser.toggleAgent() }
                 }
+                .fixedSize()
             }
-            Door(
-                icon: "xmark",
-                help: "Close" + (ShortcutStore.shared.key(for: .toggleAgent).map { "   \($0.display)" } ?? "")
-            ) { browser.toggleAgent() }
+            .padding(.horizontal, full ? 20 : 14)
         }
-        .padding(.horizontal, full ? 20 : 18)
-        .frame(height: full ? 56 : 44)
+        .frame(height: fullHeight ? Metrics.strip : (full ? 52 : 44))
+        .overlay(alignment: .bottom) {
+            if !full {
+                Rectangle().fill(Palette.hairline).frame(height: 1)
+            }
+        }
     }
 
     private var status: String {
@@ -220,47 +259,61 @@ struct AgentColumn: View {
     /// one: a lazy stack guesses the height of what it hasn't drawn, and
     /// with a reply growing at the bottom every guess moved the whole column.
     private var said: some View {
-        ScrollView {
-            measure(
-                VStack(alignment: .leading, spacing: full ? 20 : 12) {
-                    if agent.entries.isEmpty { empty }
-                    if full, let first = agent.entries.first {
-                        Text(Self.day(first.at))
-                            .font(.system(size: 12))
-                            .foregroundStyle(Palette.muted)
-                            .frame(maxWidth: .infinity)
-                            .padding(.top, 6)
+        Group {
+            if agent.entries.isEmpty {
+                GeometryReader { geo in
+                    ScrollView {
+                        measure(empty)
+                            .padding(.horizontal, full ? 20 : 14)
+                            .padding(.top, 20)
+                            .padding(.bottom, 10)
+                            .frame(minHeight: geo.size.height, alignment: .bottom)
                     }
-                    let turns = Turn.split(agent.entries)
-                    ForEach(turns) { turn in
-                        TurnView(
-                            turn: turn,
-                            // Working on it — or asked before graff was up,
-                            // and waiting for it to be.
-                            live: turn.id == turns.last?.id && (agent.phase == .working
-                                || (agent.phase == .starting && turn.you != nil && turn.answer.isEmpty)),
-                            full: full,
-                            waiting: agent.asking.map { $0.isQuestion ? "Waiting for your answer…" : "Waiting for your approval…" },
-                            visit: { url in browser.open(url, foreground: true) },
-                            feedback: { browser.reportAgentProblem(kind: .answer) }
-                        )
+                    .scrollIndicators(.never)
+                }
+            } else {
+                ScrollView {
+                    measure(
+                        VStack(alignment: .leading, spacing: full ? 20 : 12) {
+                            if full, let first = agent.entries.first {
+                                Text(Self.day(first.at))
+                                    .font(.system(size: 12))
+                                    .foregroundStyle(Palette.muted)
+                                    .frame(maxWidth: .infinity)
+                                    .padding(.top, 6)
+                            }
+                            let turns = Turn.split(agent.entries)
+                            ForEach(turns) { turn in
+                                TurnView(
+                                    turn: turn,
+                                    // Working on it — or asked before graff was up,
+                                    // and waiting for it to be.
+                                    live: turn.id == turns.last?.id && (agent.phase == .working
+                                        || (agent.phase == .starting && turn.you != nil && turn.answer.isEmpty)),
+                                    full: full,
+                                    waiting: agent.asking.map { $0.isQuestion ? "Waiting for your answer…" : "Waiting for your approval…" },
+                                    visit: { url in browser.open(url, foreground: true) },
+                                    feedback: { browser.reportAgentProblem(kind: .answer) }
+                                )
+                            }
+                        }
+                        .padding(.horizontal, full ? 20 : 14)
+                        .padding(.vertical, 16)
+                    )
+                }
+                .defaultScrollAnchor(.bottom)
+                .mask {
+                    VStack(spacing: 0) {
+                        if !full {
+                            LinearGradient(colors: [.clear, .black], startPoint: .top, endPoint: .bottom)
+                                .frame(height: 10)
+                        }
+                        Rectangle()
                     }
                 }
-                .padding(.horizontal, full ? 20 : 18)
-                .padding(.vertical, 18)
-            )
-        }
-        .defaultScrollAnchor(.bottom)
-        .frame(maxHeight: .infinity)
-        .mask {
-            VStack(spacing: 0) {
-                if !full {
-                    LinearGradient(colors: [.clear, .black], startPoint: .top, endPoint: .bottom)
-                        .frame(height: 12)
-                }
-                Rectangle()
             }
         }
+        .frame(maxHeight: .infinity)
     }
 
     /// "Today 7:44 PM", or the day it was, over a conversation on the stage.
@@ -271,62 +324,44 @@ struct AgentColumn: View {
         return date.formatted(.dateTime.month(.abbreviated).day()) + " " + time
     }
 
-    /// What there is before anything has been said: how to start, or what
-    /// is in the way of starting.
+    /// What there is before anything has been said: calm greeting and sleek
+    /// full-width starter actions anchored right above the composer.
     @ViewBuilder
     private var empty: some View {
-        VStack(alignment: .leading, spacing: 10) {
+        let hasPage = browser.active?.isBlank == false
+        let host = browser.active?.address?.host()?.replacingOccurrences(of: "www.", with: "")
+        VStack(alignment: .leading, spacing: 14) {
             switch agent.phase {
             case .missing, .signedOut, .broken:
                 AgentNotice(browser: browser, agent: agent)
             default:
-                Image(systemName: "sparkles")
-                    .font(.system(size: 22, weight: .light))
-                    .foregroundStyle(Palette.accent)
-                    .padding(.bottom, 6)
-                Text(browser.active?.isBlank == false ? "Explore this page" : "Start a conversation")
-                    .font(.system(size: 18, weight: .medium))
-                    .foregroundStyle(Palette.ink)
-                Text("Ask a question, check a claim, or follow an idea. Choose what goes with your message below.")
-                    .font(.system(size: 12.5))
-                    .foregroundStyle(Palette.muted)
-                    .fixedSize(horizontal: false, vertical: true)
-                AgentStarters(agent: agent, page: browser.active, compact: true, focus: browser.focusAgent)
-                    .padding(.top, 8)
-                agentShortcutHints
-                    .padding(.top, 10)
-            }
-        }
-        .padding(.top, 28)
-    }
+                VStack(alignment: .leading, spacing: 6) {
+                    ZStack {
+                        RoundedRectangle(cornerRadius: 9, style: .continuous)
+                            .fill(Palette.ink.opacity(0.055))
+                        RoundedRectangle(cornerRadius: 9, style: .continuous)
+                            .strokeBorder(Palette.ink.opacity(0.09), lineWidth: 0.75)
+                        Image(systemName: "sparkles")
+                            .font(.system(size: 14, weight: .medium))
+                            .foregroundStyle(Palette.ink.opacity(0.85))
+                    }
+                    .frame(width: 32, height: 32)
+                    .padding(.bottom, 4)
 
-    private var agentShortcutHints: some View {
-        let toggle = shortcuts.key(for: .toggleAgent)?.display
-        let expand = shortcuts.key(for: .expandAgent)?.display
-        return HStack(spacing: 8) {
-            if let toggle {
-                HStack(spacing: 4) {
-                    ShortcutBadge(keys: toggle)
-                    Text("Sidebar")
-                        .font(.system(size: 11))
+                    Text(hasPage ? "Ask about this page" : "How can I help?")
+                        .font(.system(size: 16, weight: .semibold))
+                        .foregroundStyle(Palette.ink)
+
+                    Text(hasPage ? (host ?? "Ready to read, check, or compare.") : "Research a topic, check a claim, or explore an idea.")
+                        .font(.system(size: 12))
                         .foregroundStyle(Palette.muted)
+                        .lineLimit(1)
                 }
-            }
-            if let expand {
-                HStack(spacing: 4) {
-                    ShortcutBadge(keys: expand)
-                    Text("Full")
-                        .font(.system(size: 11))
-                        .foregroundStyle(Palette.muted)
-                }
-            }
-            HStack(spacing: 4) {
-                ShortcutBadge(keys: ".")
-                Text("Ask")
-                    .font(.system(size: 11))
-                    .foregroundStyle(Palette.muted)
+
+                AgentStarters(agent: agent, page: browser.active, compact: true, focus: browser.focusAgent)
             }
         }
+        .frame(maxWidth: .infinity, alignment: .leading)
     }
 
     /// Everything the talk draws is held to one measure and centred on the
@@ -411,11 +446,11 @@ struct ModelPicker: View {
             .frame(height: 26)
             .background(
                 RoundedRectangle(cornerRadius: 8, style: .continuous)
-                    .fill(hovering || open ? Palette.hover : Palette.ink.opacity(0.055))
+                    .fill(hovering || open ? Palette.ink.opacity(0.09) : Palette.ink.opacity(0.04))
             )
             .overlay(
                 RoundedRectangle(cornerRadius: 8, style: .continuous)
-                    .strokeBorder(hovering || open ? Palette.ink.opacity(0.18) : Palette.hairline, lineWidth: 0.75)
+                    .strokeBorder(hovering || open ? Palette.ink.opacity(0.16) : Palette.ink.opacity(0.05), lineWidth: 0.75)
             )
             .contentShape(Rectangle())
         }

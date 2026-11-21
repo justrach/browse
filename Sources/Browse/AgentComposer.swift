@@ -37,16 +37,19 @@ struct AgentComposer: View {
         AgentFeedbackDraft.command(agent.draft) != nil || agent.canSend
     }
 
+    private var contextTab: Tab? {
+        guard agent.asking?.isQuestion != true else { return nil }
+        if let pinned = agent.pinned { return pinned }
+        if !full, let tab = browser.active, !tab.isBlank { return tab }
+        return nil
+    }
+
     // MARK: - the foot
 
     private var foot: some View {
-        VStack(alignment: .leading, spacing: 8) {
-            // On the stage the page is out of sight, so it doesn't go along.
-            if agent.asking?.isQuestion != true, let pinned = agent.pinned {
-                AgentPageContext(tab: pinned, agent: agent)
-            } else if !full, let tab = browser.active, !tab.isBlank, agent.asking?.isQuestion != true {
-                AgentPageContext(tab: tab, agent: agent)
-            } else if full, let tab = browser.active, !tab.isBlank, agent.asking == nil {
+        let radius: CGFloat = full ? 18 : 14
+        return VStack(alignment: .leading, spacing: 8) {
+            if full, agent.pinned == nil, let tab = browser.active, !tab.isBlank, agent.asking == nil {
                 Button { agent.pin(tab) } label: {
                     Label("Attach current page", systemImage: "plus")
                         .font(.system(size: 11.5))
@@ -69,54 +72,59 @@ struct AgentComposer: View {
                 QueuePanel(agent: agent, full: full)
                     .transition(.move(edge: .bottom).combined(with: .opacity))
             }
-            // One box: the words, and under them in the same box what
-            // they go to — the model, how hard it thinks — and the button.
-            // Always two rows so the model picker is immediately visible and
-            // never unmounts when its popover takes focus from the text field.
-            VStack(alignment: .leading, spacing: full ? 10 : 8) {
-                ZStack(alignment: .topLeading) {
-                    if agent.draft.isEmpty {
-                        Text(prompt)
-                            .foregroundStyle(Palette.muted.opacity(0.75))
-                            .allowsHitTesting(false)
-                    }
-                    TextField("", text: $agent.draft, axis: .vertical)
-                        .textFieldStyle(.plain)
-                        .foregroundStyle(Palette.ink)
-                        .lineLimit(1...8)
-                        .focused(typing)
-                        .onSubmit(send)
-                        .onKeyPress(.tab) {
-                            guard let switchToSearch else { return .ignored }
-                            switchToSearch()
-                            return .handled
-                        }
-                        .accessibilityLabel("Message Codegraff")
+            // One unified composer card: optional slim page-context header strip
+            // docked cleanly above the text field, model picker, and send button.
+            VStack(alignment: .leading, spacing: 0) {
+                if let tab = contextTab {
+                    AgentPageContext(tab: tab, agent: agent, embedded: true)
                 }
-                .font(.system(size: full ? 14.5 : 13.5))
-                .frame(maxWidth: .infinity, minHeight: full ? 56 : 36, alignment: .topLeading)
-                .contentShape(Rectangle())
-                .onTapGesture { typing.wrappedValue = true }
 
-                HStack(spacing: 8) {
-                    choices
-                        .frame(maxWidth: .infinity, alignment: .leading)
-                    actions
+                VStack(alignment: .leading, spacing: full ? 10 : 8) {
+                    ZStack(alignment: .topLeading) {
+                        if agent.draft.isEmpty {
+                            Text(prompt)
+                                .foregroundStyle(Palette.muted.opacity(0.7))
+                                .allowsHitTesting(false)
+                        }
+                        TextField("", text: $agent.draft, axis: .vertical)
+                            .textFieldStyle(.plain)
+                            .foregroundStyle(Palette.ink)
+                            .lineLimit(1...8)
+                            .focused(typing)
+                            .onSubmit(send)
+                            .onKeyPress(.tab) {
+                                guard let switchToSearch else { return .ignored }
+                                switchToSearch()
+                                return .handled
+                            }
+                            .accessibilityLabel("Message Codegraff")
+                    }
+                    .font(.system(size: full ? 14.5 : 13.5))
+                    .frame(maxWidth: .infinity, minHeight: full ? 52 : 34, alignment: .topLeading)
+                    .contentShape(Rectangle())
+                    .onTapGesture { typing.wrappedValue = true }
+
+                    HStack(spacing: 8) {
+                        choices
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                        actions
+                    }
                 }
+                .padding(.leading, full ? 14 : 11)
+                .padding(.trailing, full ? 10 : 8)
+                .padding(.top, full ? 12 : 10)
+                .padding(.bottom, 8)
             }
-            .padding(.leading, full ? 14 : 11)
-            .padding(.trailing, full ? 10 : 8)
-            .padding(.top, full ? 13 : 10)
-            .padding(.bottom, 8)
-            .background(full ? Palette.ground : Palette.ink.opacity(0.035), in: RoundedRectangle(cornerRadius: full ? 20 : 15, style: .continuous))
+            .background(full ? Palette.ground : Palette.ink.opacity(0.04))
+            .clipShape(RoundedRectangle(cornerRadius: radius, style: .continuous))
             .overlay(
-                RoundedRectangle(cornerRadius: full ? 20 : 15, style: .continuous)
+                RoundedRectangle(cornerRadius: radius, style: .continuous)
                     .strokeBorder(
-                        typing.wrappedValue ? Palette.accent.opacity(full ? 0.45 : 0.35) : Palette.hairline,
-                        lineWidth: 1
+                        typing.wrappedValue ? Palette.accent.opacity(full ? 0.45 : 0.4) : Palette.ink.opacity(0.11),
+                        lineWidth: 0.75
                     )
             )
-            .shadow(color: .black.opacity(full ? 0.035 : 0), radius: 8, y: 2)
+            .shadow(color: .black.opacity(full ? 0.04 : 0), radius: 8, y: 2)
             .animation(Motion.quick, value: typing.wrappedValue)
         }
         .animation(Motion.settle, value: agent.queue.map(\.id))

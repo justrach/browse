@@ -93,22 +93,24 @@ struct AsideBar: View {
                                     .foregroundStyle(agentOpen ? Palette.accent : Palette.ink.opacity(0.82))
                                 Text("Ask")
                                     .font(.system(size: 12.5, weight: .medium))
-                                    .foregroundStyle(Palette.ink)
-                                if let toggleKey {
-                                    ShortcutBadge(keys: toggleKey, active: agentOpen)
+                                    .foregroundStyle(agentOpen ? Palette.accent : Palette.ink)
+                                if !agentOpen, let toggleKey {
+                                    ShortcutBadge(keys: toggleKey)
                                 }
                             }
                             .padding(.leading, 10)
-                            .padding(.trailing, toggleKey == nil ? 10 : 6)
+                            .padding(.trailing, (!agentOpen && toggleKey != nil) ? 6 : 10)
                             .frame(height: 28)
                             .background(
                                 Capsule()
-                                    .fill(agentOpen ? Palette.wash : (askHover ? Palette.hover : Palette.ink.opacity(0.06)))
+                                    .fill(agentOpen
+                                        ? Palette.accent.opacity(askHover ? 0.16 : 0.11)
+                                        : (askHover ? Palette.hover : Palette.ink.opacity(0.055)))
                             )
                             .overlay(
                                 Capsule()
                                     .strokeBorder(
-                                        agentOpen ? Palette.accent.opacity(0.35) : Palette.ink.opacity(0.14),
+                                        agentOpen ? Palette.accent.opacity(0.28) : Palette.ink.opacity(0.11),
                                         lineWidth: 0.75
                                     )
                             )

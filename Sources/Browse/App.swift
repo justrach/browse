@@ -360,6 +360,7 @@ struct ContentView: View {
             // edge and overshot the window with the spring (see `room`).
             stage
                 .padding(.leading, roomed.width)
+                .padding(.trailing, agentTrailing)
                 .padding(.top, roomed.height)
                 .offset(x: chrome.width - roomed.width, y: chrome.height - roomed.height)
 
@@ -380,6 +381,7 @@ struct ContentView: View {
             if asideBarShown {
                 AsideBar(browser: browser, sidebarOpen: sidebar)
                     .padding(.leading, chrome.width)
+                    .padding(.trailing, agentTrailing)
                     .transition(.opacity)
             }
 
@@ -387,8 +389,21 @@ struct ContentView: View {
             if barShown {
                 BookmarksBar(browser: browser, bookmarks: browser.bookmarks)
                     .padding(.leading, chrome.width)
+                    .padding(.trailing, agentTrailing)
                     .padding(.top, band)
                     .transition(.opacity)
+            }
+
+            // In sidebar / Aside-bar layouts, Codegraff takes the full window
+            // height on the right so its header aligns cleanly beside AsideBar
+            // instead of stacking a dark header underneath a light bar.
+            if fullHeightAgent {
+                HStack(spacing: 0) {
+                    Spacer(minLength: 0)
+                    AgentColumn(browser: browser, agent: browser.agent, prefs: browser.prefs, fullHeight: true)
+                        .frame(maxHeight: .infinity, alignment: .top)
+                }
+                .transition(.move(edge: .trailing))
             }
         }
         .ignoresSafeArea()
@@ -414,7 +429,7 @@ struct ContentView: View {
                     // A tab carried out of the sidebar: the half it would
                     // open on (Split.swift).
                     .overlay { SplitDropZone(browser: browser) }
-                if consulting {
+                if consulting && !fullHeightAgent {
                     AgentColumn(browser: browser, agent: browser.agent, prefs: browser.prefs)
                         .transition(.move(edge: .trailing).combined(with: .opacity))
                 }
@@ -639,6 +654,7 @@ struct ContentView: View {
                 // bar stay as they are, uncovered and in reach.
                 PeekLayer(browser: browser)
                     .padding(.leading, chrome.width)
+                    .padding(.trailing, agentTrailing)
                     .padding(.top, chrome.height)
                     // From the window's own top edge, as the page is:
                     // the title bar's band is page too.
@@ -866,6 +882,16 @@ struct ContentView: View {
     /// not behind a page that has taken the whole screen.
     private var consulting: Bool {
         browser.consulting && browser.prefs.usesAgent && browser.active?.immersed != true
+    }
+
+    /// True when the Agent sidebar sits beside AsideBar at full window height.
+    private var fullHeightAgent: Bool {
+        consulting && !browser.agentFull && asideBarShown
+    }
+
+    /// Trailing inset reserved for the full-height Agent sidebar.
+    private var agentTrailing: CGFloat {
+        fullHeightAgent ? browser.prefs.agentWidth : 0
     }
 
     /// True while the tabs are down the left, and not folded away (see Fold.swift).
