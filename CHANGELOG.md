@@ -11,6 +11,8 @@ in [ROADMAP.md](ROADMAP.md).
 
 ## Unreleased
 
+## 1.6.0 — 21 November 2026
+
 ### Added
 
 - Customizable keyboard shortcuts in **Settings › Shortcuts**: search commands or keys, click any key pill to rebind (with conflict handling and macOS reserved-key checks), right-click to clear or reset, and configure an optional system-wide global hotkey to summon `browse` from any app. Added default shortcuts across menus (`⌥⌘P` pin/unpin, `⌥⌘E` rename tab, `⌥⌘M` copy Markdown link, `⌥⌘B` bookmarks, `⇧⌘O` bookmarks bar, `⌃⌘F` full screen, `⌥⌘D` swap split, `⌥⌘T` tidy page, `⇧⌘;` expand Codegraff, `⌘/` searchable shortcut guide).
