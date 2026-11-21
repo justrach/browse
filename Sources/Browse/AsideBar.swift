@@ -38,10 +38,6 @@ struct AsideBar: View {
             DragStrip(onDoubleClick: browser.newTab)
 
             HStack(spacing: 6) {
-                if !sidebarOpen {
-                    Color.clear.frame(width: Metrics.lights - 12)
-                }
-
                 // Toggle left tab sidebar (⌘S).
                 Door(
                     icon: "sidebar.left",
@@ -56,6 +52,7 @@ struct AsideBar: View {
                 if !sidebarOpen {
                     Helm(browser: browser)
                         .fixedSize()
+                        .transition(.opacity)
                 }
 
                 // Domain | Page Title — shrinks gracefully so right-side controls never clip.
@@ -125,8 +122,9 @@ struct AsideBar: View {
                 }
                 .fixedSize()
             }
-            .padding(.leading, 12)
+            .padding(.leading, sidebarOpen ? 12 : Metrics.lights)
             .padding(.trailing, 12)
+            .animation(Motion.glide, value: sidebarOpen)
         }
         .frame(maxWidth: .infinity)
         .frame(height: Metrics.strip)

@@ -393,6 +393,7 @@ struct ContentView: View {
         }
         .ignoresSafeArea()
         .animation(Motion.glide, value: browser.prefs.sidebar)
+        .animation(Motion.glide, value: browser.folded)
         .animation(Motion.glide, value: consulting)
         .animation(Motion.glide, value: browser.agentFull)
         .animation(.easeOut(duration: 0.12), value: browser.active?.immersed)
@@ -500,14 +501,26 @@ struct ContentView: View {
         roomTicket += 1
         var still = Transaction()
         still.disablesAnimations = true
+        // Suppress WebKit's synchronous geometry wait during the spring slide
+        // so ⌘S folds and unfolds smoothly without frame drops or right-edge stalls.
+        let pageView = browser.active?.built
+        if !Motion.reduced && (old.width != new.width || old.height != new.height) {
+            pageView?.splitLiveResizing = true
+        }
         // With Reduce Motion on, nothing slides: the page takes its new room
         // with the chrome, not after a slide that isn't there.
         withTransaction(still) { room = Motion.reduced ? new : at }
-        guard !Motion.reduced, arriving.0 || arriving.1 else { return }
         let ticket = roomTicket
-        DispatchQueue.main.asyncAfter(deadline: .now() + 0.42) {
+        if Motion.reduced {
+            pageView?.splitLiveResizing = false
+            return
+        }
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.26) {
             guard ticket == roomTicket else { return }
-            withTransaction(still) { room = chrome }
+            if arriving.0 || arriving.1 {
+                withTransaction(still) { room = chrome }
+            }
+            pageView?.splitLiveResizing = false
         }
     }
 

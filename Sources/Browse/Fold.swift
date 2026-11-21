@@ -94,7 +94,7 @@ struct Fold: View {
             // the page the top edge too, and the same band: there was nothing
             // to take hold of until the strip came down. Unfolded, the strip
             // is its own title bar, and no band lies over its tabs.
-            if prefs.sidebar || folding, browser.active?.immersed != true {
+            if (prefs.sidebar || folding), !asideBar, browser.active?.immersed != true {
                 DragStrip()
                     .frame(height: Fold.top)
                     .frame(maxWidth: .infinity)
@@ -176,8 +176,12 @@ struct Fold: View {
         browser.folded && browser.active?.immersed != true
     }
 
+    private var asideBar: Bool {
+        prefs.compactTopBar && (prefs.sidebar || browser.folded) && browser.active?.immersed != true
+    }
+
     private var lightsOff: Bool {
-        browser.folded && !browser.peeking
+        browser.folded && !browser.peeking && !asideBar
     }
 
     /// The pointer is watched only while there is something folded for it
