@@ -232,8 +232,8 @@ PROFILE="${SEARCH_PROVISION_PROFILE:-browse.provisionprofile}"
 rm -f "$APP/Contents/embedded.provisionprofile"
 if [ -n "$IDENTITY" ] && [ -f "$PROFILE" ]; then
   DECODED="$(security cms -D -i "$PROFILE" 2>/dev/null || true)"
-  APPID="$(printf '%s' "$DECODED" | plutil -extract Entitlements.com\.apple\.application-identifier raw -o - - 2>/dev/null || true)"
-  PASSKEYS="$(printf '%s' "$DECODED" | plutil -extract Entitlements.com\.apple\.developer\.web-browser\.public-key-credential raw -o - - 2>/dev/null || true)"
+  APPID="$(printf '%s' "$DECODED" | plutil -extract 'Entitlements.com\.apple\.application-identifier' raw -o - - 2>/dev/null || true)"
+  PASSKEYS="$(printf '%s' "$DECODED" | plutil -extract 'Entitlements.com\.apple\.developer\.web-browser\.public-key-credential' raw -o - - 2>/dev/null || true)"
   if [ "$APPID" = "WWP9DLJ27P.com.codegraff.search" ] && [ "$PASSKEYS" = "true" ]; then
     cp "$PROFILE" "$APP/Contents/embedded.provisionprofile"
     ENTITLEMENTS="Browse.passkeys.entitlements"

@@ -32,6 +32,7 @@ jobs:
           bash tests/safari-import.sh
           bash tests/chromium-import.sh
           bash tests/agent-tasks.sh
+          bash tests/passkeys.sh
       - name: Build
         run: swift build -c release
       - name: Bundle, signed for this runner only

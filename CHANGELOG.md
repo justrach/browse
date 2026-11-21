@@ -11,6 +11,17 @@ in [ROADMAP.md](ROADMAP.md).
 
 ## Unreleased
 
+### Added
+
+- Passkeys under the sign-in field, as in Safari: on sites that offer conditional WebAuthn (such as GitHub and Google), the Mac's passkeys for the site appear first under the sign-in box beside saved passwords, and clicking one opens the Mac's sheet for that passkey and signs you in.
+
+### Fixed
+
+- Passkey sign-ins on GitHub now complete after Touch ID: returned credential methods are writable (matching native credentials), so libraries like GitHub's `webauthn-json` can assign `toJSON`.
+- Passkeys work from same-site iframes (such as Apple Account's `idmsa.apple.com` frame inside `account.apple.com` and Sign in with Apple), naming the committed page's `topOrigin` and `crossOrigin` in client data while still refusing cross-site frames.
+- Security-key assertions without a user handle (such as Okta) no longer crash; the site receives a `null` `userHandle`.
+- Passkeys are offered only to the tab's committed page origin, and relying-party domains and origins are kept private in the macOS system log.
+
 ## 1.5.0 — 1 October 2026
 
 ### Added
