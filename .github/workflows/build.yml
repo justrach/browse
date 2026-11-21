@@ -33,6 +33,7 @@ jobs:
           bash tests/chromium-import.sh
           bash tests/agent-tasks.sh
           bash tests/passkeys.sh
+          bash tests/markdown-latex.sh
       - name: Build
         run: swift build -c release
       - name: Bundle, signed for this runner only

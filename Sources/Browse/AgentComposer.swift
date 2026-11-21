@@ -14,22 +14,23 @@ struct AgentComposer: View {
         foot
     }
 
-    /// Under the field: NanoHarness-style unified model + reasoning chip.
-    /// Fits cleanly beside the send button at every sidebar width without
-    /// ever clipping or colliding with the circular action button.
+    /// Under the field: unified model + reasoning chip. Always visible (never
+    /// hidden when the text field loses focus, so the popover stays anchored
+    /// while searching or picking models).
     @ViewBuilder
     private var choices: some View {
         HStack(spacing: 6) {
             if let current = agent.model {
                 ModelPicker(agent: agent, current: current)
-                    .help("Model & reasoning — click for reasoning slider or to switch models")
+                    .help("Switch model or adjust reasoning effort")
+            } else if agent.phase == .starting {
+                Text("Loading models…")
+                    .font(.system(size: 11.5))
+                    .foregroundStyle(Palette.muted)
+                    .padding(.horizontal, 6)
             }
         }
         .disabled(agent.phase == .working)
-    }
-
-    private var expanded: Bool {
-        full || typing.wrappedValue || agent.draft.count > 26 || agent.draft.contains("\n")
     }
 
     private var canSubmit: Bool {
@@ -70,10 +71,9 @@ struct AgentComposer: View {
             }
             // One box: the words, and under them in the same box what
             // they go to — the model, how hard it thinks — and the button.
-            let layout = expanded
-                ? AnyLayout(VStackLayout(alignment: .leading, spacing: full ? 10 : 8))
-                : AnyLayout(HStackLayout(alignment: .center, spacing: 8))
-            layout {
+            // Always two rows so the model picker is immediately visible and
+            // never unmounts when its popover takes focus from the text field.
+            VStack(alignment: .leading, spacing: full ? 10 : 8) {
                 ZStack(alignment: .topLeading) {
                     if agent.draft.isEmpty {
                         Text(prompt)
@@ -94,21 +94,20 @@ struct AgentComposer: View {
                         .accessibilityLabel("Message Codegraff")
                 }
                 .font(.system(size: full ? 14.5 : 13.5))
-                .frame(maxWidth: .infinity, minHeight: expanded ? (full ? 56 : 38) : nil, alignment: .topLeading)
-                if expanded {
-                    HStack(spacing: 8) {
-                        choices
-                            .frame(maxWidth: .infinity, alignment: .leading)
-                        actions
-                    }
-                } else {
+                .frame(maxWidth: .infinity, minHeight: full ? 56 : 36, alignment: .topLeading)
+                .contentShape(Rectangle())
+                .onTapGesture { typing.wrappedValue = true }
+
+                HStack(spacing: 8) {
+                    choices
+                        .frame(maxWidth: .infinity, alignment: .leading)
                     actions
                 }
             }
             .padding(.leading, full ? 14 : 11)
             .padding(.trailing, full ? 10 : 8)
-            .padding(.top, expanded ? (full ? 13 : 11) : 6)
-            .padding(.bottom, expanded ? 8 : 6)
+            .padding(.top, full ? 13 : 10)
+            .padding(.bottom, 8)
             .background(full ? Palette.ground : Palette.ink.opacity(0.035), in: RoundedRectangle(cornerRadius: full ? 20 : 15, style: .continuous))
             .overlay(
                 RoundedRectangle(cornerRadius: full ? 20 : 15, style: .continuous)
@@ -119,8 +118,6 @@ struct AgentComposer: View {
             )
             .shadow(color: .black.opacity(full ? 0.035 : 0), radius: 8, y: 2)
             .animation(Motion.quick, value: typing.wrappedValue)
-            .animation(Motion.snappy, value: expanded)
-            .onTapGesture { typing.wrappedValue = true }
         }
         .animation(Motion.settle, value: agent.queue.map(\.id))
         .padding(.horizontal, full ? 12 : 14)
@@ -146,7 +143,7 @@ struct AgentComposer: View {
 
     private var prompt: String {
         if agent.asking?.isQuestion == true { return "Answer Codegraff" }
-        if agent.phase == .working { return expanded ? "Type a follow-up to queue…" : "Queue a follow-up…" }
+        if agent.phase == .working { return full ? "Type a follow-up to queue…" : "Queue a follow-up…" }
         return !full && agent.withPage && browser.active?.isBlank == false ? "Ask about this page…" : "Ask Codegraff…"
     }
 
