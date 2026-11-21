@@ -1,5 +1,7 @@
 Always-visible model picker with 1-click opaque popover, rich Markdown tables and native LaTeX math in Codegraff replies, Sync with iCloud, Handoff, Reddit ad blocking, 600% PDF zoom, 10 more browser imports, faster animations, and smaller release binaries.
 
+Always-visible model picker with 1-click opaque popover, rich Markdown tables and native LaTeX math in Codegraff replies, Sync with iCloud, Handoff, Reddit ad blocking, 600% PDF zoom, 10 more browser imports, faster animations, and smaller release binaries.
+
 Passkeys under sign-in fields with agent auto-focus, customizable hotkeys and global summon, bundled browse-mcp server with Follow pill, 120 FPS AppKit Split View, NanoHarness 1:1 model picker, Low-RAM memory profiles, and high-contrast ⌘; Agent Sidebar keycaps.
 
 Continue the same Browse conversation in a browser. Enable Continue in browser from the chat menu, then open the link on another device and sign in to the same Codegraff account. Messages, activity, questions and Stop stay connected to the agent on your Mac.
