@@ -424,11 +424,26 @@ final class AgentTools: ObservableObject {
     and `show` puts a page in front of the user as a tab.
     """
 
+    private static func annotations(for name: String) -> [String: Any] {
+        switch name {
+        case "search", "read_pages", "read", "read_markdown", "page_info", "links",
+             "tabs", "snapshot", "form_fields", "screenshot", "wait_for":
+            return ["readOnlyHint": true, "destructiveHint": false, "idempotentHint": true, "openWorldHint": true]
+        case "open", "open_tab", "go", "back", "forward", "reload", "scroll", "hover", "show":
+            return ["readOnlyHint": false, "destructiveHint": false, "idempotentHint": false, "openWorldHint": true]
+        case "close":
+            return ["readOnlyHint": false, "destructiveHint": true, "idempotentHint": false, "openWorldHint": false]
+        default:
+            return ["readOnlyHint": false, "destructiveHint": true, "idempotentHint": false, "openWorldHint": true]
+        }
+    }
+
     private static func tool(_ name: String, _ description: String, _ properties: [String: [String: Any]] = [:], required: [String] = []) -> [String: Any] {
         [
             "name": name,
             "description": description,
             "inputSchema": ["type": "object", "properties": properties, "required": required],
+            "annotations": annotations(for: name),
         ]
     }
 

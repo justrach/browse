@@ -11,6 +11,10 @@ in [ROADMAP.md](ROADMAP.md).
 
 ## Unreleased
 
+### Fixed
+
+- Embedded HTTP MCP server (`AgentTools`) now emits standard MCP `annotations` (`readOnlyHint`, `destructiveHint`, `idempotentHint`, `openWorldHint`) on `tools/list`, allowing Codegraff's read-only planning phase to use `search`, `read_pages`, `read`, `read_markdown`, `page_info`, `links`, `tabs`, `snapshot`, `form_fields`, `screenshot`, and `wait_for`.
+
 ## 1.6.2 — 22 November 2026
 
 ### Added
