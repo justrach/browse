@@ -57,6 +57,11 @@ final class Preferences: ObservableObject {
     @Published var sidebar: Bool {
         didSet { store.set(sidebar, forKey: "sidebar") }
     }
+    /// Show the compact Aside-style top address bar (domain | title + top-right
+    /// Ask pill) when tabs are in the sidebar or folded away.
+    @Published var compactTopBar: Bool {
+        didSet { store.set(compactTopBar, forKey: "chrome.asideBar") }
+    }
     /// The column folded away whenever the pointer isn't at the left edge,
     /// rather than only after ⌘S (see Fold.swift). Off unless asked for.
     @Published var sideHides: Bool {
@@ -343,6 +348,7 @@ final class Preferences: ObservableObject {
         NSApplication.shared.appearance = chosen.appearance
         sidebar = store.object(forKey: "sidebar") as? Bool
             ?? (store.string(forKey: "manner") == "side")
+        compactTopBar = store.object(forKey: "chrome.asideBar") as? Bool ?? true
         sideHides = store.bool(forKey: "sidebar.hides")
         sideTint = store.object(forKey: "sidebar.tint") as? Bool ?? true
         let width = store.object(forKey: "sidebar.width") as? Double ?? Double(Metrics.side)

@@ -360,6 +360,7 @@ struct ContentView: View {
             // edge and overshot the window with the spring (see `room`).
             stage
                 .padding(.leading, roomed.width)
+                .padding(.trailing, agentTrailing)
                 .padding(.top, roomed.height)
                 .offset(x: chrome.width - roomed.width, y: chrome.height - roomed.height)
 
@@ -377,16 +378,37 @@ struct ContentView: View {
                     .transition(.move(edge: .top).combined(with: .opacity))
             }
 
+            if asideBarShown {
+                AsideBar(browser: browser, sidebarOpen: sidebar)
+                    .padding(.leading, chrome.width)
+                    .padding(.trailing, agentTrailing)
+                    .transition(.opacity)
+            }
+
             // The bookmarks bar, under the strip or beside the column's top.
             if barShown {
                 BookmarksBar(browser: browser, bookmarks: browser.bookmarks)
                     .padding(.leading, chrome.width)
+                    .padding(.trailing, agentTrailing)
                     .padding(.top, band)
                     .transition(.opacity)
+            }
+
+            // In sidebar / Aside-bar layouts, Codegraff takes the full window
+            // height on the right so its header aligns cleanly beside AsideBar
+            // instead of stacking a dark header underneath a light bar.
+            if fullHeightAgent {
+                HStack(spacing: 0) {
+                    Spacer(minLength: 0)
+                    AgentColumn(browser: browser, agent: browser.agent, prefs: browser.prefs, fullHeight: true)
+                        .frame(maxHeight: .infinity, alignment: .top)
+                }
+                .transition(.move(edge: .trailing))
             }
         }
         .ignoresSafeArea()
         .animation(Motion.glide, value: browser.prefs.sidebar)
+        .animation(Motion.glide, value: browser.folded)
         .animation(Motion.glide, value: consulting)
         .animation(Motion.glide, value: browser.agentFull)
         .animation(.easeOut(duration: 0.12), value: browser.active?.immersed)
@@ -407,7 +429,7 @@ struct ContentView: View {
                     // A tab carried out of the sidebar: the half it would
                     // open on (Split.swift).
                     .overlay { SplitDropZone(browser: browser) }
-                if consulting {
+                if consulting && !fullHeightAgent {
                     AgentColumn(browser: browser, agent: browser.agent, prefs: browser.prefs)
                         .transition(.move(edge: .trailing).combined(with: .opacity))
                 }
@@ -494,14 +516,26 @@ struct ContentView: View {
         roomTicket += 1
         var still = Transaction()
         still.disablesAnimations = true
+        // Suppress WebKit's synchronous geometry wait during the spring slide
+        // so ⌘S folds and unfolds smoothly without frame drops or right-edge stalls.
+        let pageView = browser.active?.built
+        if !Motion.reduced && (old.width != new.width || old.height != new.height) {
+            pageView?.splitLiveResizing = true
+        }
         // With Reduce Motion on, nothing slides: the page takes its new room
         // with the chrome, not after a slide that isn't there.
         withTransaction(still) { room = Motion.reduced ? new : at }
-        guard !Motion.reduced, arriving.0 || arriving.1 else { return }
         let ticket = roomTicket
-        DispatchQueue.main.asyncAfter(deadline: .now() + 0.42) {
+        if Motion.reduced {
+            pageView?.splitLiveResizing = false
+            return
+        }
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.26) {
             guard ticket == roomTicket else { return }
-            withTransaction(still) { room = chrome }
+            if arriving.0 || arriving.1 {
+                withTransaction(still) { room = chrome }
+            }
+            pageView?.splitLiveResizing = false
         }
     }
 
@@ -620,6 +654,7 @@ struct ContentView: View {
                 // bar stay as they are, uncovered and in reach.
                 PeekLayer(browser: browser)
                     .padding(.leading, chrome.width)
+                    .padding(.trailing, agentTrailing)
                     .padding(.top, chrome.height)
                     // From the window's own top edge, as the page is:
                     // the title bar's band is page too.
@@ -849,16 +884,35 @@ struct ContentView: View {
         browser.consulting && browser.prefs.usesAgent && browser.active?.immersed != true
     }
 
+    /// True when the Agent sidebar sits beside AsideBar at full window height.
+    private var fullHeightAgent: Bool {
+        consulting && !browser.agentFull && asideBarShown
+    }
+
+    /// Trailing inset reserved for the full-height Agent sidebar.
+    private var agentTrailing: CGFloat {
+        fullHeightAgent ? browser.prefs.agentWidth : 0
+    }
+
     /// True while the tabs are down the left, and not folded away (see Fold.swift).
     private var sidebar: Bool {
         browser.prefs.sidebar && !browser.folded && browser.active?.immersed != true
     }
 
-    /// The column has its own corner for the lights, so the page beside it
-    /// starts at the very top; the strip needs a band.
+    /// True when the compact Aside-style top bar is showing (tabs in sidebar
+    /// or folded away, and not in full-screen video).
+    private var asideBarShown: Bool {
+        browser.prefs.compactTopBar
+            && (browser.prefs.sidebar || browser.folded)
+            && browser.active?.immersed != true
+    }
+
+    /// The column has its own corner for the lights; the top strip or Aside
+    /// address bar takes a band across the top of the page.
     private var band: CGFloat {
         guard browser.active?.immersed != true else { return 0 }
-        // Folded, the strip is out of the window and the page has its height.
+        if asideBarShown { return Metrics.strip }
+        // Folded without the compact top bar: the page takes the full height.
         return browser.prefs.sidebar || browser.folded ? 0 : Metrics.strip
     }
 

@@ -919,6 +919,7 @@ final class PasskeyRelay: NSObject, WKScriptMessageHandlerWithReply {
     /// events on the window (see `bridge`).
     nonisolated static let page = """
     (function () {
+      if (location.protocol !== 'https:' && location.protocol !== 'http:') return;
       if (!window.PublicKeyCredential || !window.CredentialsContainer) return;
       var proto = CredentialsContainer.prototype;
       // In once, whichever copy comes first — an extension's (see
@@ -1202,6 +1203,7 @@ final class PasskeyRelay: NSObject, WKScriptMessageHandlerWithReply {
     /// the event's — and the answer dispatched back for the page to pick up.
     static let bridge = """
     (function () {
+      if (location.protocol !== 'https:' && location.protocol !== 'http:') return;
       var handler = window.webkit && webkit.messageHandlers && webkit.messageHandlers.\(name);
       if (!handler || window.__bridged) return;
       window.__bridged = true;

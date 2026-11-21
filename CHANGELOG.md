@@ -11,8 +11,19 @@ in [ROADMAP.md](ROADMAP.md).
 
 ## Unreleased
 
+### Added
+
+- **Compact top address bar (Aside style)**: single-row top bar in sidebar and folded modes showing sidebar toggle (`⌘S`), navigation buttons, clickable `domain | page title` (`⌘L`), Passwords (`🔑`), Extensions (`🧩`), and a pinned top-right **`✦ Ask [⌘;]`** pill that adapts to page tint (toggleable in Settings › Tabs).
+- **Redesigned full-height Agent Sidebar & unified composer**: in sidebar/Aside-bar layouts, Codegraff spans full window height beside the page with a flush `52pt` draggable header, untruncated title, streamlined 4-icon controls, calm bottom-anchored empty state with full-width starter rows, and a single docked composer card unifying the slim page-context strip with the input and model picker.
+
+### Performance
+
+- **BrowserBench / Speedometer 3.1 optimizations**: replaced the per-iframe `MutationObserver` in `Frames.swift` with a single pure CSS rule (zero JS per DOM mutation), debounced `Forms.swift`'s password-form observer with an O(1) `liveInputs.length` guard and skipped `pair()` on non-input focus/scroll/click events, and fast-exited `PasskeyRelay` on non-`http(s)` subframes.
+- **Smooth `⌘S` sidebar fold**: suppresses WebKit's synchronous geometry wait during the spring slide, keeps window traffic lights steady when the compact top bar is visible, and animates the top bar inset in sync with the sidebar.
+
 ### Fixed
 
+- Sideways swipe navigation checks whether horizontally scrollable elements were recently moving before triggering Back (preventing accidental Back navigation on Google Sheets and wide tables).
 - Embedded HTTP MCP server (`AgentTools`) now emits standard MCP `annotations` (`readOnlyHint`, `destructiveHint`, `idempotentHint`, `openWorldHint`) on `tools/list`, allowing Codegraff's read-only planning phase to use `search`, `read_pages`, `read`, `read_markdown`, `page_info`, `links`, `tabs`, `snapshot`, `form_fields`, `screenshot`, and `wait_for`.
 
 ## 1.6.2 — 22 November 2026
