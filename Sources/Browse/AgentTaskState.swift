@@ -53,8 +53,17 @@ struct AgentTaskStateView: View {
 
     private var state: Agent.TaskState { agent.taskState }
 
+    private var needsBanner: Bool {
+        switch state {
+        case .answer, .approval, .interrupted, .stopped, .signedOut, .missing:
+            return true
+        case .idle, .starting, .working, .finished:
+            return false
+        }
+    }
+
     var body: some View {
-        if state != .idle && !agent.entries.isEmpty {
+        if needsBanner && !agent.entries.isEmpty {
             HStack(alignment: .center, spacing: 9) {
                 if state == .working || state == .starting {
                     Ring(size: 10)

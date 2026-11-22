@@ -80,7 +80,7 @@ struct AgentColumn: View {
             radius: scheme == .dark ? 8 : 5,
             y: 1.5
         )
-        .padding(.top, floatingCard ? Split.gap : 0)
+        .padding(.top, 0)
         .padding(.trailing, floatingCard ? Split.gap : 0)
         .padding(.bottom, floatingCard ? Split.gap : 0)
         .padding(.leading, floatingCard ? Split.gap : 0)
@@ -188,9 +188,6 @@ struct AgentColumn: View {
         let expandKey = shortcuts.key(for: .expandAgent)?.display
         let toggleKey = shortcuts.key(for: .toggleAgent)?.display
         return ZStack {
-            if fullHeight {
-                DragStrip()
-            }
             HStack(spacing: 6) {
                 VStack(alignment: .leading, spacing: 2) {
                     HStack(spacing: 6) {
@@ -277,7 +274,7 @@ struct AgentColumn: View {
             }
             .padding(.horizontal, full ? 20 : 14)
         }
-        .frame(height: fullHeight ? (Metrics.strip - Split.gap) : (full ? 52 : 44))
+        .frame(height: full ? 52 : 40)
         .overlay(alignment: .bottom) {
             if !full {
                 Rectangle()
@@ -327,7 +324,7 @@ struct AgentColumn: View {
                     ZStack(alignment: .bottom) {
                         ScrollView {
                             measure(
-                                VStack(alignment: .leading, spacing: full ? 20 : 12) {
+                                LazyVStack(alignment: .leading, spacing: full ? 20 : 12) {
                                     if full, let first = agent.entries.first {
                                         Text(Self.day(first.at))
                                             .font(.system(size: 12))
@@ -515,26 +512,28 @@ struct ModelPicker: View {
 
     var body: some View {
         Button { open.toggle() } label: {
-            HStack(spacing: 6) {
-                ProviderMark(provider: current.makerKey, size: 14)
+            HStack(spacing: 5) {
+                ProviderMark(provider: current.makerKey, size: 13.5)
                 Text(current.label)
-                    .font(.system(size: 12, weight: .medium))
+                    .font(.system(size: 11.5, weight: .medium))
                     .foregroundStyle(hovering || open ? Palette.ink : Palette.ink.opacity(0.9))
                     .lineLimit(1)
                     .truncationMode(.tail)
+                    .layoutPriority(1)
                     .contentTransition(.numericText())
                 if let effortLabel {
                     Text(effortLabel)
-                        .font(.system(size: 12, weight: .medium))
+                        .font(.system(size: 11, weight: .medium))
                         .foregroundStyle(Palette.muted.opacity(0.8))
-                        .fixedSize()
+                        .lineLimit(1)
+                        .truncationMode(.tail)
                         .contentTransition(.numericText())
                 }
                 Image(systemName: "chevron.down")
                     .font(.system(size: 7.5, weight: .semibold))
                     .foregroundStyle(Palette.muted)
             }
-            .padding(.horizontal, 8)
+            .padding(.horizontal, 7)
             .frame(height: 26)
             .background(
                 RoundedRectangle(cornerRadius: 8, style: .continuous)

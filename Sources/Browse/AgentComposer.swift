@@ -355,7 +355,7 @@ struct AgentComposer: View {
                     .contentShape(Rectangle())
                     .onTapGesture { localFocusToken &+= 1 }
 
-                    HStack(spacing: 6) {
+                    HStack(spacing: 4) {
                         choices
                             .frame(maxWidth: .infinity, alignment: .leading)
                         if let ctx = agent.context, ctx.window > 0 {

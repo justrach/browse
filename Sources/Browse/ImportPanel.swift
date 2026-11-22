@@ -43,6 +43,7 @@ struct ImportPanel: View {
     @State private var forExtensions = false
     @State private var bringing = false
     @State private var brought: [Said]?
+    @State private var folderError: String?
 
     struct Said: Hashable {
         let ok: Bool
@@ -72,6 +73,7 @@ struct ImportPanel: View {
                             pick = source
                             forExtensions = false
                             brought = nil
+                            folderError = nil
                         }
                     }
                 }
@@ -185,9 +187,32 @@ struct ImportPanel: View {
     private func options(for source: ImportSource) -> some View {
         if locked.contains(source.id) {
             Card {
-                Line("Full Disk Access", "Since macOS 27, only \(source.name) itself, and apps you give Full Disk Access, can read its folder. Turned on, this sheet looks again by itself.") {
-                    Pill("Turn It On…") {
-                        browser.unlock(source) { look() }
+                if let chromium = source.chromium {
+                    Line(
+                        "Allow access to \(source.name)",
+                        "macOS protects \(source.name)'s data folder. Pick it once to import right away for this session — no Full Disk Access or relaunch needed."
+                    ) {
+                        HStack(spacing: 6) {
+                            Pill("Choose folder…", filled: true) {
+                                chooseFolder(for: chromium)
+                            }
+                            Pill("Full Disk Access…") {
+                                browser.unlock(source) { look() }
+                            }
+                        }
+                    }
+                    if let folderError {
+                        Rule()
+                        Text(folderError)
+                            .font(.system(size: 11.5))
+                            .foregroundStyle(Palette.muted)
+                            .fixedSize(horizontal: false, vertical: true)
+                    }
+                } else {
+                    Line("Full Disk Access", "Since macOS 27, only \(source.name) itself, and apps you give Full Disk Access, can read its folder. Turned on, this sheet looks again by itself.") {
+                        Pill("Turn It On…") {
+                            browser.unlock(source) { look() }
+                        }
                     }
                 }
             }
@@ -196,10 +221,55 @@ struct ImportPanel: View {
         }
     }
 
+    /// macOS protects another app's data. Choosing its folder in the system
+    /// panel grants Browse immediate access for this session without requiring
+    /// Full Disk Access or a relaunch (matching upstream Search).
+    private func chooseFolder(for source: Chromium.Source) {
+        let panel = NSOpenPanel()
+        panel.canChooseDirectories = true
+        panel.canChooseFiles = false
+        panel.allowsMultipleSelection = false
+        panel.directoryURL = source.root.deletingLastPathComponent()
+        panel.message = "Choose \(source.name)'s browser data folder"
+        panel.prompt = "Use Folder"
+        panel.begin { answer in
+            guard answer == .OK, let folder = panel.url else { return }
+            looking = true
+            DispatchQueue.global(qos: .userInitiated).async {
+                let accessed = folder.startAccessingSecurityScopedResource()
+                var selected = source
+                selected.rootOverride = folder.resolvingSymlinksInPath()
+                let found = !selected.folders.isEmpty
+                if !found && accessed { folder.stopAccessingSecurityScopedResource() }
+                DispatchQueue.main.async {
+                    guard found else {
+                        looking = false
+                        folderError = "No browser profile was found in \(folder.path.replacingOccurrences(of: NSHomeDirectory(), with: "~")). Choose the folder that contains Default or Profile 1."
+                        return
+                    }
+                    Chromium.useForSession(folder, for: source)
+                    folderError = nil
+                    previews = [:]
+                    profiles = [:]
+                    usual = [:]
+                    chosen[source.id] = nil
+                    look()
+                }
+            }
+        }
+    }
+
     private func kinds(for source: ImportSource) -> some View {
         let preview = previews[key(source, profile(of: source))]
         let extensions = fresh(source)
         return Card {
+            if let chromium = source.chromium,
+               let root = Chromium.chosenRoot(for: chromium.name), !Store.testing {
+                Line("Folder", "From \(root.path.replacingOccurrences(of: NSHomeDirectory(), with: "~"))") {
+                    Pill("Change…") { chooseFolder(for: chromium) }
+                }
+                Rule()
+            }
             if let choices = profiles[source.id], choices.count > 1 {
                 Line("Profile") {
                     Picker("", selection: Binding(
@@ -266,7 +336,11 @@ struct ImportPanel: View {
     }
 
     private func detail(of source: ImportSource) -> String {
-        if locked.contains(source.id) { return "macOS keeps its folder shut — needs Full Disk Access" }
+        if locked.contains(source.id) {
+            return source.chromium != nil
+                ? "macOS keeps its folder shut — choose folder to import"
+                : "macOS keeps its folder shut — needs Full Disk Access"
+        }
         guard let preview = previews[key(source, profile(of: source))] else { return "Counting…" }
         func count(_ n: Int, _ one: String) -> String { n == 1 ? "1 \(one)" : "\(n.formatted()) \(one)s" }
         var parts: [String] = []
@@ -359,7 +433,12 @@ struct ImportPanel: View {
                     case .success(let found):
                         let kept = browser.keep(found)
                         let skipped = found.skipped > 0 ? " (\(found.skipped.formatted()) skipped: no address)" : ""
-                        said[0] = Said(ok: true, text: (kept == 1 ? "1 password" : "\(kept.formatted()) passwords") + skipped)
+                        let locked = found.undecrypted > 0
+                            ? " — \(found.undecrypted.formatted()) couldn't be decrypted with \(source.name)'s key" : ""
+                        said[0] = Said(
+                            ok: kept > 0 || found.undecrypted == 0,
+                            text: (kept == 1 ? "1 password" : "\(kept.formatted()) passwords") + skipped + locked
+                        )
                     case .failure(Chromium.Trouble.noPassphrase):
                         said[0] = Said(ok: false, text: "macOS didn't hand over \(source.name)'s key — allow it and try again")
                     case .failure(Mozilla.Trouble.primaryPassword):
