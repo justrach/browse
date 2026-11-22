@@ -9,10 +9,12 @@ All notable changes to **browse** are documented here, newest first.
 ### Added
 
 - **Redesigned 5-step onboarding tour (`Welcome.swift`, `WelcomeResearch.swift`)**: live miniature preview of the unified Arc/Dia frosted glass frame (`graff` card, Dia active-tab badge, and `@`-tab mention chip), live `System / Light / Dark` appearance + layout + page-tint picker, macOS 27 Full Disk Access `+` guidance during browser import, and updated shortcut cards (`⌘L`, `⌘K`, `⇧⌘\`, `⌘;`).
-- **Automated UI layout & artifact regression test suite (`Tests/ui-layout.sh`)**: headless AppKit/SwiftUI `NSHostingView` geometry assertions plus source guardrails running on every CI build to prevent vertically-wrapped pills, overflowing palettes, narrow-header collisions, clipped Settings descriptions, and ScrollView `.mask` 120 FPS regressions.
+- **Automated UI layout & artifact regression test suite (`tests/ui-layout.sh`)**: headless AppKit/SwiftUI `NSHostingView` geometry assertions plus source guardrails running on every CI build to prevent vertically-wrapped pills, overflowing palettes, narrow-header collisions, clipped Settings descriptions, and ScrollView `.mask` 120 FPS regressions.
 
 ### Fixed
 
+- **Agent `⌘;` / `⇧⌘;` supersedes all other `⌘;` handlers**: added `MenuKeySanitizer` to strip macOS's built-in `Edit › Spelling and Grammar` shortcuts (`⌘;` Check Document Now and `⌘:` / `⇧⌘;` Show Spelling and Grammar), elevated `⌘;` / `⇧⌘;` to top priority in `ContentView.take(_:)`, and intercepted `performKeyEquivalent(with:)` in `PageView` and `NanoTextView` so web pages, editors, extensions, and spellcheck can no longer steal `⌘;`.
+- **Auto-register `browse` in System Settings › Full Disk Access**: when a locked browser is detected during import or when opening Full Disk Access settings, `browse` triggers macOS's `SystemPolicyAllFiles` registration so `browse` appears directly in the Full Disk Access toggle list instead of requiring manual `+` addition.
 - Locked `Pill`, `Quick`, and onboarding `Big` buttons to `.lineLimit(1).fixedSize()` so capsule controls never wrap into vertical single-letter columns, stacked Settings › Tabs › Memory profile cleanly above `Sleep now`, and removed the 3-line truncation cap on Settings `Line` descriptions.
 
 ## 1.8.1 — 22 November 2026

@@ -410,6 +410,7 @@ struct ImportPanel: View {
             // Listed by their folders; the ones macOS keeps shut aren't read.
             let present = ImportSource.present()
             let shut = Set(present.filter(\.locked).map(\.id))
+            if !shut.isEmpty { Browser.registerForFullDiskAccessList() }
             let found = present.filter { shut.contains($0.id) || !$0.profiles.isEmpty }
             let missing = Chromium.unreadable().map { "\($0.source.name) is on this Mac, but nothing of it was found in \($0.looked)." }
             let lists = found.filter { !shut.contains($0.id) }.map { ($0.id, $0.profiles, $0.usual) }
