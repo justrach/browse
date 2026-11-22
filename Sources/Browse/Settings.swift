@@ -675,13 +675,14 @@ struct SettingsPanel: View {
                 Switch(on: $prefs.sleepsTabs)
             }
             if prefs.sleepsTabs {
+                Rule(inset: 28)
                 Line(
                     "Memory profile",
                     prefs.memoryMode == .low
                         ? "Low RAM: keeps 1 background tab awake, sleeps extras after 20 s, idle tabs after 3 min, and idle pinned tabs after 20 min"
                         : "Balanced: keeps 2 background tabs awake, sleeps extras after 45 s, and idle tabs after 10 min"
                 ) {
-                    HStack(spacing: 8) {
+                    VStack(alignment: .trailing, spacing: 6) {
                         Segmented(options: Preferences.MemoryMode.allCases.map { ($0, $0.title) }, selection: $prefs.memoryMode)
                         Pill("Sleep now") { browser.sleepInactiveNow() }
                     }
@@ -1083,6 +1084,8 @@ struct Pill: View {
         Button(action: action) {
             Text(title)
                 .font(.system(size: 11.5))
+                .lineLimit(1)
+                .fixedSize()
                 .foregroundStyle(filled ? Palette.onAccent : tint)
                 .padding(.horizontal, 10)
                 .padding(.vertical, 5)
@@ -1090,6 +1093,7 @@ struct Pill: View {
                 .overlay(Capsule().strokeBorder(filled ? .clear : Palette.hairline, lineWidth: 1))
                 .contentShape(Capsule())
         }
+        .fixedSize()
         .buttonStyle(.plain)
         .onHover { hovering = $0 }
         .animation(Motion.quick, value: hovering)
