@@ -992,6 +992,23 @@ final class Tab: ObservableObject, Identifiable {
         }
     }
 
+    /// Lightweight visual preview image for the Tab Switcher sneak-peek and
+    /// Tab Overview grid. Uses the existing `cover` if asleep; otherwise takes
+    /// a low-cost 1x WebKit snapshot without a JPEG round-trip.
+    func capturePreview(width: CGFloat = 560, _ done: @escaping (NSImage?) -> Void) {
+        if let cover { return done(cover) }
+        guard let built else { return done(nil) }
+        let shot = WKSnapshotConfiguration()
+        shot.afterScreenUpdates = false
+        let boundsW = built.bounds.width
+        if boundsW > 0 {
+            shot.snapshotWidth = NSNumber(value: min(Double(width), max(1, Double(boundsW))))
+        }
+        built.takeSnapshot(with: shot) { image, _ in
+            done(image)
+        }
+    }
+
     nonisolated private static func jpeg(_ image: CGImage) -> Data? {
         let data = NSMutableData()
         guard let out = CGImageDestinationCreateWithData(data, "public.jpeg" as CFString, 1, nil) else { return nil }
