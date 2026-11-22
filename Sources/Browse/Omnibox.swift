@@ -338,6 +338,20 @@ private struct Breath: NSViewRepresentable {
     }
 }
 
+/// NSTextField subclass that notifies its coordinator the instant AppKit
+/// attaches it to a window, eliminating the SwiftUI mount race where ⌘L
+/// requested focus before `field.window` existed.
+private final class FocusableAddressField: NSTextField {
+    var onMoveToWindow: ((NSTextField) -> Void)?
+
+    override func viewDidMoveToWindow() {
+        super.viewDidMoveToWindow()
+        if window != nil {
+            onMoveToWindow?(self)
+        }
+    }
+}
+
 /// The field itself, in AppKit.
 ///
 /// SwiftUI's TextField can hold a string and nothing else, and the whole point
@@ -351,8 +365,11 @@ struct AddressField: NSViewRepresentable {
     func makeCoordinator() -> Coordinator { Coordinator(browser: browser) }
 
     func makeNSView(context: Context) -> NSTextField {
-        let field = NSTextField()
+        let field = FocusableAddressField()
         field.delegate = context.coordinator
+        field.onMoveToWindow = { [weak coordinator = context.coordinator] attached in
+            coordinator?.fulfillPendingFocus(in: attached)
+        }
         field.isBordered = false
         field.drawsBackground = false
         field.focusRingType = .none
@@ -377,6 +394,11 @@ struct AddressField: NSViewRepresentable {
         let coordinator = context.coordinator
         coordinator.browser = browser
 
+        let needsFocus = coordinator.answered != browser.focusRequest
+        if needsFocus {
+            coordinator.pendingFocusRequest = browser.focusRequest
+        }
+
         // Only when something other than typing changed it — ⌘L arriving with
         // an address, a walk through the list, a submit clearing it.
         //
@@ -389,29 +411,20 @@ struct AddressField: NSViewRepresentable {
         if want != coordinator.synced {
             coordinator.synced = want
             field.stringValue = want
-            coordinator.select(from: browser.typed.count, in: field)
+            if !needsFocus && coordinator.pendingFocusRequest == nil {
+                coordinator.select(from: browser.typed.count, in: field)
+            }
         }
 
-        if coordinator.answered != browser.focusRequest {
-            coordinator.answered = browser.focusRequest
-            DispatchQueue.main.async {
-                field.window?.makeFirstResponder(field)
-                guard let editor = field.currentEditor() as? NSTextView else { return }
-                // The system paints selected text as a block of accent colour,
-                // which over this pale field is the loudest thing in the
-                // window. A tenth of the ink says "selected" quietly enough.
-                editor.selectedTextAttributes = [
-                    .backgroundColor: NSColor(Palette.ink.opacity(0.12)),
-                    .foregroundColor: Palette.NS.ink,
-                ]
-                editor.selectAll(nil)
-            }
+        if needsFocus {
+            coordinator.fulfillPendingFocus(in: field)
         }
     }
 
     final class Coordinator: NSObject, NSTextFieldDelegate {
         var browser: Browser
         var answered = -1
+        var pendingFocusRequest: Int?
         /// The last value pushed in from the browser side, so an update can
         /// tell a change worth applying from one it made itself.
         var synced = ""
@@ -425,8 +438,56 @@ struct AddressField: NSViewRepresentable {
             self.browser = browser
         }
 
+        /// Focuses the address field and selects all text, retrying briefly if
+        /// SwiftUI is still attaching the view to its window so ⌘L never drops
+        /// focus or leaves the URL unselected.
+        @MainActor
+        func fulfillPendingFocus(in field: NSTextField, retries: Int = 8) {
+            guard let targetRequest = pendingFocusRequest else { return }
+            guard let window = field.window else { return }
+            let selectNow: @MainActor () -> Void = { [weak self, weak field, weak window] in
+                guard let self, let field, let window else { return }
+                guard self.pendingFocusRequest == targetRequest else { return }
+                let want = self.browser.completed
+                if field.stringValue != want {
+                    field.stringValue = want
+                    self.synced = want
+                }
+                if window.firstResponder !== field.currentEditor() {
+                    window.makeFirstResponder(field)
+                }
+                guard let editor = field.currentEditor() as? NSTextView else {
+                    if retries > 0 {
+                        DispatchQueue.main.asyncAfter(deadline: .now() + 0.015) {
+                            MainActor.assumeIsolated {
+                                self.fulfillPendingFocus(in: field, retries: retries - 1)
+                            }
+                        }
+                    }
+                    return
+                }
+                editor.selectedTextAttributes = [
+                    .backgroundColor: NSColor(Palette.accent.opacity(0.22)),
+                    .foregroundColor: Palette.NS.ink,
+                ]
+                let fullLength = (field.stringValue as NSString).length
+                editor.selectedRange = NSRange(location: 0, length: fullLength)
+                self.answered = targetRequest
+                self.pendingFocusRequest = nil
+            }
+            if window.firstResponder === field.currentEditor() {
+                selectNow()
+            } else {
+                DispatchQueue.main.async {
+                    MainActor.assumeIsolated { selectNow() }
+                }
+            }
+        }
+
         func controlTextDidChange(_ note: Notification) {
             guard let field = note.object as? NSTextField else { return }
+            pendingFocusRequest = nil
+            answered = browser.focusRequest
             let text = field.stringValue
 
             browser.typed = text
