@@ -1,3 +1,5 @@
+True 120 FPS scrolling by default with passive/layout-free scroll hooks, zero-lag native AppKit composer and isolated omnibox typing, NanoHarness parity (rounded accent caret, slash-command completion, prompt recall, ⌘↩ interrupt/send-queued, ⌘⇧E full-page Write mode, context usage ring, jump-to-bottom pill, and rotating working trailer), cleaner left sidebar, unified 52pt title horizon, tactile active tab pills, Aside address pill with Split View button, and refined Split View framing & resizing.
+
 Aside-style compact top address bar with page tint and top-right Ask pill, redesigned full-height Agent Sidebar with unified docked composer and streamlined header, BrowserBench/Speedometer DOM performance fixes, smoother ⌘S sidebar fold, sideways scroll Back-swipe guard, and embedded MCP read-only tool annotations.
 
 Always-visible model picker with 1-click opaque popover, rich Markdown tables and native LaTeX math in Codegraff replies, Sync with iCloud, Handoff, Reddit ad blocking, 600% PDF zoom, 10 more browser imports, faster animations, and smaller release binaries.
