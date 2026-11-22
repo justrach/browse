@@ -17,6 +17,7 @@ struct AgentComposer: View {
 
     var typing: FocusState<Bool>.Binding
 
+    @Environment(\.colorScheme) private var scheme
     @State private var measuredHeight: CGFloat = 34
     @State private var editorFocused = false
     @State private var localFocusToken = 0
@@ -166,9 +167,10 @@ struct AgentComposer: View {
     // MARK: - the foot
 
     private var foot: some View {
-        let radius: CGFloat = full ? 18 : 14
+        let radius: CGFloat = full ? 18 : 16
         let minH: CGFloat = full ? 48 : 30
         let maxH: CGFloat = full ? 210 : 156
+        let dark = scheme == .dark
 
         return VStack(alignment: .leading, spacing: 8) {
             if full, agent.pinned == nil, let tab = browser.active, !tab.isBlank, agent.asking == nil {
@@ -285,16 +287,19 @@ struct AgentComposer: View {
                 .padding(.top, full ? 12 : 10)
                 .padding(.bottom, 8)
             }
-            .background(full ? Palette.ground : Palette.ink.opacity(0.04))
+            .background(dark ? Color.white.opacity(0.05) : Color.white)
             .clipShape(RoundedRectangle(cornerRadius: radius, style: .continuous))
             .overlay(
                 RoundedRectangle(cornerRadius: radius, style: .continuous)
                     .strokeBorder(
-                        editorFocused ? Palette.accent.opacity(full ? 0.5 : 0.45) : Palette.ink.opacity(0.11),
+                        editorFocused
+                            ? Palette.accent.opacity(dark ? 0.55 : 0.45)
+                            : (dark ? Color.white.opacity(0.10) : Color.black.opacity(0.10)),
                         lineWidth: 0.75
                     )
             )
-            .shadow(color: .black.opacity(full ? 0.04 : 0), radius: 8, y: 2)
+            .shadow(color: .black.opacity(dark ? 0.22 : 0.045), radius: 3, y: 1)
+            .shadow(color: .black.opacity(dark ? 0.20 : 0.055), radius: 14, y: 5)
             .animation(Motion.quick, value: editorFocused)
         }
         .animation(Motion.quick, value: slashMenuOpen)
