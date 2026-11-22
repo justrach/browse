@@ -6,6 +6,10 @@ All notable changes to **browse** are documented here, newest first.
 
 ## Unreleased
 
+### Fixed
+
+- **Reliable `⌘L` focus & full URL selection (`Omnibox.swift`, `Browser.swift`, `Shortcuts.swift`)**: marked `⌘L` (`Open Address…`) as `alwaysOurs` so websites can never swallow it, added `FocusableAddressField` (`viewDidMoveToWindow`) with retry-safe focus & full-text selection so mounting the Omnibox never drops focus or leaves the URL unselected, cleared stale autocomplete endings on `edit()`, and dismissed blocking overlays (`Settings`, `Find`, `Tab Overview`, `Peek`) before focusing.
+
 ## 1.8.3 — 22 November 2026
 
 ### Added
