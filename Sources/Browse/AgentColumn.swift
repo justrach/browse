@@ -33,7 +33,6 @@ struct AgentColumn: View {
     /// The width the column had when the edge was picked up.
     @State private var grabbed: CGFloat?
     @State private var onEdge = false
-    @State private var seamPulse = false
 
     @Environment(\.colorScheme) private var scheme
 
@@ -70,10 +69,18 @@ struct AgentColumn: View {
         .clipShape(RoundedRectangle(cornerRadius: floatingCard ? Split.corner : 0, style: .continuous))
         .overlay {
             if floatingCard {
-                card.strokeBorder(
-                    scheme == .dark ? Color.white.opacity(0.095) : Color.black.opacity(0.075),
-                    lineWidth: 0.75
-                )
+                ZStack {
+                    card.strokeBorder(
+                        scheme == .dark ? Color.white.opacity(0.095) : Color.black.opacity(0.075),
+                        lineWidth: 0.75
+                    )
+                    PageShimmerRim(
+                        corner: Split.corner,
+                        dark: scheme == .dark,
+                        working: agent.phase == .working && agent.withPage && browser.active?.isBlank == false,
+                        settling: false
+                    )
+                }
             }
         }
         .shadow(
@@ -89,24 +96,11 @@ struct AgentColumn: View {
         .frame(maxWidth: full ? .infinity : nil, maxHeight: .infinity)
         .overlay(alignment: .leading) {
             if !full {
-                let pageLinked = floatingCard && agent.withPage && browser.active?.isBlank == false
                 ZStack(alignment: .leading) {
                     if !floatingCard {
                         Rectangle()
                             .fill(Palette.hairline)
                             .frame(width: 1)
-                    }
-                    if floatingCard {
-                        VStack {
-                            Spacer(minLength: 0)
-                            GooeyTabBridge(
-                                connected: pageLinked,
-                                working: agent.phase == .working,
-                                dark: scheme == .dark
-                            )
-                            .offset(x: -8)
-                            .padding(.bottom, 58)
-                        }
                     }
                     edge
                 }
@@ -491,50 +485,23 @@ struct AgentColumn: View {
     }
 
     /// The column's edge: pulled left to widen it, double-clicked to put it
-    /// back, as the sidebar's is.
-    /// Middle gutter resize handle between the webpage card and Codegraff:
-    /// shows a crisp Split-View-style guide rail + grip pill on hover/drag,
-    /// and a gentle luminous pulse while Codegraff is working with the page.
+    /// back, as the sidebar's is. Clean frosted gutter at rest; reveals a
+    /// crisp Split-View-style resize guide + grip pill only on hover or drag.
     private var edge: some View {
         let dragging = grabbed != nil
-        let active = onEdge || dragging
-        let workingOnPage = agent.phase == .working && agent.withPage && !full
         return ZStack {
-            // Subtle ambient shimmer line in the middle gutter while Codegraff works.
-            if workingOnPage && !active {
-                Capsule()
-                    .fill(
-                        LinearGradient(
-                            colors: [
-                                .clear,
-                                Palette.accent.opacity(seamPulse ? 0.45 : 0.18),
-                                Color(red: 0.45, green: 0.70, blue: 1.0).opacity(seamPulse ? 0.38 : 0.14),
-                                .clear,
-                            ],
-                            startPoint: .top,
-                            endPoint: .bottom
-                        )
-                    )
-                    .frame(width: 2, height: 140)
-                    .onAppear {
-                        guard !Motion.reduced else { return }
-                        withAnimation(.easeInOut(duration: 1.5).repeatForever(autoreverses: true)) {
-                            seamPulse = true
-                        }
-                    }
-                    .onDisappear { seamPulse = false }
-                    .transition(.opacity)
-            }
             // Full-height hairline guide on hover or drag.
             Rectangle()
                 .fill(dragging ? Palette.accent.opacity(0.45) : Palette.ink.opacity(onEdge ? 0.12 : 0))
                 .frame(width: 1)
                 .padding(.vertical, 12)
-            // Tactile center grip pill (matching Split View's divider).
+            // Tactile center grip pill (invisible at rest so the gutter stays clean).
             Capsule()
-                .fill(dragging ? Palette.accent : Palette.ink.opacity(onEdge ? 0.34 : 0.08))
-                .frame(width: dragging ? 3.5 : (onEdge ? 3 : 2.5), height: dragging ? 46 : (onEdge ? 38 : 24))
+                .fill(dragging ? Palette.accent : Palette.ink.opacity(onEdge ? 0.36 : 0))
+                .frame(width: dragging ? 3.5 : 3, height: dragging ? 46 : 36)
         }
+        .animation(Motion.quick, value: onEdge)
+        .animation(Motion.quick, value: dragging)
         .frame(maxHeight: .infinity)
         .frame(width: 14)
         .offset(x: -4)
@@ -572,8 +539,6 @@ struct AgentColumn: View {
             NSHapticFeedbackManager.defaultPerformer.perform(.alignment, performanceTime: .now)
             withAnimation(Motion.settle) { prefs.agentWidth = Metrics.agent }
         })
-        .animation(Motion.quick, value: active)
-        .animation(Motion.quick, value: workingOnPage)
     }
 }
 

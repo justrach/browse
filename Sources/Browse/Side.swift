@@ -823,11 +823,12 @@ private struct SideRow: View {
         .frame(height: SideBar.row)
         .frame(maxWidth: .infinity, alignment: .leading)
         // The title keeps its length under the pointer and fades out
-        // beneath the cross, rather than being cut shorter, so its end
-        // doesn't jump on each row the pointer passes.
+        // beneath the cross (or the active graff connection mark), rather than
+        // being cut shorter, so its end doesn't jump as the pointer passes.
         .mask {
+            let showBadge = live && !tab.isBlank && browser.consulting && prefs.usesAgent && !status
             ZStack {
-                Rectangle().opacity(hovering && !editing && !status ? 0 : 1)
+                Rectangle().opacity((hovering || showBadge) && !editing && !status ? 0 : 1)
                 HStack(spacing: 0) {
                     Rectangle()
                     LinearGradient(colors: [.black, .clear], startPoint: .leading, endPoint: .trailing)
@@ -845,6 +846,9 @@ private struct SideRow: View {
                             .foregroundStyle(Palette.muted)
                             .frame(width: 15, height: 15)
                             .background(Palette.ink.opacity(0.07), in: Circle())
+                            .transition(.opacity)
+                    } else if live && !tab.isBlank && browser.consulting && prefs.usesAgent && !status {
+                        AgentTabBadge(agent: browser.agent)
                             .transition(.opacity)
                     }
                 }
@@ -974,6 +978,24 @@ struct Speaker: View {
         .onHover { hovering = $0 }
         .help(tab.muted ? "Unmute Tab" : "Mute Tab")
         .animation(Motion.quick, value: hovering)
+    }
+}
+
+/// Quiet Dia-style mark on the active tab row when `graff` is open and linked
+/// to the current page. Isolated in its own view so agent state updates only
+/// re-evaluate this badge rather than re-rendering the entire tab row.
+private struct AgentTabBadge: View {
+    @ObservedObject var agent: Agent
+
+    var body: some View {
+        if agent.withPage {
+            GraffMark(
+                size: 11.5,
+                color: agent.phase == .working ? Palette.accent : Palette.muted.opacity(0.68)
+            )
+            .help(agent.phase == .working ? "graff is working with this tab" : "Connected to graff")
+            .animation(Motion.quick, value: agent.phase == .working)
+        }
     }
 }
 
