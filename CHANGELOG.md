@@ -6,6 +6,8 @@ All notable changes to **browse** are documented here, newest first.
 
 ## Unreleased
 
+## 1.8.5 — 22 November 2026
+
 ### Added
 
 - **Image pasting, drag-and-drop, and photo attach in `graff` (`Agent.swift`, `NanoComposerField.swift`, `AgentComposer.swift`, `AgentColumn.swift`)**: paste screenshots or copied images (`⌘V`), drag image files onto the composer, or click the photo button to attach up to 6 images (`56×56` removable composer thumbnails + `112×80` chat thumbnails), sent natively as ACP `image` vision blocks (including image-only prompts).
