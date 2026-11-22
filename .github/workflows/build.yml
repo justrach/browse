@@ -34,7 +34,7 @@ jobs:
           bash tests/agent-tasks.sh
           bash tests/passkeys.sh
           bash tests/markdown-latex.sh
-          bash Tests/ui-layout.sh
+          bash tests/ui-layout.sh
       - name: Build
         run: swift build -c release
       - name: Bundle, signed for this runner only
