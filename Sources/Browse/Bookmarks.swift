@@ -95,15 +95,19 @@ final class Bookmarks: ObservableObject {
                       seen.insert(raw).inserted else { continue }
                 let pretty = Address.pretty(url)
                 let prettyLow = pretty.lowercased()
+                let hostLow = prettyLow[..<(prettyLow.firstIndex(of: "/") ?? prettyLow.endIndex)]
                 let titleLow = node.title.lowercased()
                 let score: Int
-                if titleLow.hasPrefix(needle) {
-                    score = 120
-                } else if prettyLow.hasPrefix(needle) {
-                    score = 100
-                } else if titleLow.contains(needle) {
-                    score = 75
-                } else if prettyLow.contains(needle) || raw.lowercased().contains(needle) {
+                if hostLow.hasPrefix(needle) {
+                    let exactLabel = hostLow.count > needle.count
+                        && hostLow[hostLow.index(hostLow.startIndex, offsetBy: needle.count)] == "."
+                    let bareDomain = !prettyLow.contains("/")
+                    score = (exactLabel ? 140 : 110) + (bareDomain ? 15 : 0)
+                } else if needle.count >= 2, titleLow.hasPrefix(needle) {
+                    score = 95
+                } else if needle.count >= 2, titleLow.contains(needle) {
+                    score = 70
+                } else if needle.count >= 2, prettyLow.contains(needle) || raw.lowercased().contains(needle) {
                     score = 50
                 } else {
                     continue

@@ -971,10 +971,10 @@ final class Browser: NSObject, ObservableObject {
             board.setData(Data(), forType: NSPasteboard.PasteboardType("org.nspasteboard.ConcealedType"))
             board.setData(Data(), forType: NSPasteboard.PasteboardType("org.nspasteboard.TransientType"))
             let copied = board.changeCount
-            DispatchQueue.main.asyncAfter(deadline: .now() + 90) {
+            DispatchQueue.main.asyncAfter(deadline: .now() + 45) {
                 if board.changeCount == copied { board.clearContents() }
             }
-            announce("Password copied")
+            announce("Password copied (clears in 45 s)")
         }
     }
 
@@ -2930,13 +2930,25 @@ final class Browser: NSObject, ObservableObject {
             return
         }
 
-        // Saved bookmarks + top history places, deduplicated by URL and tagged
-        // with an open-tab badge whenever that exact page is already open.
-        var list = privateTab ? [] : bookmarks.suggestions(for: typed, limit: 2)
-        let bookmarkedURLs = Set(list.map(\.url.absoluteString))
-        let places = privateTab ? [] : history.suggestions(for: typed, limit: 3, engines: engines)
-            .filter { !bookmarkedURLs.contains($0.url.absoluteString) }
-        list.append(contentsOf: places.prefix(max(1, 4 - list.count)))
+        // Visited host-prefix matches (e.g. "x" → x.com) always lead so inline
+        // autocomplete and Return go straight to sites you actually visit;
+        // matching bookmarks follow, then remaining history/known sites.
+        let places = privateTab ? [] : history.suggestions(for: typed, limit: 4, engines: engines)
+        let marks = privateTab ? [] : bookmarks.suggestions(for: typed, limit: 3)
+        let lowerTyped = typed.trimmingCharacters(in: .whitespaces).lowercased()
+        let hostPrefixVisited = places.filter { $0.kind == .visited && $0.key.lowercased().hasPrefix(lowerTyped) }
+        var seenURLs = Set<String>()
+        var list: [Suggestion] = []
+        func appendUnique(_ items: [Suggestion]) {
+            for item in items where list.count < 4 {
+                if seenURLs.insert(item.url.absoluteString).inserted {
+                    list.append(item)
+                }
+            }
+        }
+        appendUnique(hostPrefixVisited)
+        appendUnique(marks)
+        appendUnique(places)
         let openByURL = Dictionary(
             tabs.compactMap { tab -> (String, Tab.ID)? in
                 guard tab.id != activeID, let url = tab.address else { return nil }
