@@ -988,14 +988,30 @@ final class Browser: NSObject, ObservableObject {
     /// waits for it: `go` runs now if the folder can be read, or else by
     /// itself once it can, while they're in System Settings. True when it
     /// ran now.
+    /// Registers `browse` (with access still off) in macOS System Settings ›
+    /// Privacy & Security › Full Disk Access so the user can flip its switch
+    /// directly without having to hunt for `/Applications/browse.app` via `+`.
+    /// Reading Chrome's macOS 27 `com.apple.macl` folder alone fails with EPERM
+    /// without adding an entry to `SystemPolicyAllFiles`; attempting a benign
+    /// read of Safari's bookmarks directory triggers `tccd` to list `browse`.
+    nonisolated static func registerForFullDiskAccessList() {
+        guard !Store.testing else { return }
+        let safariDir = FileManager.default.homeDirectoryForCurrentUser
+            .appendingPathComponent("Library/Safari", isDirectory: true)
+        let safariBookmarks = safariDir.appendingPathComponent("Bookmarks.plist")
+        _ = try? FileManager.default.contentsOfDirectory(atPath: safariDir.path)
+        _ = try? FileHandle(forReadingFrom: safariBookmarks)
+    }
+
     @discardableResult
     func unlock(_ source: ImportSource, then go: @escaping () -> Void) -> Bool {
         guard source.locked else { go(); return true }
+        Self.registerForFullDiskAccessList()
         let alert = NSAlert()
         alert.messageText = "macOS keeps \(source.name)'s folder for \(source.name) alone"
         alert.informativeText = """
         Since macOS 27, only \(source.name) itself, and apps you give Full Disk Access, can read it. \
-        Turn on browse under Full Disk Access in System Settings — if browse isn't in the list yet, click + at the bottom-left and choose browse from Applications. \
+        Turn on browse under Full Disk Access in System Settings (or click + at the bottom-left and choose browse from Applications if it hasn't appeared yet). \
         The import carries on by itself once enabled (or quit and reopen browse if needed).
 
         Without it: \(source.name)'s own exports come in too. Its bookmarks file under Bookmarks › Safari \
@@ -1006,7 +1022,12 @@ final class Browser: NSObject, ObservableObject {
         guard alert.runModal() == .alertFirstButtonReturn,
               let settings = URL(string: "x-apple.systempreferences:com.apple.preference.security?Privacy_AllFiles")
         else { return false }
-        NSWorkspace.shared.open(settings)
+        Self.registerForFullDiskAccessList()
+        // Give tccd a moment to record the denied SystemPolicyAllFiles entry so
+        // System Settings renders browse in the list right away.
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.15) {
+            NSWorkspace.shared.open(settings)
+        }
         // Looked at once a second for five minutes: long enough to find the
         // switch, and one waiting import at a time.
         unlockWatch?.cancel()
