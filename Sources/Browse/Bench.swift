@@ -1732,6 +1732,13 @@ final class Bench {
                 browser.consulting = on
             }
             if let on = request["agentfull"] as? Bool { browser.agentFull = on }
+            if let mode = request["tabswitcher"] as? String {
+                switch mode {
+                case "palette": browser.openTabSwitcher(.palette)
+                case "grid": browser.openTabSwitcher(.grid)
+                default: browser.closeTabSwitcher()
+                }
+            }
             if request["agentfeedback"] as? Bool == false, Store.testing { browser.agentFeedback = nil }
             // graff put to rest now, as ten quiet minutes would (Agent.rest).
             if request["rest"] as? Bool == true { browser.agent.rest() }

@@ -152,6 +152,8 @@ struct BrowseApp: App {
                     .shortcut(shortcuts.key(for: .previousTab))
                 Button("Search Tabs…") { browser.summon() }
                     .shortcut(shortcuts.key(for: .searchTabs))
+                Button("Tab Overview") { browser.toggleTabOverview() }
+                    .shortcut(shortcuts.key(for: .tabOverview))
                 Divider()
                 if let tab = browser.active {
                     if tab.pin == nil {
@@ -784,6 +786,12 @@ struct ContentView: View {
                     .ignoresSafeArea()
             }
             .overlay { field.id(themes.tick) }
+            .overlay {
+                if let mode = browser.tabSwitcher {
+                    TabSwitcherLayer(browser: browser, mode: mode)
+                        .id(themes.tick)
+                }
+            }
             .overlay(alignment: .top) {
                 if browser.shortcutReminder, !browser.welcoming {
                     ShortcutReminder(
@@ -837,6 +845,10 @@ struct ContentView: View {
                 }
             }
             .onChange(of: browser.activeID) { _, _ in handBack() }
+            .onChange(of: browser.tabSwitcher) { _, mode in
+                if mode == nil { handBack() }
+            }
+            .animation(Motion.settle, value: browser.tabSwitcher)
             .animation(Motion.settle, value: browser.recalling)
             .animation(Motion.settle, value: browser.hoarding)
             .animation(Motion.settle, value: browser.tuning)
@@ -1190,6 +1202,10 @@ struct ContentView: View {
         // Escape puts the page back. On a blank tab there is no page to put
         // back, so it belongs to whatever else wants it.
         if event.keyCode == 53 {
+            if browser.tabSwitcher != nil {
+                browser.closeTabSwitcher()
+                return true
+            }
             if browser.editingTab != nil {
                 browser.cancelTabEdit()
                 return true
@@ -1254,6 +1270,53 @@ struct ContentView: View {
             guard browser.editing, browser.active?.isBlank == false else { return false }
             browser.dismiss()
             return true
+        }
+
+        // Keyboard navigation inside the ⌘K Tab Switcher / ⇧⌘\ Tab Overview.
+        if let mode = browser.tabSwitcher {
+            let plain = flags.isDisjoint(with: [.command, .option, .control, .shift])
+            if plain && event.keyCode == 125 { // ↓
+                browser.stepTabSwitcher(1)
+                return true
+            }
+            if plain && event.keyCode == 126 { // ↑
+                browser.stepTabSwitcher(-1)
+                return true
+            }
+            if flags == .control && key == "n" {
+                browser.stepTabSwitcher(1)
+                return true
+            }
+            if flags == .control && key == "p" {
+                browser.stepTabSwitcher(-1)
+                return true
+            }
+            if mode == .grid && plain && browser.tabSwitcherState.query.isEmpty {
+                if event.keyCode == 124 { // →
+                    browser.stepTabSwitcher(1)
+                    return true
+                }
+                if event.keyCode == 123 { // ←
+                    browser.stepTabSwitcher(-1)
+                    return true
+                }
+            }
+            if event.keyCode == 48 && flags.isDisjoint(with: [.command, .option, .control]) { // Tab / ⇧Tab
+                browser.stepTabSwitcher(flags.contains(.shift) ? -1 : 1)
+                return true
+            }
+            if (event.keyCode == 36 || event.keyCode == 76) && plain { // Return
+                browser.confirmTabSwitcher()
+                return true
+            }
+            if event.keyCode == 51 && flags == .command { // ⌘⌫ close highlighted tab
+                browser.closeSelectedTabFromSwitcher()
+                return true
+            }
+            if key == "d" && flags == .command { // ⌘D open highlighted tab in Split View
+                browser.splitSelectedTabFromSwitcher()
+                return true
+            }
         }
 
         // Tab is the page's: it moves between a form's fields and a page's
@@ -1411,11 +1474,13 @@ struct ContentView: View {
         case .previousTab:
             browser.step(-1)
         case .searchTabs:
-            if browser.editing, !browser.offers.isEmpty {
+            if browser.tabSwitcher == .palette {
                 browser.stepSummon()
             } else {
-                browser.summon()
+                browser.openTabSwitcher(.palette)
             }
+        case .tabOverview:
+            browser.toggleTabOverview()
         case .pinTab:
             browser.togglePin()
         case .renameTab:

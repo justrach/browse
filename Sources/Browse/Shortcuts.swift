@@ -177,6 +177,7 @@ enum CommandID: String, CaseIterable, Codable, Identifiable {
     case nextTab
     case previousTab
     case searchTabs
+    case tabOverview
     case pinTab
     case renameTab
     case duplicateTab
@@ -273,6 +274,7 @@ struct BrowserCommand: Identifiable {
         BrowserCommand(.nextTab, .tabs, "Next Tab", KeyCombo("]", command: true, shift: true), alwaysOurs: true),
         BrowserCommand(.previousTab, .tabs, "Previous Tab", KeyCombo("[", command: true, shift: true), alwaysOurs: true),
         BrowserCommand(.searchTabs, .tabs, "Search Open Tabs…", KeyCombo("k", command: true), alwaysOurs: true),
+        BrowserCommand(.tabOverview, .tabs, "Tab Overview", KeyCombo("\\", command: true, shift: true), alwaysOurs: true),
         BrowserCommand(.pinTab, .tabs, "Pin / Unpin Tab", KeyCombo("p", command: true, option: true)),
         BrowserCommand(.renameTab, .tabs, "Rename Tab", KeyCombo("e", command: true, option: true)),
         BrowserCommand(.duplicateTab, .tabs, "Duplicate Tab", KeyCombo("d", command: true, shift: true)),

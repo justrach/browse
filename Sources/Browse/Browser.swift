@@ -19,6 +19,23 @@ final class OmniboxState: ObservableObject {
     @Published var focusRequest = 0
 }
 
+/// Visual mode of the open-tab finder overlay (TabOverview.swift).
+enum TabSwitcherMode: Equatable {
+    /// `⌘K`: Raycast/Dia-style searchable command palette with a live sneak-peek pane.
+    case palette
+    /// `⇧⌘\`: Safari/Arc-style visual card overview grid across all open tabs.
+    case grid
+}
+
+/// Isolated observable state for the tab switcher / overview so search typing
+/// and highlight changes never invalidate the main browser window.
+@MainActor
+final class TabSwitcherState: ObservableObject {
+    @Published var query = ""
+    @Published var selectedID: Tab.ID?
+    @Published var focusTick = 0
+}
+
 @MainActor
 final class Browser: NSObject, ObservableObject {
     @Published private(set) var tabs: [Tab] = []
@@ -465,6 +482,9 @@ final class Browser: NSObject, ObservableObject {
     @Published private(set) var summoning = false
     /// True between the first ⌘K and letting go of ⌘.
     var cycling = false
+    /// Open-tab finder / visual overview overlay (TabOverview.swift).
+    @Published var tabSwitcher: TabSwitcherMode?
+    let tabSwitcherState = TabSwitcherState()
 
     var active: Tab? { tabs.first { $0.id == activeID } }
     var fieldShowing: Bool { editing || active?.isBlank ?? true }
@@ -2539,25 +2559,196 @@ final class Browser: NSObject, ObservableObject {
     /// ⌘K again, with ⌘ still down: one step further down the list.
     func stepSummon() {
         cycling = true
-        walk(1)
+        if tabSwitcher != nil {
+            stepTabSwitcher(1)
+        } else {
+            walk(1)
+        }
     }
 
     /// ⌘ let go of: take whatever the walk landed on.
     func landSummon() {
         guard cycling else { return }
         cycling = false
+        if tabSwitcher != nil {
+            confirmTabSwitcher()
+            return
+        }
         guard picked != nil else { return }
         submit()
     }
 
-    /// ⌘K. Only what is open, nothing else.
+    /// ⌘K. Search open tabs with a live sneak-peek preview.
     func summon() {
+        openTabSwitcher(.palette)
+    }
+
+    /// ⇧⌘\. Visual card overview grid of all open tabs.
+    func toggleTabOverview() {
+        if tabSwitcher == .grid {
+            closeTabSwitcher()
+        } else {
+            openTabSwitcher(.grid)
+        }
+    }
+
+    func openTabSwitcher(_ mode: TabSwitcherMode) {
         reviewing = false
+        editing = false
+        summoning = false
+        cycling = false
         cancelTabEdit()
-        summoning = true
-        typed = ""
-        editing = true
-        focusRequest += 1
+        if tabSwitcher == nil {
+            tabSwitcherState.query = ""
+        }
+        // Refresh the active tab's preview immediately so its card is current.
+        if let active, !active.isBlank {
+            TabPreviewCache.shared.refresh(active)
+        }
+        tabSwitcher = mode
+        let ordered = switcherTabs(matching: tabSwitcherState.query, mode: mode)
+        if let current = tabSwitcherState.selectedID, ordered.contains(where: { $0.id == current }) {
+            // Keep existing highlight when toggling between palette and grid.
+        } else {
+            tabSwitcherState.selectedID = ordered.first?.id
+        }
+        tabSwitcherState.focusTick += 1
+    }
+
+    func closeTabSwitcher() {
+        guard tabSwitcher != nil else { return }
+        tabSwitcher = nil
+        cycling = false
+        tabSwitcherState.query = ""
+        tabSwitcherState.selectedID = nil
+    }
+
+    /// Filtered and ranked open tabs for the `⌘K` palette or `⇧⌘\` overview grid.
+    func switcherTabs(matching query: String, mode: TabSwitcherMode) -> [Tab] {
+        let nonBlank = tabs.filter { !$0.isBlank }
+        let pool = nonBlank.isEmpty ? tabs : nonBlank
+        let trimmed = query.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+
+        if trimmed.isEmpty {
+            switch mode {
+            case .palette:
+                // Recency-ordered with other tabs first so ⌘K → ↩ jumps back
+                // to your previous tab in one keystroke, while the active tab
+                // stays visible at the end for quick inspection/overview.
+                let others = pool.filter { $0.id != activeID }.sorted { $0.touched > $1.touched }
+                let current = pool.filter { $0.id == activeID }
+                return others + current
+            case .grid:
+                // Natural spatial order: pinned tabs first, then open tabs.
+                let pinned = pool.filter { $0.pin != nil }
+                let loose = pool.filter { $0.pin == nil }
+                return pinned + loose
+            }
+        }
+
+        let tokens = trimmed.split(whereSeparator: \.isWhitespace).map(String.init)
+        return pool.compactMap { tab -> (tab: Tab, score: Int)? in
+            let title = tab.label.lowercased()
+            let pretty = tab.address.map { Address.pretty($0).lowercased() } ?? ""
+            let fullURL = tab.address?.absoluteString.lowercased() ?? ""
+            var score = 0
+            for token in tokens {
+                if title.hasPrefix(token) {
+                    score += 120
+                } else if title.contains(token) {
+                    score += 80
+                } else if pretty.hasPrefix(token) {
+                    score += 70
+                } else if pretty.contains(token) || fullURL.contains(token) {
+                    score += 45
+                } else if Self.fuzzyMatch(token, in: title) {
+                    score += 25
+                } else if Self.fuzzyMatch(token, in: pretty) {
+                    score += 15
+                } else {
+                    return nil
+                }
+            }
+            if tab.id != activeID { score += 10 }
+            return (tab, score)
+        }
+        .sorted {
+            if $0.score != $1.score { return $0.score > $1.score }
+            return $0.tab.touched > $1.tab.touched
+        }
+        .map(\.tab)
+    }
+
+    private static func fuzzyMatch(_ needle: String, in haystack: String) -> Bool {
+        var idx = haystack.startIndex
+        for ch in needle {
+            guard let found = haystack[idx...].firstIndex(of: ch) else { return false }
+            idx = haystack.index(after: found)
+        }
+        return true
+    }
+
+    func stepTabSwitcher(_ delta: Int) {
+        guard let mode = tabSwitcher else { return }
+        let list = switcherTabs(matching: tabSwitcherState.query, mode: mode)
+        guard !list.isEmpty else {
+            tabSwitcherState.selectedID = nil
+            return
+        }
+        if let current = tabSwitcherState.selectedID,
+           let i = list.firstIndex(where: { $0.id == current }) {
+            let next = (i + delta % list.count + list.count) % list.count
+            tabSwitcherState.selectedID = list[next].id
+        } else {
+            tabSwitcherState.selectedID = delta >= 0 ? list.first?.id : list.last?.id
+        }
+    }
+
+    func confirmTabSwitcher() {
+        guard let mode = tabSwitcher else { return }
+        let list = switcherTabs(matching: tabSwitcherState.query, mode: mode)
+        let target = list.first { $0.id == tabSwitcherState.selectedID } ?? list.first
+        closeTabSwitcher()
+        if let target {
+            select(target)
+        }
+    }
+
+    func splitSelectedTabFromSwitcher() {
+        guard let mode = tabSwitcher else { return }
+        let list = switcherTabs(matching: tabSwitcherState.query, mode: mode)
+        guard let target = list.first(where: { $0.id == tabSwitcherState.selectedID }) ?? list.first else { return }
+        closeTabSwitcher()
+        if target.id == activeID {
+            select(target)
+        } else {
+            open(target, on: .right)
+        }
+    }
+
+    func closeTabFromSwitcher(_ tab: Tab) {
+        guard let mode = tabSwitcher else { return }
+        let before = switcherTabs(matching: tabSwitcherState.query, mode: mode)
+        let oldIndex = before.firstIndex { $0.id == tab.id }
+        close(tab)
+        let after = switcherTabs(matching: tabSwitcherState.query, mode: mode)
+        if after.isEmpty || (after.count == 1 && after[0].isBlank) {
+            closeTabSwitcher()
+            return
+        }
+        if let oldIndex {
+            let next = min(oldIndex, after.count - 1)
+            tabSwitcherState.selectedID = after[next].id
+        } else {
+            tabSwitcherState.selectedID = after.first?.id
+        }
+    }
+
+    func closeSelectedTabFromSwitcher() {
+        guard let mode = tabSwitcher else { return }
+        let list = switcherTabs(matching: tabSwitcherState.query, mode: mode)
+        guard let target = list.first(where: { $0.id == tabSwitcherState.selectedID }) ?? list.first else { return }
+        closeTabFromSwitcher(target)
     }
 
     private func guess() {
