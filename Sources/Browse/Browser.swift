@@ -1569,15 +1569,19 @@ final class Browser: NSObject, ObservableObject {
         FormRelay.passkeysOffered = prefs.passkeys
 
         // The History menu lists what the history holds, and the menu is drawn
-        // from this object's changes — so the history's are passed on.
+        // from this object's changes — only forward when the top-8 actually
+        // changed so background page/title churn doesn't re-diff the whole window.
+        var lastRecentKeys: [String] = history.recent().map { "\($0.key)|\($0.title)" }
         history.objectWillChange
             .sink { [weak self] in
-                self?.objectWillChange.send()
-                // This publisher fires before visits change. Recompute later
-                // so a forgotten search disappears from an open field.
                 DispatchQueue.main.async { [weak self] in
-                    guard let self, self.fieldShowing else { return }
-                    self.guess()
+                    guard let self else { return }
+                    let nowKeys = self.history.recent().map { "\($0.key)|\($0.title)" }
+                    if nowKeys != lastRecentKeys {
+                        lastRecentKeys = nowKeys
+                        self.objectWillChange.send()
+                    }
+                    if self.fieldShowing { self.guess() }
                 }
             }
             .store(in: &bag)

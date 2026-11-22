@@ -31,7 +31,62 @@ struct Bookmark: Codable, Identifiable, Hashable {
 
 @MainActor
 final class Bookmarks: ObservableObject {
-    @Published private(set) var roots: [Bookmark] = []
+    @Published private(set) var roots: [Bookmark] = [] {
+        didSet { invalidateIndex() }
+    }
+
+    private struct IndexedBookmark {
+        let url: URL
+        let rawLow: String
+        let pretty: String
+        let prettyLow: String
+        let hostLow: String
+        let bareDomain: Bool
+        let title: String
+        let titleLow: String
+    }
+
+    private var indexedCache: [IndexedBookmark]?
+    private var urlSetCache: Set<String>?
+
+    private func invalidateIndex() {
+        indexedCache = nil
+        urlSetCache = nil
+    }
+
+    private func ensureIndex() -> (items: [IndexedBookmark], urls: Set<String>) {
+        if let items = indexedCache, let urls = urlSetCache { return (items, urls) }
+        var items: [IndexedBookmark] = []
+        var urls = Set<String>()
+        func walk(_ nodes: [Bookmark]) {
+            for node in nodes {
+                if node.isFolder {
+                    walk(node.children ?? [])
+                    continue
+                }
+                guard let raw = node.url, urls.insert(raw).inserted,
+                      let url = URL(string: raw) else { continue }
+                let pretty = Address.pretty(url)
+                let prettyLow = pretty.lowercased()
+                let hostEnd = prettyLow.firstIndex(of: "/") ?? prettyLow.endIndex
+                let hostLow = String(prettyLow[..<hostEnd])
+                items.append(IndexedBookmark(
+                    url: url,
+                    rawLow: raw.lowercased(),
+                    pretty: pretty,
+                    prettyLow: prettyLow,
+                    hostLow: hostLow,
+                    bareDomain: hostEnd == prettyLow.endIndex,
+                    title: node.title,
+                    titleLow: node.title.lowercased()
+                ))
+            }
+        }
+        walk(roots)
+        indexedCache = items
+        urlSetCache = urls
+        return (items, urls)
+    }
 
     init() { load() }
 
@@ -72,57 +127,91 @@ final class Bookmarks: ObservableObject {
     }
 
     func contains(_ url: URL) -> Bool {
-        func walk(_ nodes: [Bookmark]) -> Bool {
-            nodes.contains { $0.url == url.absoluteString || walk($0.children ?? []) }
-        }
-        return walk(roots)
+        ensureIndex().urls.contains(url.absoluteString)
     }
 
-    /// Top saved bookmarks matching what's typed in the omnibox (`⌘L` / `⌘T`).
+    private static func utf8Contains(_ haystack: String, needle: [UInt8]) -> Bool {
+        guard !needle.isEmpty else { return true }
+        if let found = haystack.utf8.withContiguousStorageIfAvailable({ buf -> Bool? in
+            let n = needle.count
+            guard buf.count >= n else { return false }
+            let first = needle[0]
+            let limit = buf.count - n
+            var i = 0
+            while i <= limit {
+                if buf[i] == first {
+                    var j = 1
+                    while j < n && buf[i + j] == needle[j] { j += 1 }
+                    if j == n { return true }
+                }
+                i += 1
+            }
+            return false
+        }), let found {
+            return found
+        }
+        return haystack.contains(String(decoding: needle, as: UTF8.self))
+    }
+
+    private static func utf8HasPrefix(_ haystack: String, needle: [UInt8]) -> Bool {
+        if let found = haystack.utf8.withContiguousStorageIfAvailable({ buf -> Bool? in
+            guard buf.count >= needle.count else { return false }
+            for i in 0..<needle.count where buf[i] != needle[i] { return false }
+            return true
+        }), let found {
+            return found
+        }
+        return haystack.hasPrefix(String(decoding: needle, as: UTF8.self))
+    }
+
+    private static func utf8ExactHostLabel(_ host: String, needle: [UInt8]) -> Bool {
+        if let found = host.utf8.withContiguousStorageIfAvailable({ buf -> Bool? in
+            guard buf.count > needle.count, buf[needle.count] == 0x2E else { return false }
+            for i in 0..<needle.count where buf[i] != needle[i] { return false }
+            return true
+        }), let found {
+            return found
+        }
+        return false
+    }
+
+    /// Top saved bookmarks matching what's typed in the omnibox (`⌘L` / `⌘T`),
+    /// scanned over a pre-parsed flat index with O(N) top-K selection and
+    /// zero-Unicode-normalization ASCII UTF-8 byte matching.
     func suggestions(for typed: String, limit: Int = 2) -> [Suggestion] {
         let needle = typed.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
         guard !needle.isEmpty, limit > 0 else { return [] }
-        var ranked: [(suggestion: Suggestion, score: Int)] = []
-        var seen = Set<String>()
+        let items = ensureIndex().items
+        let needleBytes = Array(needle.utf8)
+        let ascii = needleBytes.allSatisfy { $0 >= 0x20 && $0 < 0x7F }
+        let multi = needle.count >= 2
+        var best: [(item: IndexedBookmark, score: Int)] = []
+        best.reserveCapacity(limit + 1)
 
-        func walk(_ nodes: [Bookmark]) {
-            for node in nodes {
-                if node.isFolder {
-                    walk(node.children ?? [])
-                    continue
-                }
-                guard let raw = node.url, let url = URL(string: raw),
-                      seen.insert(raw).inserted else { continue }
-                let pretty = Address.pretty(url)
-                let prettyLow = pretty.lowercased()
-                let hostLow = prettyLow[..<(prettyLow.firstIndex(of: "/") ?? prettyLow.endIndex)]
-                let titleLow = node.title.lowercased()
-                let score: Int
-                if hostLow.hasPrefix(needle) {
-                    let exactLabel = hostLow.count > needle.count
-                        && hostLow[hostLow.index(hostLow.startIndex, offsetBy: needle.count)] == "."
-                    let bareDomain = !prettyLow.contains("/")
-                    score = (exactLabel ? 140 : 110) + (bareDomain ? 15 : 0)
-                } else if needle.count >= 2, titleLow.hasPrefix(needle) {
-                    score = 95
-                } else if needle.count >= 2, titleLow.contains(needle) {
-                    score = 70
-                } else if needle.count >= 2, prettyLow.contains(needle) || raw.lowercased().contains(needle) {
-                    score = 50
-                } else {
-                    continue
-                }
-                ranked.append((
-                    Suggestion(key: pretty, title: node.title, url: url, kind: .bookmark),
-                    score
-                ))
+        for item in items {
+            let score: Int
+            if ascii ? Bookmarks.utf8HasPrefix(item.hostLow, needle: needleBytes) : item.hostLow.hasPrefix(needle) {
+                let exactLabel = ascii
+                    ? Bookmarks.utf8ExactHostLabel(item.hostLow, needle: needleBytes)
+                    : (item.hostLow.count > needle.count && item.hostLow[item.hostLow.index(item.hostLow.startIndex, offsetBy: needle.count)] == ".")
+                score = (exactLabel ? 140 : 110) + (item.bareDomain ? 15 : 0)
+            } else if multi, ascii ? Bookmarks.utf8HasPrefix(item.titleLow, needle: needleBytes) : item.titleLow.hasPrefix(needle) {
+                score = 95
+            } else if multi, ascii ? Bookmarks.utf8Contains(item.titleLow, needle: needleBytes) : item.titleLow.contains(needle) {
+                score = 70
+            } else if multi, ascii
+                ? (Bookmarks.utf8Contains(item.prettyLow, needle: needleBytes) || Bookmarks.utf8Contains(item.rawLow, needle: needleBytes))
+                : (item.prettyLow.contains(needle) || item.rawLow.contains(needle)) {
+                score = 50
+            } else {
+                continue
             }
+            if best.count == limit, let tail = best.last, score <= tail.score { continue }
+            let idx = best.firstIndex { score > $0.score } ?? best.endIndex
+            best.insert((item, score), at: idx)
+            if best.count > limit { best.removeLast() }
         }
-        walk(roots)
-        return ranked
-            .sorted { $0.score > $1.score }
-            .prefix(limit)
-            .map(\.suggestion)
+        return best.map { Suggestion(key: $0.item.pretty, title: $0.item.title, url: $0.item.url, kind: .bookmark) }
     }
 
     func remove(_ id: Bookmark.ID) {

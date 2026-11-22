@@ -469,23 +469,41 @@ final class ShortcutStore: ObservableObject {
 final class MenuKeySanitizer {
     static let shared = MenuKeySanitizer()
     private var observers: [NSObjectProtocol] = []
+    private weak var sanitizedEditMenu: NSMenu?
+    private var lastEditItemCount = -1
+    private var trackedItems: [WeakMenuItem] = []
+
+    private struct WeakMenuItem {
+        weak var item: NSMenuItem?
+    }
 
     func start() {
-        guard observers.isEmpty else { sanitize(); return }
+        guard observers.isEmpty else { sanitize(force: true); return }
         let centre = NotificationCenter.default
         observers = [
             centre.addObserver(forName: NSApplication.didUpdateNotification, object: nil, queue: nil) { [weak self] _ in
-                MainActor.assumeIsolated { self?.sanitize() }
+                MainActor.assumeIsolated { self?.sanitize(force: false) }
             },
             centre.addObserver(forName: NSMenu.didBeginTrackingNotification, object: nil, queue: nil) { [weak self] _ in
-                MainActor.assumeIsolated { self?.sanitize() }
+                MainActor.assumeIsolated { self?.sanitize(force: true) }
             },
         ]
-        sanitize()
+        sanitize(force: true)
     }
 
-    func sanitize() {
+    func sanitize(force: Bool = true) {
         guard let editMenu = NSApp.mainMenu?.items.first(where: { $0.title == "Edit" })?.submenu else { return }
+        // O(1) zero-allocation fast path for 120–240 Hz didUpdateNotification events:
+        // only re-walk the Edit menu if SwiftUI rebuilt it or re-bound a tracked spelling item.
+        if !force,
+           sanitizedEditMenu === editMenu,
+           editMenu.numberOfItems == lastEditItemCount,
+           trackedItems.allSatisfy({ $0.item?.keyEquivalent.isEmpty ?? true }) {
+            return
+        }
+        sanitizedEditMenu = editMenu
+        lastEditItemCount = editMenu.numberOfItems
+        trackedItems.removeAll(keepingCapacity: true)
         let agentCombos: [KeyCombo] = [.toggleAgent, .expandAgent].compactMap { ShortcutStore.shared.key(for: $0) }
         stripConflicts(in: editMenu, agentCombos: agentCombos)
     }
@@ -495,9 +513,12 @@ final class MenuKeySanitizer {
             if let sub = item.submenu {
                 stripConflicts(in: sub, agentCombos: agentCombos)
             }
-            guard !item.keyEquivalent.isEmpty else { continue }
             let actionName = item.action.map(NSStringFromSelector) ?? ""
             let isSpellingShortcut = actionName == "checkSpelling:" || actionName == "showGuessPanel:"
+            if isSpellingShortcut {
+                trackedItems.append(WeakMenuItem(item: item))
+            }
+            guard !item.keyEquivalent.isEmpty else { continue }
             let flags = item.keyEquivalentModifierMask.intersection(.deviceIndependentFlagsMask)
             let eq = item.keyEquivalent
             // macOS encodes ⇧⌘; as keyEquivalent ":" with [.command] (or ";" with [.command, .shift]).
@@ -512,6 +533,7 @@ final class MenuKeySanitizer {
             if isSpellingShortcut || agentCombos.contains(combo) {
                 item.keyEquivalent = ""
                 item.keyEquivalentModifierMask = []
+                if !isSpellingShortcut { trackedItems.append(WeakMenuItem(item: item)) }
             }
         }
     }
