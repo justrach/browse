@@ -11,6 +11,8 @@ in [ROADMAP.md](ROADMAP.md).
 
 ## Unreleased
 
+## 1.8.1 — 22 November 2026
+
 ### Added
 
 - **Smarter top address bar**: clickable favicon/shield popover opening `SiteCard` (with paused-shield indicator dot), clickable Zoom reset pill (`125%`), active Reading Mode badge, and one-click `⇧⌘\` Tab Overview button beside Split View.
