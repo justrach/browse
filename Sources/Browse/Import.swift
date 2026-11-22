@@ -29,10 +29,19 @@ enum Chromium {
         /// The app itself, to say so when it is on this Mac but its data
         /// isn't where it should be.
         let app: String
+        /// A folder picked by hand in NSOpenPanel (used to validate a candidate
+        /// before committing it to this session).
+        var rootOverride: URL? = nil
 
         var id: String { name }
 
-        var root: URL { Chromium.base.appendingPathComponent(folder, isDirectory: true) }
+        var root: URL {
+            if let rootOverride { return rootOverride }
+            if !Store.testing, let selected = Chromium.chosenRoot(for: name) {
+                return selected
+            }
+            return Chromium.base.appendingPathComponent(folder, isDirectory: true)
+        }
 
         /// Every profile's folder — Default, Profile 1 and on — known by
         /// having something of a person's in it. Chrome's own Guest and
@@ -62,10 +71,10 @@ enum Chromium {
         }
     }
 
-    /// What makes a folder a profile: its passwords, its bookmarks or its
-    /// history, in any of the files Chrome has kept them in.
+    /// What makes a folder a profile: its passwords, its bookmarks, its
+    /// history, or its extensions, in any of the files Chrome has kept them in.
     static let marks = ["Login Data", "Login Data For Account", "Bookmarks", "AccountBookmarks",
-                        "EncryptedBookmarks2", "EncryptedAccountBookmarks2", "History"]
+                        "EncryptedBookmarks2", "EncryptedAccountBookmarks2", "History", "Extensions"]
 
     static let known: [Source] = [
         Source(name: "Dia", folder: "Dia/User Data", service: "Dia Safe Storage", account: "Dia", app: "Dia.app"),
@@ -98,6 +107,26 @@ enum Chromium {
     static var base: URL {
         if Store.testing { return Store.folder.appendingPathComponent("Import", isDirectory: true) }
         return FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0]
+    }
+
+    /// A picked folder is trusted only while this process is running (matching
+    /// Search's macOS 27 folder-grant flow, so importing from Chrome works
+    /// immediately without requiring Full Disk Access or a relaunch).
+    private static let selectionLock = NSLock()
+    private static var selectedRoots: [String: URL] = [:]
+
+    static func chosenRoot(for name: String) -> URL? {
+        selectionLock.lock()
+        defer { selectionLock.unlock() }
+        return selectedRoots[name]
+    }
+
+    static func useForSession(_ folder: URL, for source: Source) {
+        guard !Store.testing else { return }
+        _ = folder.startAccessingSecurityScopedResource()
+        selectionLock.lock()
+        defer { selectionLock.unlock() }
+        selectedRoots[source.name] = folder.resolvingSymlinksInPath()
     }
 
     /// Only the browsers actually on this Mac, with something to read.
@@ -149,6 +178,9 @@ enum Chromium {
         var never: [String]
         /// Passwords left behind for having no site to go with.
         var skipped = 0
+        /// Passwords present in the database that didn't decrypt with the key
+        /// handed over by the keychain.
+        var undecrypted = 0
     }
 
     /// The passwords of one profile, or of all of them when `profile` is
@@ -165,6 +197,7 @@ enum Chromium {
         var seen = Set<String>()
         var readAny = false
         var skipped = 0
+        var undecrypted = 0
 
         // Signed in to Chrome, what's saved goes to the account's own file
         // beside the old one; Chrome shows both as one list, and so do we.
@@ -184,7 +217,12 @@ enum Chromium {
                     never.append(host)
                     continue
                 }
-                guard let password = unwrap(row.blob, key: key), !password.isEmpty else { continue }
+                guard !row.blob.isEmpty else { continue }
+                guard let password = unwrap(row.blob, key: key) else {
+                    undecrypted += 1
+                    continue
+                }
+                guard !password.isEmpty else { continue }
                 let clear = row.origin.lowercased().hasPrefix("http://")
                 let login = Login(host: host, user: row.user, password: password, used: row.used, clear: clear)
                 guard seen.insert(login.id).inserted else { continue }
@@ -192,7 +230,7 @@ enum Chromium {
             }
         }
         guard readAny else { throw Trouble.unreadable }
-        return Found(logins: logins, never: never, skipped: skipped)
+        return Found(logins: logins, never: never, skipped: skipped, undecrypted: undecrypted)
     }
 
     // MARK: - what they kept

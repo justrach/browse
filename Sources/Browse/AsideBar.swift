@@ -39,7 +39,6 @@ struct AsideBar: View {
         let isDark = tint?.dark ?? (scheme == .dark)
         let toggleKey = shortcuts.key(for: .toggleAgent)?.display
         let foldKey = shortcuts.key(for: .toggleFold)?.display
-        let passwordsKey = shortcuts.key(for: .passwords)?.display
         let splitKey = shortcuts.key(for: .toggleSplit)?.display
 
         ZStack(alignment: .leading) {
@@ -92,13 +91,6 @@ struct AsideBar: View {
                         help: (splitOpen ? "Leave Split View" : "Split View") + (splitKey.map { "   \($0)" } ?? "")
                     ) {
                         browser.toggleSplit()
-                    }
-
-                    Door(
-                        icon: "key",
-                        help: "Passwords" + (passwordsKey.map { "   \($0)" } ?? "")
-                    ) {
-                        browser.managing = true
                     }
 
                     ExtensionSlot()
