@@ -588,7 +588,7 @@ struct ContentView: View {
         guard let pair = browser.shownSplit, let split = browser.split else { return (0, 0) }
         let width = browser.stageFrame.width
         let usable = max(1, width - Split.gap * 3)
-        let left = Split.gap * 1.5 + usable * min(0.8, max(0.2, split.fraction))
+        let left = Split.gap * 1.5 + usable * min(0.82, max(0.18, split.fraction))
         return pair.left.id == browser.activeID ? (0, width - left) : (left, 0)
     }
 
@@ -1147,7 +1147,7 @@ struct ContentView: View {
                 return true
             }
             if browser.editingTab != nil { return true }
-            if browser.fieldShowing, !browser.offers.isEmpty {
+            if browser.fieldShowing, !browser.offers.isEmpty, !(event.window?.firstResponder is NanoTextView) {
                 browser.walk(flags.contains(.shift) ? -1 : 1)
                 return true
             }
@@ -1175,7 +1175,7 @@ struct ContentView: View {
 
         // ⌘↩ in the address field: the words go to Codegraff, not to a page.
         if flags.contains(.command), !flags.contains(.option), !flags.contains(.control),
-           event.keyCode == 36, browser.fieldShowing {
+           event.keyCode == 36, browser.fieldShowing, !(event.window?.firstResponder is NanoTextView) {
             browser.ask(browser.typed)
             return true
         }

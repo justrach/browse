@@ -28,6 +28,7 @@ struct AgentColumn: View {
     @State private var showingTasks = false
     @State private var showingBrowserChat = false
     @State private var menuHover = false
+    @State private var scrolledUp = false
 
     /// The width the column had when the edge was picked up.
     @State private var grabbed: CGFloat?
@@ -35,7 +36,14 @@ struct AgentColumn: View {
 
     var body: some View {
         VStack(spacing: 0) {
-            if full && agent.entries.isEmpty {
+            if agent.writeMode {
+                if full || !fullHeight { head }
+                NanoWritePage(browser: browser, agent: agent, full: full) {
+                    withAnimation(Motion.quick) { agent.writeMode = false }
+                    browser.focusAgent()
+                }
+                .transition(.opacity.combined(with: .scale(scale: 0.992)))
+            } else if full && agent.entries.isEmpty {
                 head
                 AgentHome(browser: browser, agent: agent, typing: $typing)
             } else if full {
@@ -45,6 +53,7 @@ struct AgentColumn: View {
                 conversation
             }
         }
+        .animation(Motion.quick, value: agent.writeMode)
         .frame(width: full ? nil : prefs.agentWidth)
         .frame(maxWidth: full ? .infinity : nil, maxHeight: .infinity)
         .background(Palette.ground)
@@ -128,7 +137,16 @@ struct AgentColumn: View {
                 )
                 .transition(.move(edge: .bottom).combined(with: .opacity))
             }
-            measure(AgentComposer(browser: browser, agent: agent, full: full, typing: $typing))
+            measure(
+                AgentComposer(
+                    browser: browser,
+                    agent: agent,
+                    full: full,
+                    onShowGuide: { showingGuide = true },
+                    onReconnect: { confirmingReconnect = true },
+                    typing: $typing
+                )
+            )
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
     }
@@ -175,7 +193,7 @@ struct AgentColumn: View {
                 HStack(spacing: 2) {
                     AgentHistoryButton(agent: agent, focus: browser.focusAgent)
                     Door(icon: "square.and.pencil", help: "New conversation") { agent.startOver(); browser.focusAgent() }
-                        .disabled(agent.entries.isEmpty && agent.draft.isEmpty)
+                        .disabled(agent.entries.isEmpty && !agent.hasDraft)
                     Menu {
                         Button {
                             withAnimation(Motion.gentle) {
@@ -272,44 +290,77 @@ struct AgentColumn: View {
                     .scrollIndicators(.never)
                 }
             } else {
-                ScrollView {
-                    measure(
-                        VStack(alignment: .leading, spacing: full ? 20 : 12) {
-                            if full, let first = agent.entries.first {
-                                Text(Self.day(first.at))
-                                    .font(.system(size: 12))
-                                    .foregroundStyle(Palette.muted)
-                                    .frame(maxWidth: .infinity)
-                                    .padding(.top, 6)
-                            }
-                            let turns = Turn.split(agent.entries)
-                            ForEach(turns) { turn in
-                                TurnView(
-                                    turn: turn,
-                                    // Working on it — or asked before graff was up,
-                                    // and waiting for it to be.
-                                    live: turn.id == turns.last?.id && (agent.phase == .working
-                                        || (agent.phase == .starting && turn.you != nil && turn.answer.isEmpty)),
-                                    full: full,
-                                    waiting: agent.asking.map { $0.isQuestion ? "Waiting for your answer…" : "Waiting for your approval…" },
-                                    visit: { url in browser.open(url, foreground: true) },
-                                    feedback: { browser.reportAgentProblem(kind: .answer) }
-                                )
+                ScrollViewReader { proxy in
+                    ZStack(alignment: .bottom) {
+                        ScrollView {
+                            measure(
+                                VStack(alignment: .leading, spacing: full ? 20 : 12) {
+                                    if full, let first = agent.entries.first {
+                                        Text(Self.day(first.at))
+                                            .font(.system(size: 12))
+                                            .foregroundStyle(Palette.muted)
+                                            .frame(maxWidth: .infinity)
+                                            .padding(.top, 6)
+                                    }
+                                    let turns = Turn.split(agent.entries)
+                                    let seed = agent.chatID?.uuidString ?? "draft"
+                                    ForEach(turns) { turn in
+                                        TurnView(
+                                            turn: turn,
+                                            // Working on it — or asked before graff was up,
+                                            // and waiting for it to be.
+                                            live: turn.id == turns.last?.id && (agent.phase == .working
+                                                || (agent.phase == .starting && turn.you != nil && turn.answer.isEmpty)),
+                                            full: full,
+                                            lastUpdate: agent.lastStreamAt,
+                                            chatSeed: seed,
+                                            waiting: agent.asking.map { $0.isQuestion ? "Waiting for your answer…" : "Waiting for your approval…" },
+                                            visit: { url in browser.open(url, foreground: true) },
+                                            feedback: { browser.reportAgentProblem(kind: .answer) }
+                                        )
+                                    }
+                                    Color.clear
+                                        .frame(height: 1)
+                                        .id("transcript-bottom")
+                                        .onAppear { scrolledUp = false }
+                                        .onDisappear { scrolledUp = true }
+                                }
+                                .padding(.horizontal, full ? 20 : 14)
+                                .padding(.vertical, 16)
+                            )
+                        }
+                        .defaultScrollAnchor(.bottom)
+                        .mask {
+                            VStack(spacing: 0) {
+                                if !full {
+                                    LinearGradient(colors: [.clear, .black], startPoint: .top, endPoint: .bottom)
+                                        .frame(height: 10)
+                                }
+                                Rectangle()
                             }
                         }
-                        .padding(.horizontal, full ? 20 : 14)
-                        .padding(.vertical, 16)
-                    )
-                }
-                .defaultScrollAnchor(.bottom)
-                .mask {
-                    VStack(spacing: 0) {
-                        if !full {
-                            LinearGradient(colors: [.clear, .black], startPoint: .top, endPoint: .bottom)
-                                .frame(height: 10)
+
+                        if scrolledUp {
+                            Button {
+                                withAnimation(Motion.snappy) {
+                                    proxy.scrollTo("transcript-bottom", anchor: .bottom)
+                                }
+                            } label: {
+                                Image(systemName: "arrow.down")
+                                    .font(.system(size: 11, weight: .semibold))
+                                    .foregroundStyle(Palette.ink)
+                                    .frame(width: 28, height: 28)
+                                    .background(Palette.ground, in: Circle())
+                                    .overlay(Circle().strokeBorder(Palette.hairline, lineWidth: 0.75))
+                                    .shadow(color: .black.opacity(0.16), radius: 8, y: 2)
+                            }
+                            .buttonStyle(TactilePress())
+                            .padding(.bottom, 8)
+                            .help("Jump to latest")
+                            .transition(.scale(scale: 0.9).combined(with: .opacity))
                         }
-                        Rectangle()
                     }
+                    .animation(Motion.quick, value: scrolledUp)
                 }
             }
         }
@@ -337,15 +388,22 @@ struct AgentColumn: View {
             default:
                 VStack(alignment: .leading, spacing: 6) {
                     ZStack {
-                        RoundedRectangle(cornerRadius: 9, style: .continuous)
-                            .fill(Palette.ink.opacity(0.055))
-                        RoundedRectangle(cornerRadius: 9, style: .continuous)
-                            .strokeBorder(Palette.ink.opacity(0.09), lineWidth: 0.75)
+                        RoundedRectangle(cornerRadius: 10, style: .continuous)
+                            .fill(
+                                LinearGradient(
+                                    colors: [Palette.ink.opacity(0.085), Palette.ink.opacity(0.025)],
+                                    startPoint: .topLeading,
+                                    endPoint: .bottomTrailing
+                                )
+                            )
+                        RoundedRectangle(cornerRadius: 10, style: .continuous)
+                            .strokeBorder(Palette.ink.opacity(0.11), lineWidth: 0.75)
                         Image(systemName: "sparkles")
                             .font(.system(size: 14, weight: .medium))
-                            .foregroundStyle(Palette.ink.opacity(0.85))
+                            .foregroundStyle(Palette.ink.opacity(0.88))
                     }
-                    .frame(width: 32, height: 32)
+                    .frame(width: 34, height: 34)
+                    .shadow(color: .black.opacity(0.05), radius: 4, y: 1.5)
                     .padding(.bottom, 4)
 
                     Text(hasPage ? "Ask about this page" : "How can I help?")
@@ -412,6 +470,7 @@ struct AgentColumn: View {
 struct ModelPicker: View {
     @ObservedObject var agent: Agent
     let current: Agent.Model
+    var openRequest: Int = 0
 
     @State private var open = false
     @State private var hovering = false
@@ -464,6 +523,9 @@ struct ModelPicker: View {
         )
         .popover(isPresented: $open, arrowEdge: .top) {
             NanoModelPopover(agent: agent, current: current) { open = false }
+        }
+        .onChange(of: openRequest) { _, _ in
+            if openRequest > 0 { open = true }
         }
     }
 }
@@ -1091,6 +1153,8 @@ private struct TurnView: View {
     let turn: Turn
     let live: Bool
     let full: Bool
+    let lastUpdate: Date
+    let chatSeed: String
     let waiting: String?
     let visit: (URL) -> Void
 
@@ -1104,6 +1168,7 @@ private struct TurnView: View {
             }
             if turn.work.contains(where: { $0.kind != .thought }) || live {
                 AgentActivity(entries: turn.work, started: turn.started, ended: turn.ended,
+                              lastUpdate: lastUpdate, chatSeed: chatSeed,
                               live: live, responding: !turn.answer.isEmpty, full: full, visit: visit, waiting: live ? waiting : nil)
             }
             ForEach(turn.answer) { entry in

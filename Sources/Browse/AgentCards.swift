@@ -291,46 +291,55 @@ struct DiffView: View {
 /// changed, or go.
 struct QueuePanel: View {
     @ObservedObject var agent: Agent
+    @ObservedObject private var composer: ComposerBuffer
     var full = false
+
+    init(agent: Agent, full: Bool = false) {
+        self.agent = agent
+        self._composer = ObservedObject(wrappedValue: agent.composer)
+        self.full = full
+    }
 
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
             Text(agent.queue.count == 1 ? "Queued" : "Queued · \(agent.queue.count)")
                 .font(.system(size: 11, weight: .medium))
                 .foregroundStyle(Palette.muted)
+                .monospacedDigit()
                 .padding(.horizontal, 12)
                 .padding(.top, 8)
                 .padding(.bottom, 2)
             ForEach(Array(agent.queue.enumerated()), id: \.element.id) { index, item in
-                Row(item: item, first: index == 0, agent: agent)
+                Row(item: item, first: index == 0, editing: composer.editingQueueID == item.id, agent: agent)
             }
         }
         .padding(.bottom, 4)
-        .background(Palette.ground, in: RoundedRectangle(cornerRadius: 16, style: .continuous))
-        .overlay(RoundedRectangle(cornerRadius: 16, style: .continuous).strokeBorder(Palette.hairline, lineWidth: 1))
+        .background(Palette.ground, in: RoundedRectangle(cornerRadius: 14, style: .continuous))
+        .overlay(RoundedRectangle(cornerRadius: 14, style: .continuous).strokeBorder(Palette.hairline, lineWidth: 0.75))
         .shadow(color: .black.opacity(0.05), radius: 8, y: 2)
     }
 
     private struct Row: View {
         let item: Agent.Queued
         let first: Bool
+        let editing: Bool
         let agent: Agent
 
         @State private var hovering = false
 
         var body: some View {
             HStack(spacing: 8) {
-                Image(systemName: first ? "arrow.turn.down.right" : "line.3.horizontal")
+                Image(systemName: editing ? "pencil" : (first ? "arrow.turn.down.right" : "line.3.horizontal"))
                     .font(.system(size: 9.5, weight: .medium))
-                    .foregroundStyle(Palette.muted)
+                    .foregroundStyle(editing ? Palette.accent : Palette.muted)
                     .frame(width: 14)
-                    .help(first ? "Goes next" : "Waits its turn")
-                Text(item.text)
-                    .font(.system(size: 12.5))
-                    .foregroundStyle(Palette.ink)
+                    .help(editing ? "Editing in composer" : (first ? "Goes next" : "Waits its turn"))
+                Text(editing ? "Editing in composer" : item.text)
+                    .font(.system(size: 12.5, weight: editing ? .medium : .regular))
+                    .foregroundStyle(editing ? Palette.accent : Palette.ink)
                     .lineLimit(1)
                     .truncationMode(.tail)
-                if let passage = item.passage {
+                if !editing, let passage = item.passage {
                     Image(systemName: "text.quote")
                         .font(.system(size: 10))
                         .foregroundStyle(Palette.muted)
@@ -338,16 +347,23 @@ struct QueuePanel: View {
                         .accessibilityLabel("Selected text from \(passage.title)")
                 }
                 Spacer(minLength: 6)
-                HStack(spacing: 2) {
-                    action("arrow.up", "Send now: stop the turn under way and send this") { agent.sendNow(item.id) }
-                    action("pencil", "Edit") { agent.edit(item.id) }
-                    action("xmark", "Remove") { agent.unqueue(item.id) }
+                if editing {
+                    HStack(spacing: 4) {
+                        action("checkmark", "Save to queue   ↩") { agent.commitQueueEdit() }
+                        action("xmark", "Cancel edit   Esc") { agent.cancelQueueEdit() }
+                    }
+                } else {
+                    HStack(spacing: 2) {
+                        action("arrow.up", "Send now (interrupt)   ⌘↩") { agent.sendNow(item.id) }
+                        action("pencil", "Edit in composer") { agent.edit(item.id) }
+                        action("xmark", "Remove") { agent.unqueue(item.id) }
+                    }
+                    .opacity(hovering ? 1 : 0.6)
                 }
-                .opacity(hovering ? 1 : 0.55)
             }
             .padding(.horizontal, 8)
             .frame(height: 36)
-            .background(RoundedRectangle(cornerRadius: 8, style: .continuous).fill(Palette.ink.opacity(hovering ? 0.045 : 0)))
+            .background(RoundedRectangle(cornerRadius: 8, style: .continuous).fill(editing ? Palette.ink.opacity(0.06) : Palette.ink.opacity(hovering ? 0.045 : 0)))
             .padding(.horizontal, 4)
             .onHover { hovering = $0 }
             .animation(Motion.quick, value: hovering)

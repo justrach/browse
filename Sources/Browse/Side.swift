@@ -75,6 +75,15 @@ struct SideBar: View {
                         .opacity(browser.active?.isBlank != false ? 0.3 : 1)
                 }
                 .frame(height: Metrics.strip)
+                .overlay(alignment: .bottom) {
+                    if prefs.compactTopBar {
+                        Rectangle()
+                            .fill(seam)
+                            .frame(height: 1)
+                            .padding(.horizontal, -10)
+                    }
+                }
+                .padding(.bottom, 6)
 
                 // The spaces side by side, as pages: two fingers sideways move
                 // the one on screen and the next one together, the next one
@@ -302,9 +311,7 @@ struct SideBar: View {
         let pinBlock = pinRows == 0 ? 0
             : CGFloat(pinRows) * pinHeight + CGFloat(pinRows - 1) * SideBar.pinGap + 10
         let loose = CGFloat(browser.tabs.count - pins) * (SideBar.row + SideBar.gap)
-        let chats = prefs.usesAgent ? CGFloat(min(SideChats.most, browser.agent.chats.all.count)) * (SideChats.row + SideBar.gap) : 0
-        let ask = prefs.usesAgent ? SideBar.row + SideBar.gap + chats : 0
-        return Metrics.strip + pinBlock + ask + SideBar.todayHeight + loose + 8
+        return Metrics.strip + pinBlock + SideBar.todayHeight + loose + 8
     }
 
     // MARK: - the pinned squares
@@ -511,13 +518,6 @@ struct SideBar: View {
     /// The loose tabs and the row that makes another, which scroll as one.
     private var rows: some View {
         VStack(alignment: .leading, spacing: 0) {
-            // Codegraff's own tab, ahead of the others (see AskTab).
-            if prefs.usesAgent {
-                AskTab(browser: browser, pill: pill, title: "Ask Codegraff")
-                    .frame(height: SideBar.row)
-                    .padding(.bottom, SideBar.gap)
-                SideChats(browser: browser, agent: browser.agent, chats: browser.agent.chats)
-            }
             today(loose: !looseTabs.isEmpty)
             loose
         }
@@ -528,29 +528,43 @@ struct SideBar: View {
 
     private static let todayHeight: CGFloat = 26
 
-    /// The line between what's kept and what's today's: a new tab at its
-    /// end, and — while there are any — the loose tabs cleared in one go,
-    /// as Arc's Clear does. Pinned tiles and Codegraff stay; ⌘⇧T brings
-    /// what went back.
+    /// Clean section header above loose tabs: space name (or "Tabs"), New Tab
+    /// button, and Clear loose tabs. Shows a subtle rule only when pinned tiles
+    /// sit above it so there's never a stray line under the title bar.
     private func today(loose: Bool) -> some View {
-        HStack(spacing: 2) {
-            Rectangle()
-                .fill(seam)
-                .frame(height: 1)
-                .padding(.leading, 10)
-                .padding(.trailing, 6)
-            Nib(icon: "plus", help: "New Tab   ⌘T") { browser.newTab() }
-            if loose {
-                Nib(icon: "trash", help: "Close Tabs That Aren't Pinned") { browser.clearLoose() }
-                    .transition(.opacity)
+        let label: String = {
+            if prefs.usesSpaces, let space = browser.spaces.first(where: { $0.id == browser.spaceID }), !space.name.isEmpty {
+                return space.name
             }
+            return "Tabs"
+        }()
+        return VStack(spacing: 4) {
+            if browser.pinnedCount > 0 {
+                Rectangle()
+                    .fill(seam)
+                    .frame(height: 1)
+                    .padding(.horizontal, 6)
+            }
+            HStack(spacing: 2) {
+                Text(label)
+                    .font(.system(size: 11, weight: .medium))
+                    .foregroundStyle(Palette.muted.opacity(0.75))
+                    .lineLimit(1)
+                    .padding(.leading, 10)
+                Spacer(minLength: 4)
+                Nib(icon: "plus", help: "New Tab   ⌘T") { browser.newTab() }
+                if loose {
+                    Nib(icon: "trash", help: "Close Tabs That Aren't Pinned") { browser.clearLoose() }
+                        .transition(.opacity)
+                }
+            }
+            .frame(height: SideBar.todayHeight)
         }
-        .frame(height: SideBar.todayHeight)
         .padding(.bottom, SideBar.gap)
         .animation(Motion.quick, value: loose)
     }
 
-    /// One small door at the bottom: the settings.
+    /// Quiet utility row anchored at the bottom of the sidebar.
     private var foot: some View {
         HStack(spacing: 2) {
             if browser.prefs.usesSpaces { SpaceDot(browser: browser) }
@@ -559,7 +573,9 @@ struct SideBar: View {
                 .popover(isPresented: $browser.bookmarksOpen, arrowEdge: .trailing) {
                     BookmarksDropdown(browser: browser, bookmarks: browser.bookmarks)
                 }
+            Door(icon: "clock", help: "History   ⌘Y") { browser.recalling = true }
             Spacer(minLength: 0)
+            Door(icon: "gearshape", help: "Settings   ⌘,") { browser.tuning = true }
         }
         .padding(.horizontal, 10)
         .padding(.bottom, 10)
@@ -886,74 +902,6 @@ struct Speaker: View {
         .buttonStyle(.plain)
         .onHover { hovering = $0 }
         .help(tab.muted ? "Unmute Tab" : "Mute Tab")
-        .animation(Motion.quick, value: hovering)
-    }
-}
-
-/// The latest chats with Codegraff, under its row, pinned ones first: one
-/// pressed puts that conversation back on the stage, picked up with graff
-/// where it was left. Right-click renames, pins or deletes it; the Ask page
-/// has them all, and a search.
-private struct SideChats: View {
-    @ObservedObject var browser: Browser
-    @ObservedObject var agent: Agent
-    @ObservedObject var chats: Chats
-
-    @State private var renaming: Chat?
-
-    static let most = 4
-    static let row: CGFloat = 28
-
-    var body: some View {
-        VStack(spacing: SideBar.gap) {
-            ForEach(Array(chats.ordered.prefix(Self.most))) { chat in
-                ChatRow(chat: chat, live: browser.talkOnStage && agent.chatID == chat.id) {
-                    browser.takeStage()
-                    agent.resume(chat)
-                }
-                .contextMenu { ChatMenu(chat: chat, agent: agent) { renaming = chat } }
-            }
-        }
-        .padding(.bottom, chats.all.isEmpty ? 0 : SideBar.gap)
-        .modifier(ChatRenamer(chats: chats, chat: $renaming))
-    }
-}
-
-/// One chat, as a line tucked under Codegraff's. The one on screen is
-/// marked quietly: the raised glass is Codegraff's own row's.
-private struct ChatRow: View {
-    let chat: Chat
-    let live: Bool
-    let open: () -> Void
-
-    @State private var hovering = false
-
-    var body: some View {
-        Button(action: open) {
-            HStack(spacing: 8) {
-                Image(systemName: chat.isPinned ? "pin.fill" : "bubble.left")
-                    .font(.system(size: 9.5))
-                    .foregroundStyle(Palette.muted)
-                    .frame(width: 14)
-                Text(chat.title.isEmpty ? "Untitled" : chat.title)
-                    .font(.system(size: 12.5))
-                    .lineLimit(1)
-                    .truncationMode(.tail)
-                    .foregroundStyle(live || hovering ? Palette.ink : Palette.ink.opacity(0.66))
-                Spacer(minLength: 0)
-            }
-            .padding(.leading, 22)
-            .padding(.trailing, 10)
-            .frame(height: SideChats.row)
-            .background(
-                RoundedRectangle(cornerRadius: 8, style: .continuous)
-                    .fill(Palette.ink.opacity(live ? 0.07 : hovering ? 0.045 : 0))
-            )
-            .contentShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
-        }
-        .buttonStyle(.plain)
-        .onHover { hovering = $0 }
-        .help(chat.title)
         .animation(Motion.quick, value: hovering)
     }
 }

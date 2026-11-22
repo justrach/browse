@@ -29,9 +29,12 @@ struct AsideBar: View {
 
     var body: some View {
         let agentOpen = browser.consulting && browser.prefs.usesAgent
+        let splitOpen = browser.shownSplit != nil
+        let isDark = tint?.dark ?? (scheme == .dark)
         let toggleKey = shortcuts.key(for: .toggleAgent)?.display
         let foldKey = shortcuts.key(for: .toggleFold)?.display
         let passwordsKey = shortcuts.key(for: .passwords)?.display
+        let splitKey = shortcuts.key(for: .toggleSplit)?.display
 
         ZStack(alignment: .leading) {
             // Draggable title-bar surface behind the empty middle of the bar.
@@ -77,6 +80,14 @@ struct AsideBar: View {
                 // Right-side utility doors + top-right Ask pill (always visible, never clipped).
                 HStack(spacing: 4) {
                     Door(
+                        icon: "rectangle.split.2x1",
+                        on: splitOpen,
+                        help: (splitOpen ? "Leave Split View" : "Split View") + (splitKey.map { "   \($0)" } ?? "")
+                    ) {
+                        browser.toggleSplit()
+                    }
+
+                    Door(
                         icon: "key",
                         help: "Passwords" + (passwordsKey.map { "   \($0)" } ?? "")
                     ) {
@@ -90,7 +101,7 @@ struct AsideBar: View {
                             HStack(spacing: 5) {
                                 Image(systemName: "sparkle")
                                     .font(.system(size: 10.5, weight: .semibold))
-                                    .foregroundStyle(agentOpen ? Palette.accent : Palette.ink.opacity(0.82))
+                                    .foregroundStyle(agentOpen ? Palette.accent : Palette.ink.opacity(0.84))
                                 Text("Ask")
                                     .font(.system(size: 12.5, weight: .medium))
                                     .foregroundStyle(agentOpen ? Palette.accent : Palette.ink)
@@ -105,15 +116,20 @@ struct AsideBar: View {
                                 Capsule()
                                     .fill(agentOpen
                                         ? Palette.accent.opacity(askHover ? 0.16 : 0.11)
-                                        : (askHover ? Palette.hover : Palette.ink.opacity(0.055)))
+                                        : (isDark
+                                            ? Color.white.opacity(askHover ? 0.12 : 0.075)
+                                            : Color.white.opacity(askHover ? 0.96 : 0.78)))
                             )
                             .overlay(
                                 Capsule()
                                     .strokeBorder(
-                                        agentOpen ? Palette.accent.opacity(0.28) : Palette.ink.opacity(0.11),
+                                        agentOpen
+                                            ? Palette.accent.opacity(0.30)
+                                            : (isDark ? Color.white.opacity(0.12) : Color.black.opacity(0.09)),
                                         lineWidth: 0.75
                                     )
                             )
+                            .shadow(color: .black.opacity(agentOpen ? 0 : (isDark ? 0.18 : 0.05)), radius: 3, y: 1)
                             .contentShape(Capsule())
                         }
                         .buttonStyle(TactilePress())
@@ -162,8 +178,11 @@ private struct AddressSummaryButton: View {
         let title = tab.title.trimmingCharacters(in: .whitespacesAndNewlines)
 
         Button { browser.edit() } label: {
-            HStack(spacing: 8) {
+            HStack(spacing: 7) {
                 if tab.isBlank {
+                    Image(systemName: "magnifyingglass")
+                        .font(.system(size: 10.5, weight: .medium))
+                        .foregroundStyle(Palette.muted.opacity(0.8))
                     Text("Search or enter website name")
                         .font(.system(size: 12.5))
                         .foregroundStyle(Palette.muted)
@@ -173,7 +192,10 @@ private struct AddressSummaryButton: View {
                         ProgressView()
                             .controlSize(.mini)
                             .scaleEffect(0.65)
-                            .frame(width: 12, height: 12)
+                            .frame(width: 13, height: 13)
+                    } else {
+                        Mark(icon: tab.icon, letter: tab.monogram, size: 13)
+                            .opacity(0.92)
                     }
                     Text(host)
                         .font(.system(size: 12.5, weight: .medium))
@@ -183,7 +205,7 @@ private struct AddressSummaryButton: View {
                     if !title.isEmpty && title != host {
                         Rectangle()
                             .fill(Palette.ink.opacity(0.16))
-                            .frame(width: 1, height: 12)
+                            .frame(width: 1, height: 11)
                         Text(title)
                             .font(.system(size: 12.5))
                             .foregroundStyle(Palette.muted)
@@ -193,13 +215,17 @@ private struct AddressSummaryButton: View {
                     }
                 }
             }
-            .padding(.horizontal, 9)
-            .padding(.vertical, 5)
+            .padding(.horizontal, 10)
+            .frame(height: 28)
             .background(
-                RoundedRectangle(cornerRadius: 8, style: .continuous)
-                    .fill(hovering ? Palette.ink.opacity(0.06) : .clear)
+                RoundedRectangle(cornerRadius: 8.5, style: .continuous)
+                    .fill(Palette.ink.opacity(hovering ? 0.075 : 0.038))
             )
-            .contentShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
+            .overlay(
+                RoundedRectangle(cornerRadius: 8.5, style: .continuous)
+                    .strokeBorder(Palette.ink.opacity(hovering ? 0.10 : 0.045), lineWidth: 0.75)
+            )
+            .contentShape(RoundedRectangle(cornerRadius: 8.5, style: .continuous))
         }
         .buttonStyle(.plain)
         .onHover { hovering = $0 }
