@@ -388,15 +388,22 @@ struct AgentColumn: View {
             default:
                 VStack(alignment: .leading, spacing: 6) {
                     ZStack {
-                        RoundedRectangle(cornerRadius: 9, style: .continuous)
-                            .fill(Palette.ink.opacity(0.055))
-                        RoundedRectangle(cornerRadius: 9, style: .continuous)
-                            .strokeBorder(Palette.ink.opacity(0.09), lineWidth: 0.75)
+                        RoundedRectangle(cornerRadius: 10, style: .continuous)
+                            .fill(
+                                LinearGradient(
+                                    colors: [Palette.ink.opacity(0.085), Palette.ink.opacity(0.025)],
+                                    startPoint: .topLeading,
+                                    endPoint: .bottomTrailing
+                                )
+                            )
+                        RoundedRectangle(cornerRadius: 10, style: .continuous)
+                            .strokeBorder(Palette.ink.opacity(0.11), lineWidth: 0.75)
                         Image(systemName: "sparkles")
                             .font(.system(size: 14, weight: .medium))
-                            .foregroundStyle(Palette.ink.opacity(0.85))
+                            .foregroundStyle(Palette.ink.opacity(0.88))
                     }
-                    .frame(width: 32, height: 32)
+                    .frame(width: 34, height: 34)
+                    .shadow(color: .black.opacity(0.05), radius: 4, y: 1.5)
                     .padding(.bottom, 4)
 
                     Text(hasPage ? "Ask about this page" : "How can I help?")

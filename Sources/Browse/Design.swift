@@ -289,35 +289,34 @@ struct Shake: GeometryEffect {
     }
 }
 
-/// What's picked, raised off the column: a lens of Liquid Glass where the Mac
-/// has it (macOS 26 on), the theme's wash where it doesn't. A thin light
-/// edge along the top and a soft shadow beneath are what make it read as
-/// lifted rather than as a grey patch.
+/// What's picked, raised off the column: a crisp, tactile elevated pill with
+/// clean contrast in both Light and Dark appearances — never a hollow wireframe.
 struct Raised: View {
     let corner: CGFloat
+    @Environment(\.colorScheme) private var scheme
 
     var body: some View {
         let shape = RoundedRectangle(cornerRadius: corner, style: .continuous)
-        Group {
-            // Glass is in the macOS 26 SDK (Swift 6.2); an older Xcode builds
-            // the wash alone.
-            #if compiler(>=6.2)
-            if #available(macOS 26, *) {
-                Color.clear.glassEffect(.regular.interactive(), in: shape)
-            } else {
-                shape.fill(Palette.wash)
-            }
-            #else
-            shape.fill(Palette.wash)
-            #endif
-        }
-        // Light catching the top edge and fading down it, as on a pane of
-        // glass lit from above.
-        .overlay(shape.strokeBorder(
-            LinearGradient(colors: [.white.opacity(0.65), .white.opacity(0.12)], startPoint: .top, endPoint: .bottom),
-            lineWidth: 0.75
-        ))
-        .shadow(color: .black.opacity(0.10), radius: 4, y: 1.5)
+        let dark = scheme == .dark
+        shape
+            .fill(dark ? Color.white.opacity(0.10) : Color.white.opacity(0.92))
+            .overlay(
+                shape.strokeBorder(
+                    LinearGradient(
+                        colors: dark
+                            ? [.white.opacity(0.18), .white.opacity(0.05)]
+                            : [.black.opacity(0.06), .black.opacity(0.09)],
+                        startPoint: .top,
+                        endPoint: .bottom
+                    ),
+                    lineWidth: 0.75
+                )
+            )
+            .shadow(
+                color: .black.opacity(dark ? 0.22 : 0.06),
+                radius: dark ? 4 : 3,
+                y: 1
+            )
     }
 }
 

@@ -374,36 +374,46 @@ private struct CompactStarterRow: View {
     let disabled: Bool
     let action: () -> Void
 
+    @Environment(\.colorScheme) private var scheme
     @State private var hovering = false
 
     var body: some View {
+        let dark = scheme == .dark
         Button(action: action) {
             HStack(spacing: 9) {
                 Image(systemName: icon)
                     .font(.system(size: 12, weight: .medium))
-                    .foregroundStyle(hovering ? Palette.ink.opacity(0.85) : Palette.muted)
+                    .foregroundStyle(hovering ? Palette.ink.opacity(0.88) : Palette.muted)
                     .frame(width: 16)
                 Text(title)
                     .font(.system(size: 12.5, weight: .medium))
-                    .foregroundStyle(hovering ? Palette.ink : Palette.ink.opacity(0.82))
+                    .foregroundStyle(hovering ? Palette.ink : Palette.ink.opacity(0.84))
                     .lineLimit(1)
                 Spacer(minLength: 4)
                 Image(systemName: "arrow.up.right")
                     .font(.system(size: 9.5, weight: .semibold))
-                    .foregroundStyle(Palette.muted.opacity(hovering ? 0.8 : 0.25))
+                    .foregroundStyle(Palette.muted.opacity(hovering ? 0.85 : 0.25))
             }
-            .padding(.horizontal, 11)
-            .padding(.vertical, 9)
+            .padding(.horizontal, 12)
+            .padding(.vertical, 9.5)
             .frame(maxWidth: .infinity, alignment: .leading)
             .background(
-                RoundedRectangle(cornerRadius: 10, style: .continuous)
-                    .fill(Palette.ink.opacity(hovering ? 0.075 : 0.03))
+                RoundedRectangle(cornerRadius: 11, style: .continuous)
+                    .fill(dark
+                        ? Color.white.opacity(hovering ? 0.08 : 0.038)
+                        : Color.white.opacity(hovering ? 0.98 : 0.72))
             )
             .overlay(
-                RoundedRectangle(cornerRadius: 10, style: .continuous)
-                    .strokeBorder(Palette.ink.opacity(hovering ? 0.12 : 0.055), lineWidth: 0.75)
+                RoundedRectangle(cornerRadius: 11, style: .continuous)
+                    .strokeBorder(
+                        dark
+                            ? Color.white.opacity(hovering ? 0.14 : 0.07)
+                            : Color.black.opacity(hovering ? 0.11 : 0.065),
+                        lineWidth: 0.75
+                    )
             )
-            .contentShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
+            .shadow(color: .black.opacity(dark ? 0 : (hovering ? 0.05 : 0.025)), radius: hovering ? 5 : 2, y: 1)
+            .contentShape(RoundedRectangle(cornerRadius: 11, style: .continuous))
         }
         .buttonStyle(TactilePress())
         .disabled(disabled)
