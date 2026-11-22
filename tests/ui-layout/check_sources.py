@@ -165,6 +165,20 @@ check(
     "graff composer supports image pasting (⌘V) and Standard / Fast / Ultra Fast speed modes",
 )
 
+# 13. Heavy SPA (X/Twitter) performance guardrails.
+forms_src = read("Sources/Browse/Forms.swift")
+swipe_src = read("Sources/Browse/Swipe.swift")
+shield_src = read("Sources/Browse/Shield.swift")
+check(
+    "function hasPasswordInput()" in forms_src
+    and 'querySelectorAll(\'input[type="password"]\')' not in forms_src,
+    "Forms.swift scans cached liveInputs instead of full-DOM querySelectorAll on every mutation/click",
+)
+check(
+    "pruneSlowGlobalCosmetics" in shield_src and "if (can) {" in swipe_src,
+    "Shield prunes unindexed global cosmetic selectors and Swipe avoids layout reads on non-scrollable divs",
+)
+
 if failures:
     print(f"\n{len(failures)} source guardrail check(s) failed.", file=sys.stderr)
     sys.exit(1)

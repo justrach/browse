@@ -85,30 +85,49 @@ enum Swipe {
         return effective !== 'hidden' && effective !== 'clip';
       }
 
+      var lastTarget = null, lastDir = 0, lastAt = 0, lastTaken = false;
+
       function taken(e) {
+        var now = Date.now();
+        var dir = e.deltaX > 0 ? 1 : -1;
+        if (e.target === lastTarget && dir === lastDir && now - lastAt < 60) {
+          return lastTaken;
+        }
         edges = [];
         var el = e.target;
         if (el && el.nodeType !== 1) el = el.parentElement;
+        var hit = false;
         while (el) {
           var root = el === document.documentElement || el === document.body;
           var can, left, max;
           if (root) {
             can = rootCanScroll();
-            left = window.scrollX || 0;
-            max = document.documentElement.scrollWidth - window.innerWidth;
+            if (can) {
+              left = window.scrollX || 0;
+              max = document.documentElement.scrollWidth - window.innerWidth;
+            }
           } else {
             var ox = getComputedStyle(el).overflowX;
             can = ox === 'auto' || ox === 'scroll';
-            left = el.scrollLeft;
-            max = el.scrollWidth - el.clientWidth;
+            // Only read scrollWidth/clientWidth when the element can actually
+            // scroll horizontally — avoids forcing synchronous layout on every
+            // non-scrollable React wrapper div.
+            if (can) {
+              left = el.scrollLeft;
+              max = el.scrollWidth - el.clientWidth;
+            }
           }
           if (can && max > 1) {
-            if (e.deltaX > 0 ? left < max - 1 : left > 1) return true;
+            if (e.deltaX > 0 ? left < max - 1 : left > 1) { hit = true; break; }
             edges.push(root ? document.documentElement : el);
           }
           el = el.parentElement;
         }
-        return false;
+        lastTarget = e.target;
+        lastDir = dir;
+        lastAt = now;
+        lastTaken = hit;
+        return hit;
       }
 
       function resting(list) {
@@ -124,7 +143,7 @@ enum Swipe {
       }
 
       window.addEventListener('wheel', function (e) {
-        if (Math.abs(e.deltaX) <= Math.abs(e.deltaY)) return;
+        if (Math.abs(e.deltaX) < 3 || Math.abs(e.deltaX) <= Math.abs(e.deltaY)) return;
         if (taken(e) || !resting(edges)) return say(true);
         // A whiteboard or a map pans with its own wheel handler and nothing
         // under it has overflow to scroll. Its preventDefault is its claim,

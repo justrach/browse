@@ -200,7 +200,15 @@ final class Shield: ObservableObject {
                 .trimmingCharacters(in: .whitespacesAndNewlines),
               !version.isEmpty
         else { return }
-        let wanted = ["network", "cosmetic"].map { ($0, "shield-\($0)-\(version)") }
+        // v2 cosmetic list drops ~490 unindexed global attribute/combinator
+        // selectors ([class^=...], [data-testid^=...], [href^=...]) that force
+        // WebKit's StyleResolver to scan every mutated DOM node on heavy SPAs
+        // like X/Twitter while keeping all domain-scoped rules and fast O(1)
+        // hash-indexed #id/.class global rules.
+        let wanted = [
+            ("network", "shield-network-\(version)"),
+            ("cosmetic", "shield-cosmetic-v2-\(version)"),
+        ]
 
         store.getAvailableContentRuleListIdentifiers { kept in
             for old in kept ?? [] where old.hasPrefix("shield-") && !wanted.contains(where: { $0.1 == old }) {
@@ -218,7 +226,8 @@ final class Shield: ObservableObject {
                     Task.detached(priority: .utility) {
                         guard let packed = try? Data(contentsOf: file),
                               let json = try? (packed as NSData).decompressed(using: .lzma) as Data,
-                              let text = String(data: json, encoding: .utf8)
+                              let text = (name == "cosmetic" ? Shield.pruneSlowGlobalCosmetics(json) : nil)
+                                  ?? String(data: json, encoding: .utf8)
                         else {
                             NSLog("shield: couldn't open \(file.lastPathComponent)")
                             return
@@ -238,6 +247,24 @@ final class Shield: ObservableObject {
                 }
             }
         }
+    }
+
+    /// Drops global (non-`if-domain`) cosmetic CSS rules that use unindexed
+    /// attribute selectors, combinators, or pseudo-selectors (`[`, ` `, `>`,
+    /// `+`, `~`, `:`). Keeps all domain-scoped rules and O(1) hash-indexed
+    /// global `#id`/`.class` rules so heavy SPAs like X/Twitter stay fast.
+    private nonisolated static func pruneSlowGlobalCosmetics(_ data: Data) -> String? {
+        guard let rules = try? JSONSerialization.jsonObject(with: data) as? [[String: Any]] else { return nil }
+        let slowChars: Set<Character> = ["[", " ", ">", "+", "~", ":"]
+        let lean = rules.filter { rule in
+            let trigger = rule["trigger"] as? [String: Any]
+            if trigger?["if-domain"] != nil { return true }
+            guard let action = rule["action"] as? [String: Any],
+                  let selector = action["selector"] as? String else { return true }
+            return !selector.contains { slowChars.contains($0) }
+        }
+        guard let encoded = try? JSONSerialization.data(withJSONObject: lean) else { return nil }
+        return String(data: encoded, encoding: .utf8)
     }
 
     /// A list ready: on every page already open that wants blocking.
