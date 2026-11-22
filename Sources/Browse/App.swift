@@ -479,24 +479,29 @@ struct ContentView: View {
         } else if let tab = browser.active {
             if arcFrame {
                 let shape = RoundedRectangle(cornerRadius: Split.corner, style: .continuous)
-                pane(tab, corner: Split.corner)
-                    .background(Palette.ground, in: shape)
-                    .clipShape(shape)
-                    .overlay(
-                        shape.strokeBorder(
+                ZStack {
+                    shape
+                        .fill(Palette.ground)
+                        .shadow(
+                            color: .black.opacity(darkCanvas ? 0.26 : 0.06),
+                            radius: darkCanvas ? 8 : 5,
+                            y: 1.5
+                        )
+                    // StageView rounds its own CALayer natively; avoid SwiftUI
+                    // .clipShape/.shadow directly on the NSViewRepresentable so
+                    // AppKit never promotes WKWebView above the Omnibox overlay.
+                    pane(tab, corner: Split.corner)
+                    shape
+                        .strokeBorder(
                             darkCanvas ? Color.white.opacity(0.095) : Color.black.opacity(0.075),
                             lineWidth: 0.75
                         )
-                    )
-                    .shadow(
-                        color: .black.opacity(darkCanvas ? 0.26 : 0.06),
-                        radius: darkCanvas ? 8 : 5,
-                        y: 1.5
-                    )
-                    .padding(.leading, sidebar ? 0 : Split.gap)
-                    .padding(.trailing, fullHeightAgent ? 0 : Split.gap)
-                    .padding(.top, asideBarShown ? 0 : Split.gap)
-                    .padding(.bottom, Split.gap)
+                        .allowsHitTesting(false)
+                }
+                .padding(.leading, sidebar ? 0 : Split.gap)
+                .padding(.trailing, fullHeightAgent ? 0 : Split.gap)
+                .padding(.top, asideBarShown ? 0 : Split.gap)
+                .padding(.bottom, Split.gap)
             } else {
                 pane(tab)
             }
