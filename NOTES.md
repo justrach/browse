@@ -1,3 +1,5 @@
+Single-letter visited domain autocomplete in the Omnibox (x → x.com) with visited-first exact host ranking, plus hardened macOS Keychain password vault (device-only accessibility, fail-closed Touch ID auth, 0o700 zero-wiped import snapshots, and 45s clipboard auto-clear).
+
 Redesigned 5-step onboarding tour, automatic macOS Full Disk Access list registration, ⌘; / ⇧⌘; superseding macOS spellcheck and web page handlers, capsule pill layout fixes, and automated UI layout regression tests.
 
 Smarter top bar with clickable Site Info/shield popover, one-click Zoom reset pill, Reading Mode badge, and Tab Overview button; Omnibox bookmarks, favicons, and open-tab badges; Find on Page live match counter and ⇧↩ stepping; Little-Arc header bar on Shift-click Peek with Open in Split; cross-Space ⌘K and ⇧⌘\ tab search with Space badges; live sidebar Downloads indicator; and graff/browse copy cleanup.

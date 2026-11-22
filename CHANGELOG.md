@@ -6,6 +6,8 @@ All notable changes to **browse** are documented here, newest first.
 
 ## Unreleased
 
+## 1.8.3 — 22 November 2026
+
 ### Added
 
 - **Single-letter visited domain autocomplete (`x` → `x.com`)**: typing a single character in the Omnibox now inline-completes to visited or bookmarked sites whose host starts with that letter (e.g. typing `x` + `↩` goes straight to `x.com`), with exact host-label matches decisively outranking longer prefixes and visited host matches ranking ahead of noisy bookmark title/path substrings.
