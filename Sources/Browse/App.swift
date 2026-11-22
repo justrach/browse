@@ -332,6 +332,7 @@ struct ContentView: View {
     /// Each theme put on (Theme.swift). What the window draws is built again
     /// once for it — the pages and the window's own set-up are kept.
     @ObservedObject private var themes = ThemeClock.shared
+    @Environment(\.colorScheme) private var scheme
 
     @State private var keys: Any?
     @State private var window: NSWindow?
@@ -342,13 +343,41 @@ struct ContentView: View {
     @State private var roomTicket = 0
 
 
-    /// The window: room at the top, one stage for the page, and the row when
-    /// there is one.
+    /// True when the Arc/Dia-style unified frosted frame wraps the floating
+    /// rounded page card (sidebar or compact top bar active, not fullscreen video).
+    private var arcFrame: Bool {
+        (sidebar || asideBarShown) && browser.active?.immersed != true
+    }
+
+    private var windowTint: PageTint? {
+        browser.prefs.sideTint ? PageTint(browser.activeHue, over: scheme) : nil
+    }
+
+    private var darkCanvas: Bool {
+        windowTint?.dark ?? (scheme == .dark)
+    }
+
+    /// The window: unified frosted canvas, floating rounded stage card, and
+    /// seamless sidebar/top-bar chrome.
     private var window_: some View {
         ZStack(alignment: .topLeading) {
-            // Black while a page has the screen, so the frame of our own window
-            // that survives the transition is not a white band across the top.
-            (browser.active?.immersed == true ? Color.black : Palette.ground)
+            // Black while a page has the screen; unified frosted glass canvas
+            // in Arc/Dia framed mode; plain ground in classic top-tab mode.
+            if browser.active?.immersed == true {
+                Color.black
+            } else if arcFrame {
+                ZStack {
+                    SideGlass(dark: windowTint?.dark)
+                    if let tint = windowTint {
+                        tint.wash
+                    } else {
+                        Palette.ground.opacity(scheme == .dark ? 0.42 : 0.48)
+                    }
+                }
+                .animation(Motion.glide, value: windowTint)
+            } else {
+                Palette.ground
+            }
 
             // One stage, always. It starts beside the column and under the
             // strip, not behind them — a page sliding beneath floating chrome
@@ -368,7 +397,7 @@ struct ContentView: View {
             // height, so the traffic lights sit in its own corner rather than
             // over the page.
             if sidebar {
-                SideBar(browser: browser, prefs: browser.prefs)
+                SideBar(browser: browser, prefs: browser.prefs, floating: false)
                     .frame(maxHeight: .infinity, alignment: .top)
                     .transition(.move(edge: .leading))
             }
@@ -379,7 +408,7 @@ struct ContentView: View {
             }
 
             if asideBarShown {
-                AsideBar(browser: browser, sidebarOpen: sidebar)
+                AsideBar(browser: browser, sidebarOpen: sidebar, framed: arcFrame)
                     .padding(.leading, chrome.width)
                     .padding(.trailing, agentTrailing)
                     .transition(.opacity)
@@ -443,12 +472,39 @@ struct ContentView: View {
         if let pair = browser.shownSplit {
             // Two tabs side by side (Split.swift). StageView lives directly in
             // AppKit; SwiftUI only supplies overlays for Find, links and forms.
-            SplitStage(browser: browser, left: pair.left, right: pair.right) { tab in
+            SplitStage(browser: browser, left: pair.left, right: pair.right, inUnifiedCanvas: arcFrame) { tab in
                 paneOverlays(tab)
             }
             .transition(.opacity)
         } else if let tab = browser.active {
-            pane(tab)
+            if arcFrame {
+                let shape = RoundedRectangle(cornerRadius: Split.corner, style: .continuous)
+                ZStack {
+                    shape
+                        .fill(Palette.ground)
+                        .shadow(
+                            color: .black.opacity(darkCanvas ? 0.26 : 0.06),
+                            radius: darkCanvas ? 8 : 5,
+                            y: 1.5
+                        )
+                    // StageView rounds its own CALayer natively; avoid SwiftUI
+                    // .clipShape/.shadow directly on the NSViewRepresentable so
+                    // AppKit never promotes WKWebView above the Omnibox overlay.
+                    pane(tab, corner: Split.corner)
+                    shape
+                        .strokeBorder(
+                            darkCanvas ? Color.white.opacity(0.095) : Color.black.opacity(0.075),
+                            lineWidth: 0.75
+                        )
+                        .allowsHitTesting(false)
+                }
+                .padding(.leading, sidebar ? 0 : Split.gap)
+                .padding(.trailing, fullHeightAgent ? 0 : Split.gap)
+                .padding(.top, asideBarShown ? 0 : Split.gap)
+                .padding(.bottom, Split.gap)
+            } else {
+                pane(tab)
+            }
         } else {
             Palette.ground
         }
@@ -582,10 +638,11 @@ struct ContentView: View {
         }
     }
 
-    /// In a split, the field stands over the half in front — the empty
-    /// side ⌘D just opened, say — not across both pages.
+    /// In a split, the field stands over the half in front — unless `⌘T` /
+    /// `+ New Tab` raised the Arc-style Command Bar, which centres cleanly over
+    /// the whole stage.
     private var otherHalf: (leading: CGFloat, trailing: CGFloat) {
-        guard let pair = browser.shownSplit, let split = browser.split else { return (0, 0) }
+        guard !browser.openingNewTab, let pair = browser.shownSplit, let split = browser.split else { return (0, 0) }
         let width = browser.stageFrame.width
         let usable = max(1, width - Split.gap * 3)
         let left = Split.gap * 1.5 + usable * min(0.82, max(0.18, split.fraction))

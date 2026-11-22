@@ -15,6 +15,9 @@ struct AsideBar: View {
     @Environment(\.colorScheme) private var scheme
     /// True when the left tab sidebar is visible beside this bar.
     let sidebarOpen: Bool
+    /// True when sitting inside the unified Arc/Dia frosted window canvas
+    /// above a floating rounded page card (transparent ground, no bottom seam).
+    var framed: Bool = false
 
     @State private var addressHover = false
     @State private var askHover = false
@@ -24,7 +27,10 @@ struct AsideBar: View {
     }
 
     private var seam: Color {
-        tint.map { $0.dark ? Color.white.opacity(0.10) : Color.black.opacity(0.08) } ?? Palette.hairline
+        if let tint {
+            return tint.dark ? Color.white.opacity(0.09) : Color.black.opacity(0.065)
+        }
+        return scheme == .dark ? Color.white.opacity(0.08) : Color.black.opacity(0.065)
     }
 
     var body: some View {
@@ -41,18 +47,19 @@ struct AsideBar: View {
             DragStrip(onDoubleClick: browser.newTab)
 
             HStack(spacing: 6) {
-                // Toggle left tab sidebar (⌘S).
-                Door(
-                    icon: "sidebar.left",
-                    help: (sidebarOpen ? "Hide Sidebar" : "Show Sidebar")
-                        + (foldKey.map { "   \($0)" } ?? "")
-                ) {
-                    browser.toggleFold()
-                }
-                .fixedSize()
-
-                // When the sidebar is folded, show Back / Forward / Reload here.
+                // When the sidebar is folded, show the Show Sidebar button and
+                // available nav controls (Back / Forward / Reload) beside the
+                // traffic lights. When open, the sidebar holds them cleanly.
                 if !sidebarOpen {
+                    Door(
+                        icon: "sidebar.left",
+                        help: "Show Sidebar" + (foldKey.map { "   \($0)" } ?? "")
+                    ) {
+                        browser.toggleFold()
+                    }
+                    .fixedSize()
+                    .transition(.opacity)
+
                     Helm(browser: browser)
                         .fixedSize()
                         .transition(.opacity)
@@ -61,7 +68,7 @@ struct AsideBar: View {
                 // Domain | Page Title — shrinks gracefully so right-side controls never clip.
                 Group {
                     if let tab = browser.active {
-                        AddressSummaryButton(tab: tab, browser: browser, hovering: $addressHover)
+                        AddressSummaryButton(tab: tab, browser: browser, isDark: isDark, hovering: $addressHover)
                     } else {
                         Button { browser.edit() } label: {
                             Text("Search or enter website name")
@@ -140,22 +147,26 @@ struct AsideBar: View {
                 }
                 .fixedSize()
             }
-            .padding(.leading, sidebarOpen ? 12 : Metrics.lights)
-            .padding(.trailing, 12)
+            .padding(.leading, sidebarOpen ? (framed ? 0 : 10) : Metrics.lights)
+            .padding(.trailing, framed ? Split.gap + 2 : 12)
             .animation(Motion.glide, value: sidebarOpen)
         }
         .frame(maxWidth: .infinity)
         .frame(height: Metrics.strip)
         .clipped()
         .background {
-            if let tint {
-                Color(nsColor: tint.color)
-            } else {
-                Palette.ground
+            if !framed {
+                if let tint {
+                    Color(nsColor: tint.color)
+                } else {
+                    Palette.ground
+                }
             }
         }
         .overlay(alignment: .bottom) {
-            Rectangle().fill(seam).frame(height: 1)
+            if !framed {
+                Rectangle().fill(seam).frame(height: 1)
+            }
         }
         .environment(\.colorScheme, tint.map { $0.dark ? .dark : .light } ?? scheme)
         .animation(Motion.glide, value: tint)
@@ -165,7 +176,10 @@ struct AsideBar: View {
 private struct AddressSummaryButton: View {
     @ObservedObject var tab: Tab
     let browser: Browser
+    let isDark: Bool
     @Binding var hovering: Bool
+    @State private var copyHover = false
+    @State private var copied = false
 
     var body: some View {
         let host: String = {
@@ -177,60 +191,96 @@ private struct AddressSummaryButton: View {
         }()
         let title = tab.title.trimmingCharacters(in: .whitespacesAndNewlines)
 
-        Button { browser.edit() } label: {
-            HStack(spacing: 7) {
-                if tab.isBlank {
-                    Image(systemName: "magnifyingglass")
-                        .font(.system(size: 10.5, weight: .medium))
-                        .foregroundStyle(Palette.muted.opacity(0.8))
-                    Text("Search or enter website name")
-                        .font(.system(size: 12.5))
-                        .foregroundStyle(Palette.muted)
-                        .lineLimit(1)
-                } else {
-                    if tab.loading {
-                        ProgressView()
-                            .controlSize(.mini)
-                            .scaleEffect(0.65)
-                            .frame(width: 13, height: 13)
-                    } else {
-                        Mark(icon: tab.icon, letter: tab.monogram, size: 13)
-                            .opacity(0.92)
-                    }
-                    Text(host)
-                        .font(.system(size: 12.5, weight: .medium))
-                        .foregroundStyle(Palette.ink)
-                        .lineLimit(1)
-                        .truncationMode(.tail)
-                    if !title.isEmpty && title != host {
-                        Rectangle()
-                            .fill(Palette.ink.opacity(0.16))
-                            .frame(width: 1, height: 11)
-                        Text(title)
+        HStack(spacing: 4) {
+            Button { browser.edit() } label: {
+                HStack(spacing: 7) {
+                    if tab.isBlank {
+                        Image(systemName: "magnifyingglass")
+                            .font(.system(size: 10.5, weight: .medium))
+                            .foregroundStyle(Palette.muted.opacity(0.8))
+                        Text("Search or enter website name")
                             .font(.system(size: 12.5))
                             .foregroundStyle(Palette.muted)
                             .lineLimit(1)
+                    } else {
+                        if tab.loading {
+                            ProgressView()
+                                .controlSize(.mini)
+                                .scaleEffect(0.65)
+                                .frame(width: 13, height: 13)
+                        } else {
+                            Mark(icon: tab.icon, letter: tab.monogram, size: 13)
+                                .opacity(0.92)
+                        }
+                        Text(host)
+                            .font(.system(size: 12.5, weight: .medium))
+                            .foregroundStyle(Palette.ink)
+                            .lineLimit(1)
                             .truncationMode(.tail)
-                            .layoutPriority(-1)
+                        if !title.isEmpty && title != host {
+                            Rectangle()
+                                .fill(Palette.ink.opacity(0.16))
+                                .frame(width: 1, height: 11)
+                            Text(title)
+                                .font(.system(size: 12.5))
+                                .foregroundStyle(Palette.muted)
+                                .lineLimit(1)
+                                .truncationMode(.tail)
+                                .layoutPriority(-1)
+                        }
                     }
                 }
+                .padding(.leading, 10)
+                .padding(.trailing, (!tab.isBlank && (hovering || copied)) ? 2 : 10)
+                .frame(height: 28)
+                .contentShape(Rectangle())
             }
-            .padding(.horizontal, 10)
-            .frame(height: 28)
-            .background(
-                RoundedRectangle(cornerRadius: 8.5, style: .continuous)
-                    .fill(Palette.ink.opacity(hovering ? 0.075 : 0.038))
-            )
-            .overlay(
-                RoundedRectangle(cornerRadius: 8.5, style: .continuous)
-                    .strokeBorder(Palette.ink.opacity(hovering ? 0.10 : 0.045), lineWidth: 0.75)
-            )
-            .contentShape(RoundedRectangle(cornerRadius: 8.5, style: .continuous))
+            .buttonStyle(.plain)
+            .help("Open or edit address   ⌘L")
+
+            if !tab.isBlank && (hovering || copied) {
+                Button {
+                    browser.copyAddress()
+                    copied = true
+                    DispatchQueue.main.asyncAfter(deadline: .now() + 1.1) { copied = false }
+                } label: {
+                    Image(systemName: copied ? "checkmark" : "link")
+                        .font(.system(size: 10.5, weight: .medium))
+                        .foregroundStyle(copied ? Palette.accent : (copyHover ? Palette.ink : Palette.muted))
+                        .frame(width: 22, height: 22)
+                        .background(
+                            RoundedRectangle(cornerRadius: 6, style: .continuous)
+                                .fill(Palette.ink.opacity(copyHover ? 0.08 : 0))
+                        )
+                        .contentShape(RoundedRectangle(cornerRadius: 6, style: .continuous))
+                }
+                .buttonStyle(.plain)
+                .onHover { copyHover = $0 }
+                .padding(.trailing, 3)
+                .help("Copy Address   ⇧⌘C")
+                .transition(.opacity.combined(with: .scale(scale: 0.88)))
+            }
         }
-        .buttonStyle(.plain)
+        .frame(height: 28)
+        .background(
+            RoundedRectangle(cornerRadius: 8.5, style: .continuous)
+                .fill(isDark
+                    ? Color.white.opacity(hovering ? 0.105 : 0.068)
+                    : Color.white.opacity(hovering ? 0.88 : 0.62))
+        )
+        .overlay(
+            RoundedRectangle(cornerRadius: 8.5, style: .continuous)
+                .strokeBorder(
+                    isDark
+                        ? Color.white.opacity(hovering ? 0.13 : 0.075)
+                        : Color.black.opacity(hovering ? 0.095 : 0.055),
+                    lineWidth: 0.75
+                )
+        )
+        .contentShape(RoundedRectangle(cornerRadius: 8.5, style: .continuous))
         .onHover { hovering = $0 }
         .animation(Motion.quick, value: hovering)
-        .help("Open or edit address   ⌘L")
+        .animation(Motion.quick, value: copied)
         .contextMenu {
             Button("Copy Address") { browser.copyAddress() }
             Button("Copy as Markdown Link") { browser.copyMarkdownLink() }

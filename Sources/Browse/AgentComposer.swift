@@ -24,6 +24,9 @@ struct AgentComposer: View {
     @State private var recall = PromptRecallState()
     @State private var slashSelection = 0
     @State private var slashDismissed = false
+    @State private var mentionSelection = 0
+    @State private var mentionDismissed = false
+    @State private var mentionHover = false
     @State private var modelOpenRequest = 0
     @State private var writeHover = false
 
@@ -57,6 +60,7 @@ struct AgentComposer: View {
             .onChange(of: agent.chatID) { _, _ in
                 recall.reset()
                 slashDismissed = false
+                mentionDismissed = false
             }
     }
 
@@ -89,6 +93,79 @@ struct AgentComposer: View {
     }
 
     private var slashMenuOpen: Bool { !slashMatches.isEmpty }
+
+    // MARK: - Dia-style @-tab mentions
+
+    /// Active trailing `@query` token when typing `@` at the start of the draft
+    /// or after whitespace.
+    private var mentionToken: (query: String, start: String.Index)? {
+        guard composer.editingQueueID == nil,
+              agent.asking?.isQuestion != true,
+              !mentionDismissed,
+              !slashMenuOpen
+        else { return nil }
+        let text = composer.text
+        guard let at = text.lastIndex(of: "@") else { return nil }
+        if at > text.startIndex {
+            let before = text[text.index(before: at)]
+            guard before.isWhitespace || before.isNewline else { return nil }
+        }
+        let after = text[text.index(after: at)...]
+        if after.contains(where: { $0.isWhitespace || $0.isNewline }) { return nil }
+        return (String(after), at)
+    }
+
+    private var mentionMatches: [Tab] {
+        guard let token = mentionToken else { return [] }
+        let already = Set(agent.mentionedTabs.map(\.id))
+        let autoContextID = (!full && agent.withPage) ? contextTab?.id : nil
+        let open = browser.tabs.filter { !$0.isBlank && !already.contains($0.id) }
+        // Put non-active tabs first when the active page is already auto-attached.
+        let ordered = open.sorted { a, b in
+            let aAuto = a.id == autoContextID
+            let bAuto = b.id == autoContextID
+            if aAuto != bAuto { return !aAuto }
+            return false
+        }
+        let needle = token.query.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+        guard !needle.isEmpty else { return ordered }
+        return ordered.filter { tab in
+            let title = tab.label.lowercased()
+            let host = (tab.address?.host() ?? "").lowercased()
+            let url = (tab.address?.absoluteString ?? "").lowercased()
+            return title.contains(needle) || host.contains(needle) || url.contains(needle)
+        }
+    }
+
+    private var mentionMenuOpen: Bool { !mentionMatches.isEmpty }
+
+    private var anyCompletionOpen: Bool { slashMenuOpen || mentionMenuOpen }
+
+    private func acceptMention(_ tab: Tab? = nil) {
+        let matches = mentionMatches
+        guard let chosen = tab ?? (matches.indices.contains(mentionSelection) ? matches[mentionSelection] : matches.first) else { return }
+        if let token = mentionToken {
+            let prefix = String(composer.text[..<token.start])
+            agent.draft = prefix
+        }
+        agent.mentionTab(chosen)
+        mentionSelection = 0
+        mentionDismissed = false
+        localFocusToken &+= 1
+    }
+
+    private func insertAtMention() {
+        guard composer.editingQueueID == nil, agent.asking?.isQuestion != true else { return }
+        mentionDismissed = false
+        mentionSelection = 0
+        let current = composer.text
+        if current.isEmpty || current.last?.isWhitespace == true || current.last?.isNewline == true {
+            agent.draft = current + "@"
+        } else if !current.hasSuffix("@") {
+            agent.draft = current + " @"
+        }
+        localFocusToken &+= 1
+    }
 
     private func acceptSlashCommand(_ command: NanoSlashCommand? = nil) {
         let matches = slashMatches
@@ -191,9 +268,12 @@ struct AgentComposer: View {
                         .fixedSize(horizontal: false, vertical: true)
                 }
             }
-            // NanoHarness slash-command completion popover anchored cleanly above the composer.
+            // NanoHarness slash-command or Dia @-tab completion popover anchored above the composer.
             if slashMenuOpen {
                 slashMenu
+                    .transition(.move(edge: .bottom).combined(with: .opacity))
+            } else if mentionMenuOpen {
+                mentionMenu
                     .transition(.move(edge: .bottom).combined(with: .opacity))
             }
             // What was typed while it worked, in the order it will go.
@@ -202,11 +282,14 @@ struct AgentComposer: View {
                     .transition(.move(edge: .bottom).combined(with: .opacity))
             }
             // One unified composer card: optional slim page-context header strip
-            // docked cleanly above the native 120 FPS text editor, model picker,
-            // context ring, write-mode toggle, and send button.
+            // + Dia-style @-mentioned tab pills docked cleanly above the native
+            // 120 FPS text editor, model picker, context ring, and send button.
             VStack(alignment: .leading, spacing: 0) {
                 if let tab = contextTab {
                     AgentPageContext(tab: tab, agent: agent, embedded: true)
+                }
+                if !agent.mentionedTabs.isEmpty, agent.asking?.isQuestion != true {
+                    mentionedStrip
                 }
 
                 VStack(alignment: .leading, spacing: full ? 8 : 6) {
@@ -225,7 +308,7 @@ struct AgentComposer: View {
                             minHeight: minH,
                             maxHeight: maxH,
                             newlinesOnReturn: false,
-                            slashMenuOpen: slashMenuOpen,
+                            slashMenuOpen: anyCompletionOpen,
                             recallingUnchanged: recall.isShowingUnchanged(composer.text),
                             focusRequest: localFocusToken,
                             measuredHeight: $measuredHeight,
@@ -233,17 +316,34 @@ struct AgentComposer: View {
                             onTextChange: { newText in
                                 slashDismissed = false
                                 slashSelection = 0
+                                mentionDismissed = false
+                                mentionSelection = 0
                                 agent.syncDraftFromEditor(newText)
                             },
                             onSubmit: send,
                             onCommandReturn: commandReturn,
                             onSlashMove: { delta in
-                                let count = slashMatches.count
-                                guard count > 0 else { return }
-                                slashSelection = (slashSelection + delta + count) % count
+                                if slashMenuOpen {
+                                    let count = slashMatches.count
+                                    guard count > 0 else { return }
+                                    slashSelection = (slashSelection + delta + count) % count
+                                } else if mentionMenuOpen {
+                                    let count = min(7, mentionMatches.count)
+                                    guard count > 0 else { return }
+                                    mentionSelection = (mentionSelection + delta + count) % count
+                                }
                             },
-                            onSlashAccept: { acceptSlashCommand() },
-                            onSlashDismiss: { slashDismissed = true },
+                            onSlashAccept: {
+                                if slashMenuOpen {
+                                    acceptSlashCommand()
+                                } else if mentionMenuOpen {
+                                    acceptMention()
+                                }
+                            },
+                            onSlashDismiss: {
+                                if slashMenuOpen { slashDismissed = true }
+                                if mentionMenuOpen { mentionDismissed = true }
+                            },
                             onRecall: stepRecall,
                             onEscape: handleEscape,
                             onToggleWriteMode: openWriteMode,
@@ -262,6 +362,24 @@ struct AgentComposer: View {
                             ContextUsageRing(used: ctx.used, window: ctx.window)
                         }
                         if agent.asking?.isQuestion != true, composer.editingQueueID == nil {
+                            if browser.tabs.contains(where: { !$0.isBlank }) {
+                                Button(action: insertAtMention) {
+                                    Text("@")
+                                        .font(.system(size: 12.5, weight: .medium, design: .rounded))
+                                        .foregroundStyle(mentionHover ? Palette.ink : Palette.muted.opacity(0.82))
+                                        .frame(width: 24, height: 24)
+                                        .background(
+                                            RoundedRectangle(cornerRadius: 6, style: .continuous)
+                                                .fill(mentionHover ? Palette.hover : .clear)
+                                        )
+                                        .contentShape(Rectangle())
+                                }
+                                .buttonStyle(TactilePress())
+                                .onHover { mentionHover = $0 }
+                                .animation(Motion.quick, value: mentionHover)
+                                .help("Mention another open tab   @")
+                                .accessibilityLabel("Mention open tab")
+                            }
                             Button(action: openWriteMode) {
                                 Image(systemName: "arrow.up.left.and.arrow.down.right")
                                     .font(.system(size: 10.5, weight: .medium))
@@ -303,6 +421,8 @@ struct AgentComposer: View {
             .animation(Motion.quick, value: editorFocused)
         }
         .animation(Motion.quick, value: slashMenuOpen)
+        .animation(Motion.quick, value: mentionMenuOpen)
+        .animation(Motion.quick, value: agent.mentionedTabs.map(\.id))
         .animation(Motion.settle, value: agent.queue.map(\.id))
         .padding(.horizontal, full ? 12 : 14)
         .padding(.top, full ? 4 : 6)
@@ -351,6 +471,106 @@ struct AgentComposer: View {
         .shadow(color: .black.opacity(0.14), radius: 14, y: 4)
     }
 
+    /// Dia-style floating tab mention picker triggered by `@` in the composer.
+    private var mentionMenu: some View {
+        let matches = Array(mentionMatches.prefix(7))
+        return VStack(alignment: .leading, spacing: 2) {
+            Text("Mention an open tab")
+                .font(.system(size: 10.5, weight: .semibold))
+                .foregroundStyle(Palette.muted.opacity(0.75))
+                .padding(.horizontal, 9)
+                .padding(.top, 4)
+                .padding(.bottom, 2)
+            ForEach(Array(matches.enumerated()), id: \.element.id) { index, tab in
+                let lit = index == min(mentionSelection, max(0, matches.count - 1))
+                let host: String = {
+                    guard let h = tab.address?.host(), !h.isEmpty else { return "" }
+                    return h.hasPrefix("www.") ? String(h.dropFirst(4)) : h
+                }()
+                Button { acceptMention(tab) } label: {
+                    HStack(spacing: 8) {
+                        Mark(icon: tab.icon, letter: tab.monogram, size: 14)
+                        Text(tab.label)
+                            .font(.system(size: 12, weight: .medium))
+                            .foregroundStyle(Palette.ink)
+                            .lineLimit(1)
+                            .truncationMode(.tail)
+                        if !host.isEmpty {
+                            Text(host)
+                                .font(.system(size: 11))
+                                .foregroundStyle(Palette.muted)
+                                .lineLimit(1)
+                                .truncationMode(.tail)
+                        }
+                        Spacer(minLength: 4)
+                    }
+                    .padding(.horizontal, 9)
+                    .padding(.vertical, 6)
+                    .background(
+                        RoundedRectangle(cornerRadius: 7, style: .continuous)
+                            .fill(lit ? Palette.hover : .clear)
+                    )
+                    .contentShape(Rectangle())
+                }
+                .buttonStyle(.plain)
+                .onHover { over in if over { mentionSelection = index } }
+            }
+        }
+        .padding(5)
+        .background(Palette.ground, in: RoundedRectangle(cornerRadius: 11, style: .continuous))
+        .overlay(
+            RoundedRectangle(cornerRadius: 11, style: .continuous)
+                .strokeBorder(Palette.hairline, lineWidth: 0.75)
+        )
+        .shadow(color: .black.opacity(0.14), radius: 14, y: 4)
+    }
+
+    /// Attached `@`-mentioned tab pills docked neatly inside the composer card.
+    private var mentionedStrip: some View {
+        ScrollView(.horizontal, showsIndicators: false) {
+            HStack(spacing: 6) {
+                ForEach(agent.mentionedTabs) { tab in
+                    HStack(spacing: 5) {
+                        Mark(icon: tab.icon, letter: tab.monogram, size: 12)
+                        Text("@\(tab.label)")
+                            .font(.system(size: 11.5, weight: .medium))
+                            .foregroundStyle(Palette.ink.opacity(0.9))
+                            .lineLimit(1)
+                            .truncationMode(.tail)
+                            .frame(maxWidth: 150, alignment: .leading)
+                        Button { agent.unmentionTab(tab.id) } label: {
+                            Image(systemName: "xmark")
+                                .font(.system(size: 8.5, weight: .semibold))
+                                .foregroundStyle(Palette.muted)
+                                .frame(width: 14, height: 14)
+                                .contentShape(Circle())
+                        }
+                        .buttonStyle(.plain)
+                        .help("Remove \(tab.label)")
+                    }
+                    .padding(.leading, 7)
+                    .padding(.trailing, 5)
+                    .frame(height: 24)
+                    .background(
+                        Capsule()
+                            .fill(Palette.accent.opacity(scheme == .dark ? 0.14 : 0.09))
+                    )
+                    .overlay(
+                        Capsule()
+                            .strokeBorder(Palette.accent.opacity(0.24), lineWidth: 0.75)
+                    )
+                }
+            }
+            .padding(.horizontal, full ? 12 : 10)
+            .padding(.vertical, 6)
+        }
+        .overlay(alignment: .bottom) {
+            Rectangle()
+                .fill(scheme == .dark ? Color.white.opacity(0.06) : Color.black.opacity(0.055))
+                .frame(height: 1)
+        }
+    }
+
     private var actions: some View {
         HStack(spacing: 5) {
             if composer.editingQueueID != nil {
@@ -373,7 +593,7 @@ struct AgentComposer: View {
         if composer.editingQueueID != nil { return "Edit queued message…" }
         if agent.asking?.isQuestion == true { return "Answer Codegraff" }
         if agent.phase == .working { return full ? "Queue a follow-up (⌘↩ to interrupt)…" : "Queue a follow-up…" }
-        return !full && agent.withPage && browser.active?.isBlank == false ? "Ask about this page…" : "Do anything…"
+        return !full && agent.withPage && browser.active?.isBlank == false ? "Ask about this page, or @ a tab…" : "Ask anything, or @ a tab…"
     }
 
     private func round(icon: String, help: String, live: Bool, act: @escaping () -> Void) -> some View {

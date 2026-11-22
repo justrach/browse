@@ -34,7 +34,11 @@ struct AgentColumn: View {
     @State private var grabbed: CGFloat?
     @State private var onEdge = false
 
+    @Environment(\.colorScheme) private var scheme
+
     var body: some View {
+        let card = RoundedRectangle(cornerRadius: Split.corner, style: .continuous)
+        let floatingCard = fullHeight && !full
         VStack(spacing: 0) {
             if agent.writeMode {
                 if full || !fullHeight { head }
@@ -54,15 +58,42 @@ struct AgentColumn: View {
             }
         }
         .animation(Motion.quick, value: agent.writeMode)
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
+        .background {
+            if floatingCard {
+                Palette.ground.clipShape(card)
+            } else {
+                Palette.ground
+            }
+        }
+        .clipShape(RoundedRectangle(cornerRadius: floatingCard ? Split.corner : 0, style: .continuous))
+        .overlay {
+            if floatingCard {
+                card.strokeBorder(
+                    scheme == .dark ? Color.white.opacity(0.095) : Color.black.opacity(0.075),
+                    lineWidth: 0.75
+                )
+            }
+        }
+        .shadow(
+            color: floatingCard ? .black.opacity(scheme == .dark ? 0.26 : 0.06) : .clear,
+            radius: scheme == .dark ? 8 : 5,
+            y: 1.5
+        )
+        .padding(.top, floatingCard ? Split.gap : 0)
+        .padding(.trailing, floatingCard ? Split.gap : 0)
+        .padding(.bottom, floatingCard ? Split.gap : 0)
+        .padding(.leading, floatingCard ? Split.gap : 0)
         .frame(width: full ? nil : prefs.agentWidth)
         .frame(maxWidth: full ? .infinity : nil, maxHeight: .infinity)
-        .background(Palette.ground)
         .overlay(alignment: .leading) {
             if !full {
                 ZStack(alignment: .leading) {
-                    Rectangle()
-                        .fill(Palette.hairline)
-                        .frame(width: 1)
+                    if !floatingCard {
+                        Rectangle()
+                            .fill(Palette.hairline)
+                            .frame(width: 1)
+                    }
                     edge
                 }
             }
@@ -246,10 +277,12 @@ struct AgentColumn: View {
             }
             .padding(.horizontal, full ? 20 : 14)
         }
-        .frame(height: fullHeight ? Metrics.strip : (full ? 52 : 44))
+        .frame(height: fullHeight ? (Metrics.strip - Split.gap) : (full ? 52 : 44))
         .overlay(alignment: .bottom) {
             if !full {
-                Rectangle().fill(Palette.hairline).frame(height: 1)
+                Rectangle()
+                    .fill(scheme == .dark ? Color.white.opacity(0.08) : Color.black.opacity(0.065))
+                    .frame(height: 1)
             }
         }
     }

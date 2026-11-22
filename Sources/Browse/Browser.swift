@@ -381,11 +381,16 @@ final class Browser: NSObject, ObservableObject {
     @Published var editing = false {
         didSet {
             guard !editing else { return }
+            openingNewTab = false
             cancelGoogleSuggestions()
             googleSaid = [:]
             googleOrder = []
         }
     }
+    /// True while `⌘T` / `+ New Tab` has raised the floating Arc-style Command
+    /// Bar over the current page: submitting creates a new tab, while `Esc`
+    /// dismisses cleanly without leaving an orphan blank tab behind.
+    @Published var openingNewTab = false
     /// Isolated omnibox typing state so keystrokes never trigger full-window
     /// SwiftUI invalidations across `ContentView` / `SideBar` / `AgentColumn`.
     let omnibox = OmniboxState()
@@ -1810,7 +1815,14 @@ final class Browser: NSObject, ObservableObject {
 
     // MARK: - tabs
 
-    func newTab() {
+    func newTab() { newTab(immediate: false) }
+
+    /// `⌘T` / `+ New Tab`. When a real page is already on screen, raises the
+    /// floating Arc-style Command Bar over it and only creates the new tab once
+    /// you submit — pressing Escape leaves no orphan blank tab behind. Pass
+    /// `immediate: true` when a blank tab must exist right away (Split View,
+    /// closing the last tab, or bench commands).
+    func newTab(immediate: Bool) {
         // On a private tab, a new one is private too: ⌘T from a page that
         // keeps nothing and landing on one that keeps everything is how a
         // private search ends up in the history.
@@ -1828,6 +1840,16 @@ final class Browser: NSObject, ObservableObject {
             rememberSession()
             return
         }
+        // Arc-style deferred new tab: float the Command Bar over the current
+        // page first and only create the tab when a destination is submitted.
+        if !immediate, active?.isBlank == false {
+            summoning = false
+            openingNewTab = true
+            typed = ""
+            editing = true
+            focusRequest += 1
+            return
+        }
         // Never two empty tabs. One already open anywhere in the row comes to
         // its end and is the one opened, with whatever was typed into it and
         // never gone to cleared away — a row of identical empty tabs is what
@@ -1839,6 +1861,7 @@ final class Browser: NSObject, ObservableObject {
             if activeID != blank.id { leaving() }
             activeID = blank.id
             summoning = false
+            openingNewTab = false
             typed = ""
             editing = false
             focusRequest += 1
@@ -1850,6 +1873,7 @@ final class Browser: NSObject, ObservableObject {
         leaving()
         activeID = tab.id
         summoning = false
+        openingNewTab = false
         typed = ""
         editing = false
         focusRequest += 1
@@ -1941,7 +1965,7 @@ final class Browser: NSObject, ObservableObject {
             if let back = (loose.isEmpty ? others : loose).max(by: { $0.touched < $1.touched }) {
                 select(back)
             } else {
-                newTab()
+                newTab(immediate: true)
             }
             writeSession(now: true)
             return
@@ -1996,9 +2020,9 @@ final class Browser: NSObject, ObservableObject {
     /// brings them back, one at a time.
     func clearLoose() {
         guard tabs.contains(where: { $0.pin == nil && !$0.bench }) else { return }
-        // newTab() may bring an empty tab already open to the front rather
+        // newTab(immediate: true) may bring an empty tab already open to the front rather
         // than make one; whichever it lands on stays.
-        newTab()
+        newTab(immediate: true)
         let going = tabs.filter { $0.pin == nil && !$0.bench && $0.id != activeID }
         for tab in going { close(tab) }
         guard !going.isEmpty else { return }
@@ -2722,25 +2746,43 @@ final class Browser: NSObject, ObservableObject {
             }
     }
 
+    /// Navigate either a newly created tab (when raised via Arc-style `⌘T` /
+    /// `+ New Tab`) or the current active tab (`⌘L`).
+    private func navigateSubmitted(_ url: URL, searched: String?) {
+        if openingNewTab {
+            openingNewTab = false
+            let tab = Tab()
+            adopt(tab)
+            leaving()
+            activeID = tab.id
+            if let searched { rememberSearch(searched, url: url, in: tab) }
+            tab.go(to: url)
+            rememberSession()
+        } else if let tab = active ?? tabs.first {
+            if let searched { rememberSearch(searched, url: url, in: tab) }
+            tab.go(to: url)
+        }
+    }
+
     /// A row clicked in the list, taken directly rather than through the
     /// keyboard's selection. The pointer and the arrow keys are answering the
     /// same question but must not share an answer: a list that appears under a
     /// resting cursor would otherwise rewrite the field before you had moved.
     func take(_ offer: Suggestion) {
         if offer.kind == .ask {
+            openingNewTab = false
             ask(offer.key)
             return
         }
         summoning = false
         if let id = offer.tab, let tab = tabs.first(where: { $0.id == id }) {
+            openingNewTab = false
             select(tab)
         } else {
             let url = offer.kind == .google ? searchURL(for: offer.key) : offer.url
-            if let url, let tab = active ?? tabs.first {
-                if offer.kind == .search || offer.kind == .searched || offer.kind == .google {
-                    rememberSearch(offer.key, url: url, in: tab)
-                }
-                tab.go(to: url)
+            if let url {
+                let searched = (offer.kind == .search || offer.kind == .searched || offer.kind == .google) ? offer.key : nil
+                navigateSubmitted(url, searched: searched)
             }
         }
         editing = false
@@ -2777,6 +2819,7 @@ final class Browser: NSObject, ObservableObject {
     /// and Escape puts it back.
     func edit() {
         summoning = false
+        openingNewTab = false
         typed = active?.address?.absoluteString ?? ""
         editing = true
         focusRequest += 1
@@ -2784,6 +2827,7 @@ final class Browser: NSObject, ObservableObject {
 
     func dismiss() {
         summoning = false
+        openingNewTab = false
         cycling = false
         // A blank tab has nothing behind the field to go back to.
         guard active?.isBlank == false else { return }
@@ -2796,6 +2840,7 @@ final class Browser: NSObject, ObservableObject {
     /// those is a place, nothing happens and the field says so.
     func submit() {
         if let picked, offers.indices.contains(picked), offers[picked].kind == .ask {
+            openingNewTab = false
             ask(offers[picked].key)
             return
         }
@@ -2805,6 +2850,7 @@ final class Browser: NSObject, ObservableObject {
            let id = offers[picked].tab,
            let tab = tabs.first(where: { $0.id == id }) {
             summoning = false
+            openingNewTab = false
             select(tab)
             editing = false
             typed = ""
@@ -2842,10 +2888,7 @@ final class Browser: NSObject, ObservableObject {
             refusals += 1
             return
         }
-        if let tab = active ?? tabs.first {
-            if let searched { rememberSearch(searched, url: url, in: tab) }
-            tab.go(to: url)
-        }
+        navigateSubmitted(url, searched: searched)
         // Somewhere typed with ⌘L over the talk: the page is what was asked for.
         leaveStage()
         editing = false

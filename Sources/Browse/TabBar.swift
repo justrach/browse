@@ -145,8 +145,7 @@ struct TabBar: View {
                     // of the row. The dropdown hangs from the last one.
                     HStack(spacing: Metrics.tabGap) {
                         ExtensionSlot()
-                        Helm(browser: browser)
-                            .padding(.trailing, 8)
+                        Helm(browser: browser, trailingPadding: 8)
                         Door(icon: "bookmark", help: "Bookmarks") { browser.bookmarksOpen.toggle() }
                             .popover(isPresented: $browser.bookmarksOpen, arrowEdge: .bottom) {
                                 BookmarksDropdown(browser: browser, bookmarks: browser.bookmarks)
@@ -442,50 +441,45 @@ struct AskTab: View {
 /// far end of the row, in the sidebar.
 struct Helm: View {
     @ObservedObject var browser: Browser
+    var trailingPadding: CGFloat = 0
 
     var body: some View {
         if let tab = browser.active {
-            Wheel(browser: browser, tab: tab)
-        } else {
-            // Nowhere to go and nothing to reload: the doors stay in place,
-            // greyed, so the row doesn't shift when a tab arrives.
-            HStack(spacing: 4) {
-                Door(icon: "chevron.left") {}
-                Door(icon: "chevron.right") {}
-                Door(icon: "arrow.clockwise") {}
-            }
-            .opacity(0.3)
-            .allowsHitTesting(false)
+            Wheel(browser: browser, tab: tab, trailingPadding: trailingPadding)
         }
     }
 
     private struct Wheel: View {
         let browser: Browser
         @ObservedObject var tab: Tab
+        let trailingPadding: CGFloat
 
         var body: some View {
             let back = !tab.isBlank && tab.canGoBack
             let forward = !tab.isBlank && tab.canGoForward
-            HStack(spacing: 4) {
-                Door(icon: "chevron.left", help: "Back   ⌘[") { browser.back() }
-                    .disabled(!back)
-                    .opacity(back ? 1 : 0.3)
-                Door(icon: "chevron.right", help: "Forward   ⌘]") { browser.forward() }
-                    .disabled(!forward)
-                    .opacity(forward ? 1 : 0.3)
-                // Reload, or stop while it is still coming.
-                Door(
-                    icon: tab.loading ? "xmark" : "arrow.clockwise",
-                    help: tab.loading ? "Stop   ⌘." : "Reload   ⌘R"
-                ) {
-                    if tab.loading { tab.stop() } else { browser.reload() }
+            if !tab.isBlank {
+                HStack(spacing: 4) {
+                    if back {
+                        Door(icon: "chevron.left", help: "Back   ⌘[") { browser.back() }
+                            .transition(.opacity.combined(with: .scale(scale: 0.85)))
+                    }
+                    if forward {
+                        Door(icon: "chevron.right", help: "Forward   ⌘]") { browser.forward() }
+                            .transition(.opacity.combined(with: .scale(scale: 0.85)))
+                    }
+                    // Reload, or stop while it is still coming.
+                    Door(
+                        icon: tab.loading ? "xmark" : "arrow.clockwise",
+                        help: tab.loading ? "Stop   ⌘." : "Reload   ⌘R"
+                    ) {
+                        if tab.loading { tab.stop() } else { browser.reload() }
+                    }
                 }
-                .disabled(tab.isBlank)
-                .opacity(tab.isBlank ? 0.3 : 1)
+                .padding(.trailing, trailingPadding)
+                .animation(Motion.quick, value: back)
+                .animation(Motion.quick, value: forward)
+                .animation(Motion.quick, value: tab.loading)
             }
-            .animation(Motion.quick, value: back)
-            .animation(Motion.quick, value: forward)
-            .animation(Motion.quick, value: tab.loading)
         }
     }
 }
