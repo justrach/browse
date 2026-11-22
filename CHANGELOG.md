@@ -11,6 +11,8 @@ in [ROADMAP.md](ROADMAP.md).
 
 ## Unreleased
 
+## 1.8.0 — 22 November 2026
+
 ### Added
 
 - **Arc & Dia browser chrome**: unified frosted glass window canvas with floating `10pt` squircle webpage and `graff` cards, dynamic Back/Forward/Reload navigation buttons, inline hover Copy Link inside the URL pill, Arc-style `Today` divider with hover `Clear`, deferred floating New Tab Command Bar (`⌘T` / `+ New Tab`), and Dia-style `@`-tab mentions inside the `graff` composer.
