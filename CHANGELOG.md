@@ -11,6 +11,22 @@ in [ROADMAP.md](ROADMAP.md).
 
 ## Unreleased
 
+### Added
+
+- **Arc & Dia browser chrome**: unified frosted glass window canvas with floating `10pt` squircle webpage and `graff` cards, dynamic Back/Forward/Reload navigation buttons, inline hover Copy Link inside the URL pill, Arc-style `Today` divider with hover `Clear`, deferred floating New Tab Command Bar (`⌘T` / `+ New Tab`), and Dia-style `@`-tab mentions inside the `graff` composer.
+- **`⌘K` Tab Switcher with live sneak-peek & `⇧⌘\` Visual Tab Overview Grid**: upgraded `⌘K` into a floating frosted command palette with fuzzy multi-token search, recency ordering, real favicons/status badges, `⌘D` open-in-Split, `⌘⌫` quick-close, and a live WebKit snapshot sneak-peek pane; added `⇧⌘\` (`Tab Overview`) for a full-window visual card overview grid with real-time filtering.
+- **Cross-section Settings Search (`⌘F`)**: native macOS-style Search field in the Settings rail indexing all 11 Settings sections plus every keyboard shortcut dynamically, with grouped results and instant jump-to-page.
+- **`graff` branding & local Harness MCP**: replaced corporate `Codegraff` chrome labels with `graff` + the vector Harness mark, added a quiet Dia-style active-tab connection badge in the sidebar, and automatically wired the local Harness engine MCP server when installed.
+
+### Performance
+
+- **120 FPS Agent sidebar slide & chat scrolling**: deferred WebKit layout reflow across single and Split View panes during sidebar open/close, replaced full-`ScrollView` `.mask(...)` compositing with a lightweight top fade overlay, and added an LRU parse cache to `MarkdownParser`.
+
+### Fixed
+
+- Updated macOS 27 Chrome import flow to promote Full Disk Access when macOS locks Chromium folders with `com.apple.macl`, report permission-denied errors accurately on folder selection, and surface undecrypted password counts.
+- Aligned the top bar cleanly across full window width so webpage and `graff` cards share flush top/bottom edges, prevented the model picker label from collapsing at narrow widths, and kept the `6pt` middle gutter spotless at rest.
+
 ## 1.7.1 — 22 November 2026
 
 ### Added
