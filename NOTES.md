@@ -1,3 +1,5 @@
+Image pasting and Fast/Ultra Fast speed modes in graff, Dark Mode chrome fix on dark SPAs, major X/Twitter and main-thread performance optimizations (48× faster History, 59× faster Bookmarks), and Lean 4 formal verification proofs.
+
 Fixed ⌘L to always supersede web pages, focus the address bar immediately on mount, dismiss blocking overlays, and select the entire URL.
 
 Single-letter visited domain autocomplete in the Omnibox (x → x.com) with visited-first exact host ranking, plus hardened macOS Keychain password vault (device-only accessibility, fail-closed Touch ID auth, 0o700 zero-wiped import snapshots, and 45s clipboard auto-clear).
