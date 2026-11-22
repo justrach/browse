@@ -3191,12 +3191,18 @@ final class Browser: NSObject, ObservableObject {
 
     // MARK: - the address field
 
-    /// ⌘L. The current address comes up selected, so typing over it replaces it
-    /// and Escape puts it back.
+    /// ⌘L. The current address comes up focused and fully selected, so typing
+    /// immediately replaces it and Escape puts it back.
     func edit() {
+        if tabSwitcher != nil { closeTabSwitcher() }
+        if finding { closeFind() }
+        if tuning { tuning = false }
+        if peekTab != nil { closePeek() }
         summoning = false
         openingNewTab = false
         typed = active?.address?.absoluteString ?? ""
+        ending = nil
+        picked = nil
         editing = true
         focusRequest += 1
     }

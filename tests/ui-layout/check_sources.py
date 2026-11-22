@@ -140,6 +140,16 @@ check(
     "Browser import temporary directories enforce owner-only 0o700 permissions",
 )
 
+# 11. ⌘L must always belong to the browser and focus + select-all reliably on window attach.
+omnibox_src = read("Sources/Browse/Omnibox.swift")
+check(
+    'BrowserCommand(.openAddress, .file, "Open Address…", KeyCombo("l", command: true), alwaysOurs: true)' in shortcuts_src
+    and "class FocusableAddressField" in omnibox_src
+    and "viewDidMoveToWindow()" in omnibox_src
+    and "fulfillPendingFocus" in omnibox_src,
+    "⌘L is alwaysOurs and FocusableAddressField reliably focuses & selects all on mount",
+)
+
 if failures:
     print(f"\n{len(failures)} source guardrail check(s) failed.", file=sys.stderr)
     sys.exit(1)

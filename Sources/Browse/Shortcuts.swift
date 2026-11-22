@@ -239,7 +239,7 @@ struct BrowserCommand: Identifiable {
         BrowserCommand(.newTab, .file, "New Tab", KeyCombo("t", command: true), alwaysOurs: true),
         BrowserCommand(.newPrivateTab, .file, "New Private Tab", KeyCombo("n", command: true, shift: true), alwaysOurs: true),
         BrowserCommand(.reopenTab, .file, "Reopen Closed Tab", KeyCombo("t", command: true, shift: true), alwaysOurs: true),
-        BrowserCommand(.openAddress, .file, "Open Address…", KeyCombo("l", command: true)),
+        BrowserCommand(.openAddress, .file, "Open Address…", KeyCombo("l", command: true), alwaysOurs: true),
         BrowserCommand(.closeTab, .file, "Close Tab", KeyCombo("w", command: true), alwaysOurs: true),
         BrowserCommand(.share, .file, "Share…", nil),
         BrowserCommand(.printPage, .file, "Print…", KeyCombo("p", command: true)),
