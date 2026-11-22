@@ -602,11 +602,29 @@ struct SideBar: View {
                     BookmarksDropdown(browser: browser, bookmarks: browser.bookmarks)
                 }
             Door(icon: "clock", help: "History   ⌘Y") { browser.recalling = true }
+            if browser.activeDownloadCount > 0 || !browser.loot.kept.isEmpty {
+                ZStack(alignment: .topTrailing) {
+                    Door(
+                        icon: "arrow.down.circle",
+                        on: browser.hoarding,
+                        help: browser.activeDownloadCount > 0
+                            ? "Downloading (\(browser.activeDownloadCount))   ⇧⌘J"
+                            : "Downloads   ⇧⌘J"
+                    ) { browser.hoarding = true }
+                    if browser.activeDownloadCount > 0 {
+                        PulseDot(color: Palette.accent, size: 4.5, active: true)
+                            .offset(x: -1, y: 1)
+                            .allowsHitTesting(false)
+                    }
+                }
+                .transition(.opacity.combined(with: .scale(scale: 0.9)))
+            }
             Spacer(minLength: 0)
             Door(icon: "gearshape", help: "Settings   ⌘,") { browser.tuning = true }
         }
         .padding(.horizontal, 10)
         .padding(.bottom, 10)
+        .animation(Motion.quick, value: browser.activeDownloadCount)
     }
 
 }
