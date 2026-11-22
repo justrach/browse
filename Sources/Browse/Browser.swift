@@ -27,6 +27,15 @@ enum TabSwitcherMode: Equatable {
     case grid
 }
 
+/// A tab entry inside the `⌘K` Command Switcher or `⇧⌘\` Tab Overview Grid.
+/// `space` is `nil` for tabs in the current Space, or the owning `Space` when
+/// parked in another Space.
+struct SwitcherItem: Identifiable {
+    let tab: Tab
+    let space: Space?
+    var id: Tab.ID { tab.id }
+}
+
 /// Isolated observable state for the tab switcher / overview so search typing
 /// and highlight changes never invalidate the main browser window.
 @MainActor
@@ -505,15 +514,24 @@ final class Browser: NSObject, ObservableObject {
     // MARK: - looking for something on the page
 
     @Published var finding = false
-    @Published var needle = "" { didSet { look(forward: true) } }
+    @Published var needle = "" {
+        didSet {
+            findIndex = 0
+            countFindMatches()
+            look(forward: true, resetIndex: true)
+        }
+    }
     /// Set when the page doesn't hold what was asked for.
     @Published private(set) var missed = false
+    @Published private(set) var findMatches = 0
+    @Published private(set) var findIndex = 0
     @Published private(set) var findFocus = 0
 
     func openFind() {
         guard active?.isBlank == false else { return }
         finding = true
         findFocus += 1
+        if !needle.isEmpty { countFindMatches() }
     }
 
     func closeFind() {
@@ -521,22 +539,88 @@ final class Browser: NSObject, ObservableObject {
         finding = false
         needle = ""
         missed = false
+        findMatches = 0
+        findIndex = 0
         // There is no public way to call off a find, but letting go of the
         // selection is what taking the highlight away amounts to.
         active?.web.evaluateJavaScript("window.getSelection().removeAllRanges()")
     }
 
-    func look(forward: Bool) {
-        guard let web = active?.web, !needle.isEmpty else {
+    private func countFindMatches() {
+        let query = needle
+        guard let web = active?.web, !query.isEmpty else {
+            findMatches = 0
+            findIndex = 0
+            return
+        }
+        guard let encoded = try? JSONSerialization.data(withJSONObject: [query]),
+              let json = String(data: encoded, encoding: .utf8) else { return }
+        let js = """
+        (() => {
+          const q = (\(json))[0].toLowerCase();
+          if (!q || !document.body) return 0;
+          const walker = document.createTreeWalker(document.body, NodeFilter.SHOW_TEXT);
+          let count = 0, node;
+          while ((node = walker.nextNode())) {
+            const p = node.parentElement;
+            if (!p) continue;
+            const tag = p.tagName;
+            if (tag === 'SCRIPT' || tag === 'STYLE' || tag === 'NOSCRIPT') continue;
+            if (p.offsetParent === null && getComputedStyle(p).position !== 'fixed') continue;
+            const text = (node.nodeValue || '').toLowerCase();
+            let pos = 0;
+            while ((pos = text.indexOf(q, pos)) !== -1) {
+              count++;
+              if (count >= 1000) return 1000;
+              pos += q.length;
+            }
+          }
+          return count;
+        })()
+        """
+        web.evaluateJavaScript(js) { [weak self] result, _ in
+            MainActor.assumeIsolated {
+                guard let self, self.needle == query else { return }
+                let total = (result as? NSNumber)?.intValue ?? 0
+                self.findMatches = total
+                if total == 0 {
+                    self.findIndex = 0
+                } else if self.findIndex == 0 || self.findIndex > total {
+                    self.findIndex = 1
+                }
+            }
+        }
+    }
+
+    func look(forward: Bool, resetIndex: Bool = false) {
+        let query = needle
+        guard let web = active?.web, !query.isEmpty else {
             missed = false
+            findMatches = 0
+            findIndex = 0
             return
         }
         let configuration = WKFindConfiguration()
         configuration.backwards = !forward
         configuration.caseSensitive = false
         configuration.wraps = true
-        web.find(needle, configuration: configuration) { [weak self] result in
-            MainActor.assumeIsolated { self?.missed = !result.matchFound }
+        web.find(query, configuration: configuration) { [weak self] result in
+            MainActor.assumeIsolated {
+                guard let self, self.needle == query else { return }
+                self.missed = !result.matchFound
+                guard result.matchFound else {
+                    self.findIndex = 0
+                    return
+                }
+                let total = max(1, self.findMatches)
+                if resetIndex || self.findIndex == 0 {
+                    self.findIndex = 1
+                } else if forward {
+                    self.findIndex = (self.findIndex % total) + 1
+                } else {
+                    self.findIndex = self.findIndex <= 1 ? total : self.findIndex - 1
+                }
+            }
         }
     }
 
@@ -911,8 +995,8 @@ final class Browser: NSObject, ObservableObject {
         alert.messageText = "macOS keeps \(source.name)'s folder for \(source.name) alone"
         alert.informativeText = """
         Since macOS 27, only \(source.name) itself, and apps you give Full Disk Access, can read it. \
-        Turn on browse under Full Disk Access in System Settings and the import carries on by itself. \
-        If it doesn't, quit and reopen browse and try again.
+        Turn on browse under Full Disk Access in System Settings — if browse isn't in the list yet, click + at the bottom-left and choose browse from Applications. \
+        The import carries on by itself once enabled (or quit and reopen browse if needed).
 
         Without it: \(source.name)'s own exports come in too. Its bookmarks file under Bookmarks › Safari \
         or a file…, and its passwords CSV under Passwords.
@@ -1411,7 +1495,10 @@ final class Browser: NSObject, ObservableObject {
     var dozing: Timer?
     var pressure: DispatchSourceMemoryPressure?
     /// Downloads still under way. See `keep(_:)`.
-    var downloading: [WKDownload] = []
+    var downloading: [WKDownload] = [] {
+        didSet { activeDownloadCount = downloading.count }
+    }
+    @Published private(set) var activeDownloadCount = 0
     /// alert(), confirm() and prompt() from tabs that weren't in front,
     /// waiting for them to be (see Dialogs.swift).
     var heldDialogs: [Tab.ID: [HeldQuestion]] = [:]
@@ -2608,12 +2695,16 @@ final class Browser: NSObject, ObservableObject {
         if tabSwitcher == nil {
             tabSwitcherState.query = ""
         }
+        // Ensure parked tabs from other Spaces are loaded when Spaces are on.
+        if prefs.usesSpaces && spaces.count > 1 {
+            preloadSpaces()
+        }
         // Refresh the active tab's preview immediately so its card is current.
         if let active, !active.isBlank {
             TabPreviewCache.shared.refresh(active)
         }
         tabSwitcher = mode
-        let ordered = switcherTabs(matching: tabSwitcherState.query, mode: mode)
+        let ordered = switcherItems(matching: tabSwitcherState.query, mode: mode)
         if let current = tabSwitcherState.selectedID, ordered.contains(where: { $0.id == current }) {
             // Keep existing highlight when toggling between palette and grid.
         } else {
@@ -2630,10 +2721,19 @@ final class Browser: NSObject, ObservableObject {
         tabSwitcherState.selectedID = nil
     }
 
-    /// Filtered and ranked open tabs for the `⌘K` palette or `⇧⌘\` overview grid.
-    func switcherTabs(matching query: String, mode: TabSwitcherMode) -> [Tab] {
-        let nonBlank = tabs.filter { !$0.isBlank }
-        let pool = nonBlank.isEmpty ? tabs : nonBlank
+    /// Filtered and ranked open tabs across the current Space (and other Spaces
+    /// when Spaces are enabled) for the `⌘K` palette or `⇧⌘\` overview grid.
+    func switcherItems(matching query: String, mode: TabSwitcherMode) -> [SwitcherItem] {
+        var all: [SwitcherItem] = tabs.map { SwitcherItem(tab: $0, space: nil) }
+        if prefs.usesSpaces && spaces.count > 1 {
+            for space in spaces where space.id != spaceID {
+                if let row = parked[space.id] {
+                    all.append(contentsOf: row.tabs.filter { !$0.isBlank }.map { SwitcherItem(tab: $0, space: space) })
+                }
+            }
+        }
+        let nonBlank = all.filter { !$0.tab.isBlank }
+        let pool = nonBlank.isEmpty ? all : nonBlank
         let trimmed = query.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
 
         if trimmed.isEmpty {
@@ -2642,22 +2742,26 @@ final class Browser: NSObject, ObservableObject {
                 // Recency-ordered with other tabs first so ⌘K → ↩ jumps back
                 // to your previous tab in one keystroke, while the active tab
                 // stays visible at the end for quick inspection/overview.
-                let others = pool.filter { $0.id != activeID }.sorted { $0.touched > $1.touched }
-                let current = pool.filter { $0.id == activeID }
+                let others = pool.filter { $0.tab.id != activeID }.sorted { $0.tab.touched > $1.tab.touched }
+                let current = pool.filter { $0.tab.id == activeID }
                 return others + current
             case .grid:
-                // Natural spatial order: pinned tabs first, then open tabs.
-                let pinned = pool.filter { $0.pin != nil }
-                let loose = pool.filter { $0.pin == nil }
-                return pinned + loose
+                // Natural spatial order: current Space (pinned then loose), then other Spaces.
+                let here = pool.filter { $0.space == nil }
+                let elsewhere = pool.filter { $0.space != nil }
+                let pinned = here.filter { $0.tab.pin != nil }
+                let loose = here.filter { $0.tab.pin == nil }
+                return pinned + loose + elsewhere
             }
         }
 
         let tokens = trimmed.split(whereSeparator: \.isWhitespace).map(String.init)
-        return pool.compactMap { tab -> (tab: Tab, score: Int)? in
+        return pool.compactMap { item -> (item: SwitcherItem, score: Int)? in
+            let tab = item.tab
             let title = tab.label.lowercased()
             let pretty = tab.address.map { Address.pretty($0).lowercased() } ?? ""
             let fullURL = tab.address?.absoluteString.lowercased() ?? ""
+            let spaceName = item.space?.name.lowercased() ?? ""
             var score = 0
             for token in tokens {
                 if title.hasPrefix(token) {
@@ -2668,6 +2772,8 @@ final class Browser: NSObject, ObservableObject {
                     score += 70
                 } else if pretty.contains(token) || fullURL.contains(token) {
                     score += 45
+                } else if !spaceName.isEmpty && spaceName.contains(token) {
+                    score += 40
                 } else if Self.fuzzyMatch(token, in: title) {
                     score += 25
                 } else if Self.fuzzyMatch(token, in: pretty) {
@@ -2676,14 +2782,15 @@ final class Browser: NSObject, ObservableObject {
                     return nil
                 }
             }
+            if item.space == nil { score += 15 }
             if tab.id != activeID { score += 10 }
-            return (tab, score)
+            return (item, score)
         }
         .sorted {
             if $0.score != $1.score { return $0.score > $1.score }
-            return $0.tab.touched > $1.tab.touched
+            return $0.item.tab.touched > $1.item.tab.touched
         }
-        .map(\.tab)
+        .map(\.item)
     }
 
     private static func fuzzyMatch(_ needle: String, in haystack: String) -> Bool {
@@ -2697,7 +2804,7 @@ final class Browser: NSObject, ObservableObject {
 
     func stepTabSwitcher(_ delta: Int) {
         guard let mode = tabSwitcher else { return }
-        let list = switcherTabs(matching: tabSwitcherState.query, mode: mode)
+        let list = switcherItems(matching: tabSwitcherState.query, mode: mode)
         guard !list.isEmpty else {
             tabSwitcherState.selectedID = nil
             return
@@ -2711,35 +2818,55 @@ final class Browser: NSObject, ObservableObject {
         }
     }
 
+    func selectFromSwitcher(_ item: SwitcherItem) {
+        closeTabSwitcher()
+        if let space = item.space {
+            switchSpace(to: space.id)
+        }
+        select(item.tab)
+    }
+
     func confirmTabSwitcher() {
         guard let mode = tabSwitcher else { return }
-        let list = switcherTabs(matching: tabSwitcherState.query, mode: mode)
-        let target = list.first { $0.id == tabSwitcherState.selectedID } ?? list.first
-        closeTabSwitcher()
-        if let target {
-            select(target)
+        let list = switcherItems(matching: tabSwitcherState.query, mode: mode)
+        guard let target = list.first(where: { $0.id == tabSwitcherState.selectedID }) ?? list.first else {
+            closeTabSwitcher()
+            return
         }
+        selectFromSwitcher(target)
     }
 
     func splitSelectedTabFromSwitcher() {
         guard let mode = tabSwitcher else { return }
-        let list = switcherTabs(matching: tabSwitcherState.query, mode: mode)
+        let list = switcherItems(matching: tabSwitcherState.query, mode: mode)
         guard let target = list.first(where: { $0.id == tabSwitcherState.selectedID }) ?? list.first else { return }
+        if target.space != nil {
+            selectFromSwitcher(target)
+            return
+        }
         closeTabSwitcher()
-        if target.id == activeID {
-            select(target)
+        if target.tab.id == activeID {
+            select(target.tab)
         } else {
-            open(target, on: .right)
+            open(target.tab, on: .right)
         }
     }
 
-    func closeTabFromSwitcher(_ tab: Tab) {
+    func closeTabFromSwitcher(_ item: SwitcherItem) {
         guard let mode = tabSwitcher else { return }
-        let before = switcherTabs(matching: tabSwitcherState.query, mode: mode)
-        let oldIndex = before.firstIndex { $0.id == tab.id }
-        close(tab)
-        let after = switcherTabs(matching: tabSwitcherState.query, mode: mode)
-        if after.isEmpty || (after.count == 1 && after[0].isBlank) {
+        let before = switcherItems(matching: tabSwitcherState.query, mode: mode)
+        let oldIndex = before.firstIndex { $0.id == item.id }
+        if let space = item.space {
+            if var row = parked[space.id] {
+                row.tabs.removeAll { $0.id == item.tab.id }
+                item.tab.close()
+                parked[space.id] = row
+            }
+        } else {
+            close(item.tab)
+        }
+        let after = switcherItems(matching: tabSwitcherState.query, mode: mode)
+        if after.isEmpty || (after.count == 1 && after[0].tab.isBlank) {
             closeTabSwitcher()
             return
         }
@@ -2753,7 +2880,7 @@ final class Browser: NSObject, ObservableObject {
 
     func closeSelectedTabFromSwitcher() {
         guard let mode = tabSwitcher else { return }
-        let list = switcherTabs(matching: tabSwitcherState.query, mode: mode)
+        let list = switcherItems(matching: tabSwitcherState.query, mode: mode)
         guard let target = list.first(where: { $0.id == tabSwitcherState.selectedID }) ?? list.first else { return }
         closeTabFromSwitcher(target)
     }
@@ -2782,10 +2909,27 @@ final class Browser: NSObject, ObservableObject {
             return
         }
 
-        // Three places and, if it can't be a place, a search. No open pages:
-        // ⌘K exists for those, and mixing them in here made the list long
-        // enough that reading it cost more than typing the address would have.
-        var list = privateTab ? [] : history.suggestions(for: typed, limit: 3, engines: engines)
+        // Saved bookmarks + top history places, deduplicated by URL and tagged
+        // with an open-tab badge whenever that exact page is already open.
+        var list = privateTab ? [] : bookmarks.suggestions(for: typed, limit: 2)
+        let bookmarkedURLs = Set(list.map(\.url.absoluteString))
+        let places = privateTab ? [] : history.suggestions(for: typed, limit: 3, engines: engines)
+            .filter { !bookmarkedURLs.contains($0.url.absoluteString) }
+        list.append(contentsOf: places.prefix(max(1, 4 - list.count)))
+        let openByURL = Dictionary(
+            tabs.compactMap { tab -> (String, Tab.ID)? in
+                guard tab.id != activeID, let url = tab.address else { return nil }
+                return (url.absoluteString, tab.id)
+            },
+            uniquingKeysWith: { first, _ in first }
+        )
+        list = list.map { offer in
+            var copy = offer
+            if let existing = openByURL[offer.url.absoluteString] {
+                copy.tab = existing
+            }
+            return copy
+        }
         // Searched for before: a few ranked matches, so the words needn't be typed
         // out again. Above the places once there's a space in what was
         // typed — by then it's words, not the start of an address.

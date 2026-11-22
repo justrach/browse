@@ -83,8 +83,17 @@ struct AsideBar: View {
                 .frame(minWidth: 0, maxWidth: .infinity, alignment: .leading)
                 .layoutPriority(-1)
 
-                // Right-side utility doors + top-right Ask pill (always visible, never clipped).
+                // Right-side utility doors + top-right graff pill (always visible, never clipped).
                 HStack(spacing: 4) {
+                    let overviewKey = shortcuts.key(for: .tabOverview)?.display
+                    Door(
+                        icon: "square.grid.2x2",
+                        on: browser.tabSwitcher == .grid,
+                        help: "Tab Overview" + (overviewKey.map { "   \($0)" } ?? "")
+                    ) {
+                        browser.toggleTabOverview()
+                    }
+
                     Door(
                         icon: "rectangle.split.2x1",
                         on: splitOpen,
@@ -171,8 +180,13 @@ private struct AddressSummaryButton: View {
     let browser: Browser
     let isDark: Bool
     @Binding var hovering: Bool
+    @ObservedObject private var shield = Shield.shared
     @State private var copyHover = false
     @State private var copied = false
+    @State private var siteHover = false
+    @State private var siteCardOpen = false
+    @State private var zoomHover = false
+    @State private var readerHover = false
 
     var body: some View {
         let host: String = {
@@ -183,8 +197,47 @@ private struct AddressSummaryButton: View {
             return Address.pretty(url)
         }()
         let title = tab.title.trimmingCharacters(in: .whitespacesAndNewlines)
+        let shieldPaused = !tab.isBlank && !host.isEmpty && browser.prefs.shielded && shield.isPaused(on: host)
+        let zoomed = !tab.isBlank && abs(tab.zoom - browser.prefs.pageZoom) > 0.005
+        let showCopy = !tab.isBlank && (hovering || copied)
+        let hasTrailingChip = showCopy || zoomed || tab.reader
 
-        HStack(spacing: 4) {
+        HStack(spacing: 2) {
+            if !tab.isBlank {
+                Button { siteCardOpen.toggle() } label: {
+                    ZStack(alignment: .bottomTrailing) {
+                        if tab.loading {
+                            ProgressView()
+                                .controlSize(.mini)
+                                .scaleEffect(0.65)
+                                .frame(width: 14, height: 14)
+                        } else {
+                            Mark(icon: tab.icon, letter: tab.monogram, size: 13.5)
+                                .opacity(0.94)
+                        }
+                        if shieldPaused {
+                            Circle()
+                                .fill(Color.orange)
+                                .frame(width: 5.5, height: 5.5)
+                                .offset(x: 2, y: 2)
+                        }
+                    }
+                    .frame(width: 24, height: 22)
+                    .background(
+                        RoundedRectangle(cornerRadius: 6, style: .continuous)
+                            .fill(Palette.ink.opacity(siteHover || siteCardOpen ? 0.08 : 0))
+                    )
+                    .contentShape(RoundedRectangle(cornerRadius: 6, style: .continuous))
+                }
+                .buttonStyle(.plain)
+                .onHover { siteHover = $0 }
+                .padding(.leading, 4)
+                .help(shieldPaused ? "Site info (ad blocker paused on \(host))" : "Site information & shield")
+                .popover(isPresented: $siteCardOpen, arrowEdge: .bottom) {
+                    SiteCard(browser: browser, tab: tab) { siteCardOpen = false }
+                }
+            }
+
             Button { browser.edit() } label: {
                 HStack(spacing: 7) {
                     if tab.isBlank {
@@ -196,15 +249,6 @@ private struct AddressSummaryButton: View {
                             .foregroundStyle(Palette.muted)
                             .lineLimit(1)
                     } else {
-                        if tab.loading {
-                            ProgressView()
-                                .controlSize(.mini)
-                                .scaleEffect(0.65)
-                                .frame(width: 13, height: 13)
-                        } else {
-                            Mark(icon: tab.icon, letter: tab.monogram, size: 13)
-                                .opacity(0.92)
-                        }
                         Text(host)
                             .font(.system(size: 12.5, weight: .medium))
                             .foregroundStyle(Palette.ink)
@@ -223,15 +267,52 @@ private struct AddressSummaryButton: View {
                         }
                     }
                 }
-                .padding(.leading, 10)
-                .padding(.trailing, (!tab.isBlank && (hovering || copied)) ? 2 : 10)
+                .padding(.leading, tab.isBlank ? 10 : 3)
+                .padding(.trailing, hasTrailingChip ? 2 : 10)
                 .frame(height: 28)
                 .contentShape(Rectangle())
             }
             .buttonStyle(.plain)
             .help("Open or edit address   ⌘L")
 
-            if !tab.isBlank && (hovering || copied) {
+            if tab.reader {
+                Button { browser.toggleReader() } label: {
+                    Image(systemName: "doc.plaintext.fill")
+                        .font(.system(size: 10, weight: .medium))
+                        .foregroundStyle(Palette.accent)
+                        .frame(width: 22, height: 22)
+                        .background(
+                            RoundedRectangle(cornerRadius: 6, style: .continuous)
+                                .fill(Palette.accent.opacity(readerHover ? 0.18 : 0.12))
+                        )
+                }
+                .buttonStyle(.plain)
+                .onHover { readerHover = $0 }
+                .padding(.trailing, (zoomed || showCopy) ? 1 : 3)
+                .help("Exit Reading Mode   ⇧⌘R")
+                .transition(.opacity.combined(with: .scale(scale: 0.9)))
+            }
+
+            if zoomed {
+                Button { browser.resetZoom() } label: {
+                    Text("\(Int((tab.zoom * 100).rounded()))%")
+                        .font(.system(size: 10, weight: .semibold, design: .rounded))
+                        .monospacedDigit()
+                        .foregroundStyle(zoomHover ? Palette.ink : Palette.muted)
+                        .padding(.horizontal, 6)
+                        .frame(height: 20)
+                        .background(
+                            Capsule().fill(Palette.ink.opacity(zoomHover ? 0.11 : 0.065))
+                        )
+                }
+                .buttonStyle(.plain)
+                .onHover { zoomHover = $0 }
+                .padding(.trailing, showCopy ? 1 : 4)
+                .help("Reset zoom to default   ⌘0")
+                .transition(.opacity.combined(with: .scale(scale: 0.9)))
+            }
+
+            if showCopy {
                 Button {
                     browser.copyAddress()
                     copied = true
@@ -274,7 +355,12 @@ private struct AddressSummaryButton: View {
         .onHover { hovering = $0 }
         .animation(Motion.quick, value: hovering)
         .animation(Motion.quick, value: copied)
+        .animation(Motion.quick, value: zoomed)
+        .animation(Motion.quick, value: tab.reader)
         .contextMenu {
+            Button("Site Information…") { siteCardOpen = true }
+                .disabled(tab.isBlank)
+            Divider()
             Button("Copy Address") { browser.copyAddress() }
             Button("Copy as Markdown Link") { browser.copyMarkdownLink() }
         }

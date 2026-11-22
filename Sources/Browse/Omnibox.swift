@@ -182,9 +182,7 @@ struct Omnibox: View {
                         .font(.system(size: 10, weight: .medium))
                         .foregroundStyle(Palette.muted)
                 case .ask:
-                    Image(systemName: "sparkle")
-                        .font(.system(size: 10, weight: .medium))
-                        .foregroundStyle(Palette.muted)
+                    GraffMark(size: 13, color: Palette.muted)
                 case .open:
                     // Already open: naming it takes you back to it rather than
                     // opening a second copy.
@@ -192,12 +190,34 @@ struct Omnibox: View {
                         .fill(Palette.ink.opacity(0.55))
                         .frame(width: 5, height: 5)
                         .padding(.horizontal, 2)
+                case .bookmark:
+                    if let host = offer.url.host()?.lowercased(), let icon = Favicons.shared.cached(host) {
+                        Image(nsImage: icon)
+                            .resizable()
+                            .interpolation(.high)
+                            .frame(width: 14, height: 14)
+                            .clipShape(RoundedRectangle(cornerRadius: 3, style: .continuous))
+                    } else {
+                        Image(systemName: "star.fill")
+                            .font(.system(size: 10, weight: .medium))
+                            .foregroundStyle(Palette.muted)
+                    }
+                case .visited, .known:
+                    if let host = offer.url.host()?.lowercased(), let icon = Favicons.shared.cached(host) {
+                        Image(nsImage: icon)
+                            .resizable()
+                            .interpolation(.high)
+                            .frame(width: 14, height: 14)
+                            .clipShape(RoundedRectangle(cornerRadius: 3, style: .continuous))
+                    } else {
+                        Image(systemName: "globe")
+                            .font(.system(size: 10.5, weight: .regular))
+                            .foregroundStyle(Palette.muted.opacity(0.75))
+                    }
                 case .elsewhere:
                     Image(systemName: "laptopcomputer.and.iphone")
                         .font(.system(size: 10, weight: .medium))
                         .foregroundStyle(Palette.muted)
-                default:
-                    EmptyView()
                 }
                 words
                     .font(.system(size: 13))
@@ -212,6 +232,19 @@ struct Omnibox: View {
                         .truncationMode(.tail)
                 }
                 Spacer(minLength: 0)
+                if offer.kind == .bookmark {
+                    Image(systemName: "star.fill")
+                        .font(.system(size: 9))
+                        .foregroundStyle(Palette.muted.opacity(0.65))
+                }
+                if offer.tab != nil && offer.kind != .open {
+                    Text("Open tab")
+                        .font(.system(size: 10, weight: .medium))
+                        .foregroundStyle(Palette.muted)
+                        .padding(.horizontal, 6)
+                        .padding(.vertical, 2)
+                        .background(Capsule().fill(Palette.ink.opacity(0.06)))
+                }
                 if offer.kind == .ask {
                     Text("⌘↩")
                         .font(.system(size: 11, design: .rounded))

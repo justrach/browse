@@ -591,7 +591,7 @@ struct AgentComposer: View {
 
     private var prompt: String {
         if composer.editingQueueID != nil { return "Edit queued message…" }
-        if agent.asking?.isQuestion == true { return "Answer Codegraff" }
+        if agent.asking?.isQuestion == true { return "Answer graff" }
         if agent.phase == .working { return full ? "Queue a follow-up (⌘↩ to interrupt)…" : "Queue a follow-up…" }
         return !full && agent.withPage && browser.active?.isBlank == false ? "Ask about this page, or @ a tab…" : "Ask anything, or @ a tab…"
     }

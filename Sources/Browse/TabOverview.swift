@@ -105,13 +105,15 @@ private struct TabPaletteView: View {
     @FocusState private var searchFocused: Bool
     @Environment(\.colorScheme) private var scheme
 
-    private var tabs: [Tab] {
-        browser.switcherTabs(matching: state.query, mode: .palette)
+    private var items: [SwitcherItem] {
+        browser.switcherItems(matching: state.query, mode: .palette)
     }
 
-    private var selectedTab: Tab? {
-        tabs.first { $0.id == state.selectedID } ?? tabs.first
+    private var selectedItem: SwitcherItem? {
+        items.first { $0.id == state.selectedID } ?? items.first
     }
+
+    private var selectedTab: Tab? { selectedItem?.tab }
 
     var body: some View {
         let dark = scheme == .dark
@@ -127,7 +129,7 @@ private struct TabPaletteView: View {
                 searchHeader(dark: dark)
                 Divider().overlay(Palette.hairline)
 
-                if tabs.isEmpty {
+                if items.isEmpty {
                     emptyState
                 } else {
                     HStack(spacing: 0) {
@@ -179,7 +181,7 @@ private struct TabPaletteView: View {
     }
 
     private func syncSelection() {
-        let list = tabs
+        let list = items
         if let current = state.selectedID, list.contains(where: { $0.id == current }) {
             return
         }
@@ -211,7 +213,7 @@ private struct TabPaletteView: View {
                 .help("Clear search")
             }
 
-            Text("\(tabs.count) open")
+            Text("\(items.count) open")
                 .font(.system(size: 11, weight: .medium))
                 .foregroundStyle(Palette.muted)
                 .padding(.horizontal, 7)
@@ -248,29 +250,30 @@ private struct TabPaletteView: View {
         ScrollViewReader { proxy in
             ScrollView {
                 LazyVStack(spacing: 2) {
-                    ForEach(tabs) { tab in
-                        let isSelected = tab.id == selectedTab?.id
-                        let isActive = tab.id == browser.activeID
+                    ForEach(items) { item in
+                        let tab = item.tab
+                        let isSelected = item.id == selectedItem?.id
+                        let isActive = item.space == nil && tab.id == browser.activeID
                         TabPaletteRow(
                             tab: tab,
+                            space: item.space,
                             selected: isSelected,
                             active: isActive,
-                            inSplit: browser.split?.has(tab.id) == true,
+                            inSplit: item.space == nil && browser.split?.has(tab.id) == true,
                             dark: dark,
                             onHover: { over in
                                 if over && !browser.cycling {
-                                    state.selectedID = tab.id
+                                    state.selectedID = item.id
                                 }
                             },
                             onSelect: {
-                                browser.closeTabSwitcher()
-                                browser.select(tab)
+                                browser.selectFromSwitcher(item)
                             },
                             onClose: {
-                                browser.closeTabFromSwitcher(tab)
+                                browser.closeTabFromSwitcher(item)
                             }
                         )
-                        .id(tab.id)
+                        .id(item.id)
                     }
                 }
                 .padding(8)
@@ -287,10 +290,11 @@ private struct TabPaletteView: View {
 
     @ViewBuilder
     private func sneakPeek(dark: Bool) -> some View {
-        if let tab = selectedTab {
+        if let item = selectedItem {
+            let tab = item.tab
             let _ = previews.revision
             let preview = previews.image(for: tab)
-            let isActive = tab.id == browser.activeID
+            let isActive = item.space == nil && tab.id == browser.activeID
             let prettyURL = tab.address.map { Address.pretty($0) } ?? "New Tab"
 
             VStack(alignment: .leading, spacing: 12) {
@@ -322,8 +326,7 @@ private struct TabPaletteView: View {
                 .shadow(color: .black.opacity(dark ? 0.30 : 0.08), radius: 12, y: 4)
                 .contentShape(Rectangle())
                 .onTapGesture {
-                    browser.closeTabSwitcher()
-                    browser.select(tab)
+                    browser.selectFromSwitcher(item)
                 }
                 .onAppear { previews.request(tab, width: 640) }
                 .id(tab.id)
@@ -338,7 +341,9 @@ private struct TabPaletteView: View {
                             .lineLimit(1)
                             .truncationMode(.tail)
                         Spacer(minLength: 4)
-                        if isActive {
+                        if let space = item.space {
+                            SpaceChip(space: space, dark: dark)
+                        } else if isActive {
                             Text("Current")
                                 .font(.system(size: 10, weight: .semibold))
                                 .foregroundStyle(Palette.accent)
@@ -359,8 +364,7 @@ private struct TabPaletteView: View {
 
                 HStack(spacing: 8) {
                     Button {
-                        browser.closeTabSwitcher()
-                        browser.select(tab)
+                        browser.selectFromSwitcher(item)
                     } label: {
                         HStack(spacing: 5) {
                             Text(isActive ? "Focus Tab" : "Switch to Tab")
@@ -376,7 +380,7 @@ private struct TabPaletteView: View {
                     }
                     .buttonStyle(TactilePress())
 
-                    if !isActive && !tab.isBlank {
+                    if item.space == nil && !isActive && !tab.isBlank {
                         Button {
                             browser.splitSelectedTabFromSwitcher()
                         } label: {
@@ -402,7 +406,7 @@ private struct TabPaletteView: View {
                     Spacer(minLength: 0)
 
                     Button {
-                        browser.closeTabFromSwitcher(tab)
+                        browser.closeTabFromSwitcher(item)
                     } label: {
                         Image(systemName: "trash")
                             .font(.system(size: 11.5, weight: .medium))
@@ -451,6 +455,7 @@ private struct TabPaletteView: View {
 
 private struct TabPaletteRow: View {
     @ObservedObject var tab: Tab
+    let space: Space?
     let selected: Bool
     let active: Bool
     let inSplit: Bool
@@ -479,11 +484,16 @@ private struct TabPaletteRow: View {
                             .frame(width: 5, height: 5)
                     }
                 }
-                Text(host)
-                    .font(.system(size: 11))
-                    .foregroundStyle(Palette.muted)
-                    .lineLimit(1)
-                    .truncationMode(.middle)
+                HStack(spacing: 5) {
+                    if let space {
+                        SpaceChip(space: space, dark: dark, compact: true)
+                    }
+                    Text(host)
+                        .font(.system(size: 11))
+                        .foregroundStyle(Palette.muted)
+                        .lineLimit(1)
+                        .truncationMode(.middle)
+                }
             }
 
             Spacer(minLength: 4)
@@ -556,12 +566,12 @@ private struct TabOverviewGridView: View {
     @FocusState private var searchFocused: Bool
     @Environment(\.colorScheme) private var scheme
 
-    private var tabs: [Tab] {
-        browser.switcherTabs(matching: state.query, mode: .grid)
+    private var items: [SwitcherItem] {
+        browser.switcherItems(matching: state.query, mode: .grid)
     }
 
-    private var selectedTab: Tab? {
-        tabs.first { $0.id == state.selectedID } ?? tabs.first
+    private var selectedItem: SwitcherItem? {
+        items.first { $0.id == state.selectedID } ?? items.first
     }
 
     private let columns = [
@@ -586,7 +596,7 @@ private struct TabOverviewGridView: View {
                     .padding(.horizontal, 28)
                     .padding(.bottom, 18)
 
-                if tabs.isEmpty {
+                if items.isEmpty {
                     VStack(spacing: 10) {
                         Image(systemName: "square.grid.2x2")
                             .font(.system(size: 28, weight: .light))
@@ -602,30 +612,35 @@ private struct TabOverviewGridView: View {
                     ScrollViewReader { proxy in
                         ScrollView {
                             LazyVGrid(columns: columns, spacing: 18) {
-                                ForEach(tabs) { tab in
+                                ForEach(items) { item in
+                                    let tab = item.tab
                                     TabOverviewCard(
                                         tab: tab,
-                                        selected: tab.id == selectedTab?.id,
-                                        active: tab.id == browser.activeID,
-                                        inSplit: browser.split?.has(tab.id) == true,
+                                        space: item.space,
+                                        selected: item.id == selectedItem?.id,
+                                        active: item.space == nil && tab.id == browser.activeID,
+                                        inSplit: item.space == nil && browser.split?.has(tab.id) == true,
                                         dark: dark,
                                         onSelect: {
-                                            browser.closeTabSwitcher()
-                                            browser.select(tab)
+                                            browser.selectFromSwitcher(item)
                                         },
                                         onSplit: {
-                                            browser.closeTabSwitcher()
-                                            if tab.id == browser.activeID {
-                                                browser.select(tab)
+                                            if item.space != nil {
+                                                browser.selectFromSwitcher(item)
                                             } else {
-                                                browser.open(tab, on: .right)
+                                                browser.closeTabSwitcher()
+                                                if tab.id == browser.activeID {
+                                                    browser.select(tab)
+                                                } else {
+                                                    browser.open(tab, on: .right)
+                                                }
                                             }
                                         },
                                         onClose: {
-                                            browser.closeTabFromSwitcher(tab)
+                                            browser.closeTabFromSwitcher(item)
                                         }
                                     )
-                                    .id(tab.id)
+                                    .id(item.id)
                                     .onAppear {
                                         previews.request(tab, width: 520)
                                     }
@@ -646,21 +661,21 @@ private struct TabOverviewGridView: View {
             }
         }
         .onAppear {
-            if state.selectedID == nil || !tabs.contains(where: { $0.id == state.selectedID }) {
-                state.selectedID = browser.activeID ?? tabs.first?.id
+            if state.selectedID == nil || !items.contains(where: { $0.id == state.selectedID }) {
+                state.selectedID = browser.activeID ?? items.first?.id
             }
             DispatchQueue.main.async { searchFocused = true }
             // Prime previews for the visible set smoothly.
-            for tab in tabs.prefix(12) {
-                previews.request(tab, width: 520)
+            for item in items.prefix(12) {
+                previews.request(item.tab, width: 520)
             }
         }
         .onChange(of: state.focusTick) { _, _ in
             DispatchQueue.main.async { searchFocused = true }
         }
         .onChange(of: state.query) { _, _ in
-            if let current = state.selectedID, tabs.contains(where: { $0.id == current }) { return }
-            state.selectedID = tabs.first?.id
+            if let current = state.selectedID, items.contains(where: { $0.id == current }) { return }
+            state.selectedID = items.first?.id
         }
     }
 
@@ -670,7 +685,7 @@ private struct TabOverviewGridView: View {
                 Text("Open Tabs")
                     .font(.system(size: 16, weight: .semibold, design: .rounded))
                     .foregroundStyle(Palette.ink)
-                Text("\(tabs.count)")
+                Text("\(items.count)")
                     .font(.system(size: 11.5, weight: .semibold))
                     .foregroundStyle(Palette.muted)
                     .padding(.horizontal, 7)
@@ -779,6 +794,7 @@ private struct TabOverviewGridView: View {
 private struct TabOverviewCard: View {
     @ObservedObject var tab: Tab
     @ObservedObject private var previews = TabPreviewCache.shared
+    let space: Space?
     let selected: Bool
     let active: Bool
     let inSplit: Bool
@@ -813,7 +829,7 @@ private struct TabOverviewCard: View {
                 Spacer(minLength: 4)
                 if hovering {
                     HStack(spacing: 4) {
-                        if !active && !tab.isBlank {
+                        if space == nil && !active && !tab.isBlank {
                             Button(action: onSplit) {
                                 Image(systemName: "rectangle.split.2x1")
                                     .font(.system(size: 9.5, weight: .medium))
@@ -893,7 +909,10 @@ private struct TabOverviewCard: View {
                     .foregroundStyle(Palette.muted)
                     .lineLimit(1)
                     .truncationMode(.middle)
-                Spacer(minLength: 0)
+                Spacer(minLength: 4)
+                if let space {
+                    SpaceChip(space: space, dark: dark, compact: true)
+                }
                 if tab.shy {
                     Image(systemName: "eye.slash")
                         .font(.system(size: 9))
@@ -957,6 +976,27 @@ private struct TabPlaceholderSurface: View {
                 endPoint: .bottomTrailing
             )
         )
+    }
+}
+
+private struct SpaceChip: View {
+    let space: Space
+    let dark: Bool
+    var compact = false
+
+    var body: some View {
+        let tint = Spaces.colours[space.colour % Spaces.colours.count]
+        HStack(spacing: 3) {
+            Image(systemName: space.symbol)
+                .font(.system(size: compact ? 8 : 9, weight: .medium))
+            Text(space.name)
+                .font(.system(size: compact ? 9.5 : 10, weight: .medium))
+                .lineLimit(1)
+        }
+        .foregroundStyle(tint)
+        .padding(.horizontal, compact ? 5 : 6)
+        .padding(.vertical, compact ? 1.5 : 2)
+        .background(Capsule().fill(tint.opacity(dark ? 0.18 : 0.12)))
     }
 }
 
