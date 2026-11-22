@@ -6,9 +6,17 @@ import AppKit
 /// shivers and says so, rather than quietly handing your keystrokes to a
 /// search engine.
 struct Omnibox: View {
-    @ObservedObject var browser: Browser
+    let browser: Browser
+    /// Isolated omnibox state so typing never invalidates the rest of the window.
+    @ObservedObject private var omnibox: OmniboxState
     /// Raised over a page by ⌘L, rather than standing on an empty tab.
     let over: Bool
+
+    init(browser: Browser, over: Bool) {
+        self.browser = browser
+        self._omnibox = ObservedObject(wrappedValue: browser.omnibox)
+        self.over = over
+    }
 
     /// The field's own height — the 22 of text and 14 of air above and below it
     /// that `field` lays out — so the list can sit below it without being
@@ -39,7 +47,7 @@ struct Omnibox: View {
                     // Present or gone, not always-on-and-hidden: the list keeps
                     // the appear and disappear it had, and the overlay is what
                     // keeps that from moving the field.
-                    if !browser.offers.isEmpty {
+                    if !omnibox.offers.isEmpty {
                         list
                             .frame(maxWidth: Metrics.fieldWidth)
                             .offset(y: Self.fieldHeight + 8)
@@ -55,13 +63,13 @@ struct Omnibox: View {
                 // an animation of its own. Its rows follow what was typed or
                 // pasted at once — sliding into place on a spring between
                 // keystrokes, they trailed behind the field.
-                .animation(Motion.quick, value: browser.offers.isEmpty)
+                .animation(Motion.quick, value: omnibox.offers.isEmpty)
                 .animation(Motion.settle, value: refused)
         }
     }
 
     private var field: some View {
-        AddressField(browser: browser)
+        AddressField(browser: browser, omnibox: omnibox)
             .frame(height: 22)
             .padding(.horizontal, 22)
             .padding(.vertical, 14)
@@ -87,12 +95,12 @@ struct Omnibox: View {
             )
             .shadow(color: .black.opacity(0.06), radius: 24, y: 8)
             .modifier(Shake(travel: shake))
-            .onChange(of: browser.refusals) { _, _ in
+            .onChange(of: omnibox.refusals) { _, _ in
                 shake = 0
                 refused = true
                 withAnimation(.easeOut(duration: 0.5)) { shake = 1 }
             }
-            .onChange(of: browser.typed) { _, _ in
+            .onChange(of: omnibox.typed) { _, _ in
                 withAnimation(Motion.quick) { refused = false }
             }
     }
@@ -106,8 +114,8 @@ struct Omnibox: View {
     /// is kept, only anchored to its own top edge.
     private var list: some View {
         VStack(spacing: 0) {
-            ForEach(Array(browser.offers.enumerated()), id: \.element.id) { index, offer in
-                Row(offer: offer, typed: browser.typed, picked: browser.picked == index)
+            ForEach(Array(omnibox.offers.enumerated()), id: \.element.id) { index, offer in
+                Row(offer: offer, typed: omnibox.typed, picked: omnibox.picked == index)
                     .contentShape(Rectangle())
                     .onTapGesture { browser.take(offer) }
                     // Google's answer arrives a beat after the keys: its rows
@@ -304,7 +312,8 @@ private struct Breath: NSViewRepresentable {
 /// selected, so carrying on typing replaces it and Return accepts it. That
 /// needs a real text field and its delegate.
 struct AddressField: NSViewRepresentable {
-    @ObservedObject var browser: Browser
+    let browser: Browser
+    @ObservedObject var omnibox: OmniboxState
 
     func makeCoordinator() -> Coordinator { Coordinator(browser: browser) }
 

@@ -6,6 +6,19 @@ import Combine
 // whether the address field is up. Small enough to read in one sitting, which
 // is the point of a browser with no features.
 
+/// Isolated observable state for the omnibox (`⌘L` / `⌘K`) so every keystroke
+/// and suggestion update re-renders only `Omnibox` — never `ContentView`,
+/// `SideBar`, `AsideBar`, `AgentColumn`, or the active web stage.
+@MainActor
+final class OmniboxState: ObservableObject {
+    @Published var typed = ""
+    @Published var offers: [Suggestion] = []
+    @Published var ending: String?
+    @Published var picked: Int?
+    @Published var refusals = 0
+    @Published var focusRequest = 0
+}
+
 @MainActor
 final class Browser: NSObject, ObservableObject {
     @Published private(set) var tabs: [Tab] = []
@@ -373,10 +386,20 @@ final class Browser: NSObject, ObservableObject {
             googleOrder = []
         }
     }
+    /// Isolated omnibox typing state so keystrokes never trigger full-window
+    /// SwiftUI invalidations across `ContentView` / `SideBar` / `AgentColumn`.
+    let omnibox = OmniboxState()
+
     /// What is in the field. Every change re-reads the history, because the
     /// list under the field and the grey ending inside it are both just
     /// answers to this string.
-    @Published var typed = "" { didSet { guess() } }
+    var typed: String {
+        get { omnibox.typed }
+        set {
+            omnibox.typed = newValue
+            guess()
+        }
+    }
 
     let history = History()
     /// Count a submitted search now; its resulting page finish adds a title.
@@ -388,11 +411,20 @@ final class Browser: NSObject, ObservableObject {
     }
     private var submittedSearches: [Tab.ID: SubmittedSearch] = [:]
     /// What the field is offering, best first.
-    @Published private(set) var offers: [Suggestion] = []
+    var offers: [Suggestion] {
+        get { omnibox.offers }
+        set { omnibox.offers = newValue }
+    }
     /// The rest of the best match, drawn grey after the caret. Tab takes it.
-    @Published private(set) var ending: String?
+    var ending: String? {
+        get { omnibox.ending }
+        set { omnibox.ending = newValue }
+    }
     /// Which row the arrow keys have walked to, if any.
-    @Published var picked: Int?
+    var picked: Int? {
+        get { omnibox.picked }
+        set { omnibox.picked = newValue }
+    }
     private var googleTask: Task<Void, Never>?
     private var googleGeneration = 0
     /// Google's answers for what was typed lately, kept for the field while
@@ -413,9 +445,14 @@ final class Browser: NSObject, ObservableObject {
         return URLSession(configuration: config)
     }()
     /// Bumped when what was typed isn't an address and can't be searched for.
-    @Published private(set) var refusals = 0
+    @Published private(set) var refusals = 0 {
+        didSet { omnibox.refusals = refusals }
+    }
     /// Bumped whenever the cursor should go back into the field.
-    @Published private(set) var focusRequest = 0
+    var focusRequest: Int {
+        get { omnibox.focusRequest }
+        set { omnibox.focusRequest = newValue }
+    }
 
     /// True while the field is a switcher rather than an address bar. ⌘K asks
     /// one question — which of the pages I already have open — and answering it

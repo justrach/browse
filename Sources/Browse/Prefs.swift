@@ -433,7 +433,7 @@ final class Preferences: ObservableObject {
         let scrolls = store.bool(forKey: "autoscroll")
         autoScroll = scrolls
         AutoScroll.on = scrolls
-        let fast = store.bool(forKey: "pages.120")
+        let fast = store.object(forKey: "pages.120") as? Bool ?? true
         fastPages = fast
         FrameRate.fast = fast
         // Left behind by the Web Inspector's switch, from before it was

@@ -1,6 +1,29 @@
 import AppKit
 import Foundation
 
+/// Isolated observable composer state so every keystroke updates only the
+/// composer and send button — never invalidating `AgentColumn`, `TurnView`,
+/// `MarkdownReplyView`, or `AgentHome`.
+@MainActor
+final class ComposerBuffer: ObservableObject {
+    @Published var text: String = ""
+    /// Bumped only on programmatic mutations (starters, prompt recall, slash
+    /// completions, queue edit, clear) so `NanoComposerField` syncs cleanly
+    /// without clobbering user typing or IME composition.
+    @Published private(set) var revision: Int = 0
+    /// Queued message currently being edited in place inside the composer.
+    @Published var editingQueueID: Agent.Queued.ID?
+
+    func setProgrammatic(_ value: String) {
+        text = value
+        revision &+= 1
+    }
+
+    func updateFromEditor(_ value: String) {
+        if text != value { text = value }
+    }
+}
+
 // Codegraff, working beside the page.
 //
 // Search doesn't carry an agent of its own; it runs the one already on the
@@ -377,7 +400,29 @@ final class Agent: ObservableObject {
     /// The model graff says it is running.
     @Published private(set) var model: Model?
     @Published private(set) var effort: Effort?
-    @Published var draft = ""
+    /// Isolated typing buffer observed only by the composer and Write view.
+    let composer = ComposerBuffer()
+    /// Flips only when draft transitions between empty and non-empty so views
+    /// like the header's New Chat button stay accurate without per-keystroke redraws.
+    @Published private(set) var hasDraft = false
+    /// NanoHarness full-page distraction-free Write editor (`⌘⇧E`).
+    @Published var writeMode = false
+    /// Unsent draft text, backed by `composer` so keystrokes never trigger
+    /// full-transcript SwiftUI invalidations.
+    var draft: String {
+        get { composer.text }
+        set {
+            composer.setProgrammatic(newValue)
+            let nonEmpty = !newValue.isEmpty
+            if hasDraft != nonEmpty { hasDraft = nonEmpty }
+        }
+    }
+    /// Called by the native AppKit editor on every keystroke.
+    func syncDraftFromEditor(_ text: String) {
+        composer.updateFromEditor(text)
+        let nonEmpty = !text.isEmpty
+        if hasDraft != nonEmpty { hasDraft = nonEmpty }
+    }
     @Published var passage: AgentPassage?
     lazy var tasks = AgentTasks()
     lazy var browserChat = AgentBrowserChat(agent: self, prefs: prefs)
@@ -440,7 +485,15 @@ final class Agent: ObservableObject {
     /// title where nobody has named it.
     @Published private(set) var named: String?
     /// The slash commands graff offers (`available_commands_update`).
-    private(set) var commands: [String] = []
+    @Published private(set) var commands: [String] = []
+    /// Last moment a streaming update arrived during an active turn (for NanoHarness quiet banner).
+    @Published private(set) var lastStreamAt = Date()
+    /// Saved draft text while editing a queued row in place inside the composer.
+    private var savedDraftBeforeQueueEdit: String?
+    /// Pending coalesced streaming reply/thought pieces flushed at ~60 Hz so
+    /// high-throughput streaming never starves 120 FPS scrolling or typing.
+    private var pendingFlow: (kind: Entry.Kind, text: String)?
+    private var flowFlushTask: Task<Void, Never>?
 
     /// A message typed while graff was working: it waits its turn, and goes
     /// once the turn before it ends — Harness's queue (crates/ui/src/
@@ -638,6 +691,7 @@ final class Agent: ObservableObject {
 
     /// Turned off in Settings, or about to be started afresh.
     func shutDown() {
+        flushFlow()
         generation = UUID()
         let dying = pipe
         pipe = nil
@@ -664,6 +718,9 @@ final class Agent: ObservableObject {
         outcome = nil
         queue = []
         queueHeld = false
+        composer.editingQueueID = nil
+        savedDraftBeforeQueueEdit = nil
+        writeMode = false
         named = nil
         context = nil
         stumble = nil
@@ -688,6 +745,9 @@ final class Agent: ObservableObject {
         outcome = chat.failed.map(Outcome.interrupted)
         queue = []
         queueHeld = false
+        composer.editingQueueID = nil
+        savedDraftBeforeQueueEdit = nil
+        writeMode = false
         named = nil
         context = nil
         stumble = nil
@@ -1066,10 +1126,26 @@ final class Agent: ObservableObject {
 
     // MARK: - talking
 
+    /// Earlier user prompts in this conversation, oldest first (deduplicating
+    /// consecutive repeats), for NanoHarness ↑/↓ prompt recall.
+    var sessionPrompts: [String] {
+        var out: [String] = []
+        for entry in entries where entry.kind == .you {
+            let trimmed = entry.text.trimmingCharacters(in: .whitespacesAndNewlines)
+            guard !trimmed.isEmpty, out.last != trimmed else { continue }
+            out.append(trimmed)
+        }
+        return out
+    }
+
     /// What was typed. An answer, if graff is waiting on one; otherwise a
     /// prompt, with the page as an embedded resource — graff's way of taking
     /// a document along with the words.
     func send(page tab: Tab?) {
+        if composer.editingQueueID != nil {
+            commitQueueEdit()
+            return
+        }
         guard prefs.usesAgent else { return }
         let tab = pinned ?? tab
         let text = draft.trimmingCharacters(in: .whitespacesAndNewlines)
@@ -1090,6 +1166,7 @@ final class Agent: ObservableObject {
             return
         }
         draft = ""
+        writeMode = false
         let excerpt = passage
         passage = nil
         // Mid-turn, it waits its turn.
@@ -1099,6 +1176,38 @@ final class Agent: ObservableObject {
         }
         queueHeld = false
         submit(text, page: tab, passage: excerpt)
+    }
+
+    /// NanoHarness ⌘↩ shortcut:
+    /// - Editing a queued item → save back to queue.
+    /// - Empty draft while queued items exist → interrupt and send newest queued item now.
+    /// - Non-empty draft while working → interrupt current turn and send this immediately.
+    /// - Otherwise → standard send.
+    func sendInterrupt(page tab: Tab?) {
+        if composer.editingQueueID != nil {
+            commitQueueEdit()
+            return
+        }
+        let trimmed = draft.trimmingCharacters(in: .whitespacesAndNewlines)
+        if trimmed.isEmpty {
+            if let newest = queue.last { sendNow(newest.id) }
+            return
+        }
+        if (phase == .working || prompting), asking?.isQuestion != true {
+            guard prefs.usesAgent else { return }
+            let targetTab = pinned ?? tab
+            let excerpt = passage
+            draft = ""
+            writeMode = false
+            passage = nil
+            let item = Queued(text: trimmed, tab: targetTab, passage: excerpt)
+            queue.insert(item, at: 0)
+            queueHeld = false
+            if let asking { answer(asking, with: nil) }
+            if let session { notify("session/cancel", ["sessionId": session]) }
+            return
+        }
+        send(page: tab)
     }
 
     private func submit(_ text: String, page tab: Tab?, passage: AgentPassage? = nil) {
@@ -1148,6 +1257,7 @@ final class Agent: ObservableObject {
         }
         call("session/prompt", ["sessionId": session, "prompt": blocks]) { [weak self] result in
             guard let self else { return }
+            self.flushFlow()
             self.prompting = false
             if self.phase == .working { self.phase = .ready }
             self.asking = nil
@@ -1204,20 +1314,41 @@ final class Agent: ObservableObject {
         }
     }
 
-    /// Back into the composer to change it; its words go ahead of whatever
-    /// is there.
+    /// NanoHarness inline queue editing: opens the queued row in the composer
+    /// while keeping the row visible as "Editing in composer".
     func edit(_ id: Queued.ID) {
-        guard let index = queue.firstIndex(where: { $0.id == id }) else { return }
-        if let held = queue[index].passage, let passage, held != passage {
-            entries.append(Entry(kind: .note, text: "Remove the selected text in your draft before editing this queued message"))
-            return
+        if composer.editingQueueID == id { return }
+        if composer.editingQueueID != nil { cancelQueueEdit() }
+        guard let item = queue.first(where: { $0.id == id }) else { return }
+        savedDraftBeforeQueueEdit = draft
+        composer.editingQueueID = id
+        draft = item.text
+    }
+
+    func commitQueueEdit() {
+        guard let id = composer.editingQueueID else { return }
+        let edited = draft.trimmingCharacters(in: .whitespacesAndNewlines)
+        if let index = queue.firstIndex(where: { $0.id == id }) {
+            if edited.isEmpty {
+                queue.remove(at: index)
+            } else {
+                queue[index].text = edited
+            }
         }
-        let item = queue.remove(at: index)
-        draft = draft.isEmpty ? item.text : item.text + "\n" + draft
-        if let excerpt = item.passage { passage = excerpt }
+        composer.editingQueueID = nil
+        draft = savedDraftBeforeQueueEdit ?? ""
+        savedDraftBeforeQueueEdit = nil
+    }
+
+    func cancelQueueEdit() {
+        guard composer.editingQueueID != nil else { return }
+        composer.editingQueueID = nil
+        draft = savedDraftBeforeQueueEdit ?? ""
+        savedDraftBeforeQueueEdit = nil
     }
 
     func unqueue(_ id: Queued.ID) {
+        if composer.editingQueueID == id { cancelQueueEdit() }
         queue.removeAll { $0.id == id }
     }
 
@@ -1286,12 +1417,14 @@ final class Agent: ObservableObject {
     }
 
     private func updated(_ update: [String: Any]) {
+        lastStreamAt = Date()
         switch update["sessionUpdate"] as? String {
         case "agent_message_chunk":
             flow(.reply, Agent.text(update["content"]))
         case "agent_thought_chunk":
             flow(.thought, Agent.text(update["content"]))
         case "tool_call":
+            flushFlow()
             let key = update["toolCallId"] as? String ?? ""
             let title = update["title"] as? String ?? "Working"
             // graff finding and unfolding its own tools: its business, not
@@ -1328,6 +1461,7 @@ final class Agent: ObservableObject {
             }
             took(update, into: index)
         case "plan":
+            flushFlow()
             // No id of its own on the wire: one plan per turn, refreshed in
             // place, as Harness keeps it under one id.
             let items = Steps.plan(update)
@@ -1357,6 +1491,7 @@ final class Agent: ObservableObject {
             // something the column offers. Harness drops both too.
             break
         case "gui_ask_user":
+            flushFlow()
             if let asking { answer(asking, with: nil) }
             let input = update["input"] as? [String: Any] ?? [:]
             let options = (input["options"] as? [Any] ?? []).compactMap { option -> Ask.Option? in
@@ -1373,6 +1508,7 @@ final class Agent: ObservableObject {
         case "config_option_update":
             adopt(update)
         case "gui_turn_end":
+            flushFlow()
             // A turn graff woke up for on its own has ended; one Search
             // started ends with its answer instead.
             if !prompting { settle(true) }
@@ -1389,15 +1525,35 @@ final class Agent: ObservableObject {
         if let diff = Steps.diff(update) { entries[index].diff = diff }
     }
 
-    /// A reply or a thought arrives a few words at a time; each piece goes
-    /// on the end of the one before, until something else comes between.
+    /// A reply or a thought arrives a few words at a time; coalesce bursts to
+    /// ~60 Hz (16 ms) so rapid streaming never starves 120 FPS scrolling or typing,
+    /// and flush immediately on every structural boundary (tool, plan, end).
     private func flow(_ kind: Entry.Kind, _ piece: String) {
         guard !piece.isEmpty else { return }
-        if let last = entries.indices.last, entries[last].kind == kind {
-            entries[last].text += piece
+        if let pending = pendingFlow, pending.kind == kind {
+            pendingFlow = (kind, pending.text + piece)
+        } else {
+            flushFlow()
+            pendingFlow = (kind, piece)
+        }
+        guard flowFlushTask == nil else { return }
+        flowFlushTask = Task { @MainActor [weak self] in
+            try? await Task.sleep(for: .milliseconds(16))
+            self?.flushFlow()
+        }
+    }
+
+    private func flushFlow() {
+        flowFlushTask?.cancel()
+        flowFlushTask = nil
+        guard let pending = pendingFlow else { return }
+        pendingFlow = nil
+        lastStreamAt = Date()
+        if let last = entries.indices.last, entries[last].kind == pending.kind {
+            entries[last].text += pending.text
             entries[last].until = Date()
         } else {
-            entries.append(Entry(kind: kind, text: piece))
+            entries.append(Entry(kind: pending.kind, text: pending.text))
         }
     }
 
@@ -1417,6 +1573,7 @@ final class Agent: ObservableObject {
         take(["jsonrpc": "2.0", "method": "session/update", "params": [
             "update": ["sessionUpdate": "agent_message_chunk", "content": ["type": "text", "text": piece]],
         ]])
+        flushFlow()
     }
 
     /// Any `session/update` at all, as graff would send it — the bench's
