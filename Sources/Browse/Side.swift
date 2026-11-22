@@ -9,6 +9,9 @@ import SwiftUI
 struct SideBar: View {
     @ObservedObject var browser: Browser
     @ObservedObject var prefs: Preferences
+    /// True when sliding out over the page from a folded edge (Fold.swift),
+    /// where the sidebar supplies its own glass surface and trailing edge.
+    var floating: Bool = false
 
     @Namespace private var pill
 
@@ -106,22 +109,29 @@ struct SideBar: View {
         // Rows on their way to or from another space stay in the column.
         .clipped()
         .onAppear { SpaceSwipe.shared.start(for: browser) }
-        // Glass: the desktop behind, blurred, under the page's colour when it
-        // has one and the theme's own ground when it doesn't.
+        // When docked inside the unified Arc/Dia window frame, the window's own
+        // continuous frosted canvas shines straight through with zero seam.
+        // When peeking over a folded page, supply our own glass backdrop.
         .background {
-            ZStack {
-                SideGlass(dark: tint?.dark)
-                if let tint {
-                    tint.wash
-                    if landing { Palette.hover.opacity(0.45) }
-                } else {
-                    (landing ? Palette.hover : Palette.ground).opacity(0.45)
+            if floating {
+                ZStack {
+                    SideGlass(dark: tint?.dark)
+                    if let tint {
+                        tint.wash
+                        if landing { Palette.hover.opacity(0.45) }
+                    } else {
+                        (landing ? Palette.hover : Palette.ground).opacity(0.45)
+                    }
                 }
+                .animation(Motion.glide, value: tint)
+            } else if landing {
+                Palette.hover.opacity(0.45)
             }
-            .animation(Motion.glide, value: tint)
         }
         .overlay(alignment: .trailing) {
-            Rectangle().fill(seam).frame(width: 1)
+            if floating {
+                Rectangle().fill(seam).frame(width: 1)
+            }
         }
         .overlay(alignment: .trailing) { edge }
         .onDrop(of: [.url, .text], isTargeted: $landing) { providers in
@@ -314,7 +324,8 @@ struct SideBar: View {
         let pinBlock = pinRows == 0 ? 0
             : CGFloat(pinRows) * pinHeight + CGFloat(pinRows - 1) * SideBar.pinGap + 10
         let loose = CGFloat(browser.tabs.count - pins) * (SideBar.row + SideBar.gap)
-        return Metrics.strip + pinBlock + SideBar.todayHeight + loose + 8
+        let newRow = SideBar.row + SideBar.gap
+        return Metrics.strip + pinBlock + SideBar.todayHeight + newRow + loose + 8
     }
 
     // MARK: - the pinned squares
@@ -518,10 +529,12 @@ struct SideBar: View {
         return [ids[min(l, r)]]
     }
 
-    /// The loose tabs and the row that makes another, which scroll as one.
+    /// The loose tabs and the Arc-style "+ New Tab" row, which scroll as one.
     private var rows: some View {
         VStack(alignment: .leading, spacing: 0) {
             today(loose: !looseTabs.isEmpty)
+            NewTabRow(browser: browser)
+                .padding(.bottom, SideBar.gap)
             loose
         }
     }
@@ -529,56 +542,51 @@ struct SideBar: View {
     /// The foot's door and its margin beneath.
     private static let footHeight: CGFloat = 26 + 10
 
-    private static let todayHeight: CGFloat = 26
+    private static let todayHeight: CGFloat = 24
 
-    /// Clean section header above loose tabs: space name (or "Tabs"), a subtle
-    /// Clear pill on hover when loose tabs exist, and New Tab.
+    /// Arc-style section divider above today's tabs: subtle hairline with
+    /// space name (or "Today") and a hover-only Clear capsule.
     private func today(loose: Bool) -> some View {
         let label: String = {
             if prefs.usesSpaces, let space = browser.spaces.first(where: { $0.id == browser.spaceID }), !space.name.isEmpty {
                 return space.name
             }
-            return "Tabs"
+            return "Today"
         }()
-        return VStack(spacing: 4) {
-            if browser.pinnedCount > 0 {
-                Rectangle()
-                    .fill(seam)
-                    .frame(height: 1)
-                    .padding(.horizontal, 6)
-            }
-            HStack(spacing: 4) {
-                Text(label)
-                    .font(.system(size: 11, weight: .semibold))
-                    .foregroundStyle(Palette.muted.opacity(0.68))
-                    .lineLimit(1)
-                    .padding(.leading, 10)
-                Spacer(minLength: 4)
-                if loose && headerHover {
-                    Button { browser.clearLoose() } label: {
-                        Text("Clear")
-                            .font(.system(size: 10.5, weight: .medium))
-                            .foregroundStyle(clearHover ? Palette.ink.opacity(0.85) : Palette.muted)
-                            .padding(.horizontal, 7)
-                            .frame(height: 20)
-                            .background(
-                                Capsule()
-                                    .fill(Palette.ink.opacity(clearHover ? 0.085 : 0.045))
-                            )
-                            .contentShape(Capsule())
-                    }
-                    .buttonStyle(.plain)
-                    .onHover { clearHover = $0 }
-                    .help("Close Tabs That Aren't Pinned")
-                    .transition(.opacity.combined(with: .scale(scale: 0.92)))
+        return HStack(spacing: 6) {
+            Text(label)
+                .font(.system(size: 11, weight: .semibold))
+                .foregroundStyle(Palette.muted.opacity(0.68))
+                .lineLimit(1)
+                .padding(.leading, 10)
+            Rectangle()
+                .fill(seam)
+                .frame(height: 0.75)
+                .frame(maxWidth: .infinity)
+            if loose && headerHover {
+                Button { browser.clearLoose() } label: {
+                    Text("Clear")
+                        .font(.system(size: 10.5, weight: .medium))
+                        .foregroundStyle(clearHover ? Palette.ink.opacity(0.88) : Palette.muted)
+                        .padding(.horizontal, 7)
+                        .frame(height: 19)
+                        .background(
+                            Capsule()
+                                .fill(Palette.ink.opacity(clearHover ? 0.09 : 0.048))
+                        )
+                        .contentShape(Capsule())
                 }
-                Nib(icon: "plus", help: "New Tab   ⌘T") { browser.newTab() }
+                .buttonStyle(.plain)
+                .onHover { clearHover = $0 }
+                .help("Close Tabs That Aren't Pinned")
+                .transition(.opacity.combined(with: .scale(scale: 0.92)))
             }
-            .frame(height: SideBar.todayHeight)
-            .contentShape(Rectangle())
-            .onHover { headerHover = $0 }
         }
-        .padding(.bottom, SideBar.gap)
+        .padding(.trailing, 4)
+        .frame(height: SideBar.todayHeight)
+        .contentShape(Rectangle())
+        .onHover { headerHover = $0 }
+        .padding(.bottom, 4)
         .animation(Motion.quick, value: loose)
         .animation(Motion.quick, value: headerHover)
         .animation(Motion.quick, value: clearHover)
@@ -678,7 +686,11 @@ private struct PinSquare: View {
                 // The ink, thinly, rather than a grey of its own: on glass a
                 // solid grey is a patch; this is a shade of whatever's behind.
                 RoundedRectangle(cornerRadius: scale * 9 / 34, style: .continuous)
-                    .fill(Palette.ink.opacity(hovering ? 0.085 : 0.05))
+                    .fill(Palette.ink.opacity(hovering ? 0.095 : 0.055))
+                    .overlay(
+                        RoundedRectangle(cornerRadius: scale * 9 / 34, style: .continuous)
+                            .strokeBorder(Palette.ink.opacity(hovering ? 0.11 : 0.06), lineWidth: 0.5)
+                    )
             }
         }
         .contentShape(RoundedRectangle(cornerRadius: scale * 9 / 34, style: .continuous))
@@ -692,6 +704,45 @@ private struct PinSquare: View {
         .help(tab.label)
         .animation(Motion.quick, value: hovering)
         .transition(.scale(scale: 0.8).combined(with: .opacity))
+    }
+}
+
+/// Arc-style "+ New Tab" action row tucked cleanly at the top of Today's tabs.
+private struct NewTabRow: View {
+    let browser: Browser
+    @State private var hovering = false
+
+    var body: some View {
+        Button { browser.newTab() } label: {
+            HStack(spacing: 9) {
+                Image(systemName: "plus")
+                    .font(.system(size: 11.5, weight: .medium))
+                    .foregroundStyle(hovering ? Palette.ink.opacity(0.85) : Palette.muted.opacity(0.82))
+                    .frame(width: 16, height: 16)
+                Text("New Tab")
+                    .font(.system(size: 13, weight: .regular))
+                    .foregroundStyle(hovering ? Palette.ink.opacity(0.9) : Palette.muted.opacity(0.85))
+                Spacer(minLength: 4)
+                if hovering {
+                    Text("⌘T")
+                        .font(.system(size: 10.5, weight: .medium, design: .rounded))
+                        .foregroundStyle(Palette.muted.opacity(0.75))
+                        .transition(.opacity)
+                }
+            }
+            .padding(.horizontal, 10)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .frame(height: SideBar.row)
+            .background(
+                RoundedRectangle(cornerRadius: 9, style: .continuous)
+                    .fill(Palette.ink.opacity(hovering ? 0.055 : 0))
+            )
+            .contentShape(RoundedRectangle(cornerRadius: 9, style: .continuous))
+        }
+        .buttonStyle(.plain)
+        .onHover { hovering = $0 }
+        .help("New Tab   ⌘T")
+        .animation(Motion.quick, value: hovering)
     }
 }
 
@@ -922,34 +973,6 @@ struct Speaker: View {
         .buttonStyle(.plain)
         .onHover { hovering = $0 }
         .help(tab.muted ? "Unmute Tab" : "Mute Tab")
-        .animation(Motion.quick, value: hovering)
-    }
-}
-
-/// A Door's smaller cousin, for the end of a line: a symbol and nothing else
-/// until the pointer is on it.
-private struct Nib: View {
-    let icon: String
-    var help = ""
-    let act: () -> Void
-
-    @State private var hovering = false
-
-    var body: some View {
-        Button(action: act) {
-            Image(systemName: icon)
-                .font(.system(size: 10.5, weight: .medium))
-                .foregroundStyle(hovering ? Palette.ink.opacity(0.85) : Palette.muted.opacity(0.78))
-                .frame(width: 22, height: 22)
-                .background(
-                    RoundedRectangle(cornerRadius: 6.5, style: .continuous)
-                        .fill(Palette.ink.opacity(hovering ? 0.075 : 0))
-                )
-                .contentShape(RoundedRectangle(cornerRadius: 6.5, style: .continuous))
-        }
-        .buttonStyle(.plain)
-        .onHover { hovering = $0 }
-        .help(help)
         .animation(Motion.quick, value: hovering)
     }
 }

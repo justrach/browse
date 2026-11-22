@@ -15,6 +15,9 @@ struct AsideBar: View {
     @Environment(\.colorScheme) private var scheme
     /// True when the left tab sidebar is visible beside this bar.
     let sidebarOpen: Bool
+    /// True when sitting inside the unified Arc/Dia frosted window canvas
+    /// above a floating rounded page card (transparent ground, no bottom seam).
+    var framed: Bool = false
 
     @State private var addressHover = false
     @State private var askHover = false
@@ -65,7 +68,7 @@ struct AsideBar: View {
                 // Domain | Page Title — shrinks gracefully so right-side controls never clip.
                 Group {
                     if let tab = browser.active {
-                        AddressSummaryButton(tab: tab, browser: browser, hovering: $addressHover)
+                        AddressSummaryButton(tab: tab, browser: browser, isDark: isDark, hovering: $addressHover)
                     } else {
                         Button { browser.edit() } label: {
                             Text("Search or enter website name")
@@ -144,22 +147,26 @@ struct AsideBar: View {
                 }
                 .fixedSize()
             }
-            .padding(.leading, sidebarOpen ? 10 : Metrics.lights)
-            .padding(.trailing, 12)
+            .padding(.leading, sidebarOpen ? (framed ? 0 : 10) : Metrics.lights)
+            .padding(.trailing, framed ? Split.gap + 2 : 12)
             .animation(Motion.glide, value: sidebarOpen)
         }
         .frame(maxWidth: .infinity)
         .frame(height: Metrics.strip)
         .clipped()
         .background {
-            if let tint {
-                Color(nsColor: tint.color)
-            } else {
-                Palette.ground
+            if !framed {
+                if let tint {
+                    Color(nsColor: tint.color)
+                } else {
+                    Palette.ground
+                }
             }
         }
         .overlay(alignment: .bottom) {
-            Rectangle().fill(seam).frame(height: 1)
+            if !framed {
+                Rectangle().fill(seam).frame(height: 1)
+            }
         }
         .environment(\.colorScheme, tint.map { $0.dark ? .dark : .light } ?? scheme)
         .animation(Motion.glide, value: tint)
@@ -169,6 +176,7 @@ struct AsideBar: View {
 private struct AddressSummaryButton: View {
     @ObservedObject var tab: Tab
     let browser: Browser
+    let isDark: Bool
     @Binding var hovering: Bool
     @State private var copyHover = false
     @State private var copied = false
@@ -256,11 +264,18 @@ private struct AddressSummaryButton: View {
         .frame(height: 28)
         .background(
             RoundedRectangle(cornerRadius: 8.5, style: .continuous)
-                .fill(Palette.ink.opacity(hovering ? 0.068 : 0.036))
+                .fill(isDark
+                    ? Color.white.opacity(hovering ? 0.105 : 0.068)
+                    : Color.white.opacity(hovering ? 0.88 : 0.62))
         )
         .overlay(
             RoundedRectangle(cornerRadius: 8.5, style: .continuous)
-                .strokeBorder(Palette.ink.opacity(hovering ? 0.095 : 0.045), lineWidth: 0.75)
+                .strokeBorder(
+                    isDark
+                        ? Color.white.opacity(hovering ? 0.13 : 0.075)
+                        : Color.black.opacity(hovering ? 0.095 : 0.055),
+                    lineWidth: 0.75
+                )
         )
         .contentShape(RoundedRectangle(cornerRadius: 8.5, style: .continuous))
         .onHover { hovering = $0 }

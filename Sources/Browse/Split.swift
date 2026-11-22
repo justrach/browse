@@ -219,6 +219,7 @@ struct SplitStage<Overlay: View>: View {
     @ObservedObject var browser: Browser
     @ObservedObject var left: Tab
     @ObservedObject var right: Tab
+    var inUnifiedCanvas: Bool = false
     let overlay: (Tab) -> Overlay
 
     @Environment(\.colorScheme) private var scheme
@@ -238,7 +239,9 @@ struct SplitStage<Overlay: View>: View {
                 }
             }
         )
-        .background { ground }
+        .background {
+            if !inUnifiedCanvas { ground }
+        }
         .environment(\.colorScheme, tint.map { $0.dark ? .dark : .light } ?? scheme)
     }
 

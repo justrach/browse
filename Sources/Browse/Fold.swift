@@ -115,7 +115,7 @@ struct Fold: View {
             ZStack(alignment: .leading) {
                 Color.clear.frame(width: 0)
                 if folding, prefs.sidebar, browser.peeking {
-                    SideBar(browser: browser, prefs: prefs)
+                    SideBar(browser: browser, prefs: prefs, floating: true)
                         .shadow(color: .black.opacity(0.14), radius: 20, x: 4)
                         .transition(.move(edge: .leading))
                 }
