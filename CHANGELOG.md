@@ -11,6 +11,18 @@ in [ROADMAP.md](ROADMAP.md).
 
 ## Unreleased
 
+### Added
+
+- **Smarter top address bar**: clickable favicon/shield popover opening `SiteCard` (with paused-shield indicator dot), clickable Zoom reset pill (`125%`), active Reading Mode badge, and one-click `⇧⌘\` Tab Overview button beside Split View.
+- **Smarter Omnibox (`⌘L` / `⌘T`)**: surfaces matching saved Bookmarks with star indicators, shows cached favicons on visited and bookmark rows, and badges URLs already open in another tab.
+- **Upgraded Find on Page (`⌘F`)**: frosted glass capsule with a live match counter (`3 / 12` / `0 / 0`) and `⇧↩` previous-match stepping.
+- **Little-Arc Peek**: integrated `38pt` header bar on Shift-click Peek panels with Back/Forward/Reload, favicon + title/host (click to copy), Copy Link, Open in Split View, Expand to Tab, and Close.
+- **Cross-Space Tab Switcher & Downloads indicator**: `⌘K` and `⇧⌘\` search and jump across all Spaces with tinted Space badges, and the sidebar footer displays a live Downloads button with an active download pulse dot.
+
+### Fixed
+
+- Unified remaining `Codegraff` / `Search` copy to `graff` / `browse` across context menus, composer, Agent home, and Settings › Agent, and added the `+` button instructions to the macOS 27 Full Disk Access prompt.
+
 ## 1.8.0 — 22 November 2026
 
 ### Added
