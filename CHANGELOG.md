@@ -6,6 +6,10 @@ All notable changes to **browse** are documented here, newest first.
 
 ## Unreleased
 
+### Fixed
+
+- **Eliminated bright corner bleed artifacts on rounded page cards (`App.swift`, `Stage.swift`, `AgentColumn.swift`)**: replaced the full-size `Palette.ground` backdrop behind `StageView` with `FramedPageBackdrop`, which insets the shadow-casting backdrop by `1pt` and matches `darkCanvas` whenever a live `WKWebView` is displayed — preventing subpixel misalignment between SwiftUI's `RoundedRectangle` and CoreAnimation's `CALayer.cornerCurve = .continuous` from bleeding white/light crescent fringes around the four corners on dark pages. Also clipped `PageOverlays` to the card corner radius and removed redundant double-clipping in `AgentColumn`.
+
 ## 1.8.5 — 22 November 2026
 
 ### Added
