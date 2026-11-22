@@ -1529,6 +1529,14 @@ final class PageView: WKWebView {
     /// How many came back unused and were kept quiet, for the bench.
     static var quieted = 0
 
+    override func performKeyEquivalent(with event: NSEvent) -> Bool {
+        if ShortcutStore.shared.isAgentToggle(event) {
+            _ = ContentView.keyHook?(event)
+            return true
+        }
+        return super.performKeyEquivalent(with: event)
+    }
+
     override func keyDown(with event: NSEvent) {
         if let handed, PageView.same(handed, event) {
             self.handed = nil

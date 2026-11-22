@@ -861,6 +861,7 @@ struct ContentView: View {
             .animation(Motion.settle, value: browser.reviewing)
         .onAppear {
             watchKeys()
+            MenuKeySanitizer.shared.start()
             browser.askFocus()
             // Addresses from other apps have somewhere to go from here on.
             Links.hand(to: browser)
@@ -1180,11 +1181,29 @@ struct ContentView: View {
         18: 1, 19: 2, 20: 3, 21: 4, 23: 5, 22: 6, 26: 7, 28: 8, 25: 9, 29: 0,
     ]
 
+    /// The last event timestamp handled by an agent toggle (`⌘;` / `⇧⌘;`),
+    /// preventing double-firing if an event visits both the monitor and performKeyEquivalent.
+    private static var lastAgentToggleTimestamp: TimeInterval = -1
+
     private func take(_ event: NSEvent) -> Bool {
         // While recording a custom shortcut in Settings › Shortcuts, let the recorder have every key.
         if ShortcutStore.shared.recording { return false }
         // A small window's keys are its own (see Little.swift).
         if let little = LittleWindow.owning(event.window) { return little.take(event) }
+
+        // ⌘; and ⇧⌘; always supersede web pages, editors, extensions, overlays,
+        // and macOS Edit › Spelling and Grammar inside browse.
+        if let combo = KeyCombo(event: event), combo.isUsable,
+           let command = ShortcutStore.shared.command(for: combo),
+           command.id == .toggleAgent || command.id == .expandAgent {
+            if event.timestamp > 0 && event.timestamp == ContentView.lastAgentToggleTimestamp {
+                return true
+            }
+            ContentView.lastAgentToggleTimestamp = event.timestamp
+            if browser.tabSwitcher != nil { browser.closeTabSwitcher() }
+            return perform(command.id, event: event)
+        }
+
         let flags = event.modifierFlags.intersection(.deviceIndependentFlagsMask)
         let key = event.charactersIgnoringModifiers?.lowercased() ?? ""
 

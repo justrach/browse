@@ -390,6 +390,14 @@ final class NanoTextView: NSTextView {
         return ok
     }
 
+    override func performKeyEquivalent(with event: NSEvent) -> Bool {
+        if ShortcutStore.shared.isAgentToggle(event) {
+            _ = ContentView.keyHook?(event)
+            return true
+        }
+        return super.performKeyEquivalent(with: event)
+    }
+
     override func keyDown(with event: NSEvent) {
         if let coordinator, coordinator.handleKeyDown(event, in: self) {
             return

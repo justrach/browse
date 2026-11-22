@@ -13,8 +13,10 @@ struct KeyCombo: Codable, Hashable, Equatable {
 
     init(_ key: String, command: Bool = false, shift: Bool = false, option: Bool = false, control: Bool = false) {
         // ⌘+ arrives as "=" or "+" depending on keyboard layout; normalize to "+".
+        // ⇧⌘; can arrive as ":" under some IMEs or synthetic events; normalize to ";".
         let plus = key == "=" || key == "+"
-        self.key = plus ? "+" : key.lowercased()
+        let colon = key == ":" && shift
+        self.key = plus ? "+" : (colon ? ";" : key.lowercased())
         self.shift = plus ? false : shift
         self.command = command
         self.option = option
@@ -363,6 +365,13 @@ final class ShortcutStore: ObservableObject {
         BrowserCommand.all.first { key(for: $0.id) == combo }
     }
 
+    /// True when `event` matches the agent toggle (`⌘;`) or full-screen expand (`⇧⌘;`).
+    func isAgentToggle(_ event: NSEvent) -> Bool {
+        guard !recording, let combo = KeyCombo(event: event), combo.isUsable,
+              let cmd = command(for: combo) else { return false }
+        return cmd.id == .toggleAgent || cmd.id == .expandAgent
+    }
+
     /// Assigns `combo` to `id`. If another command currently holds `combo`,
     /// that command is cleared so there are never duplicate bindings.
     @discardableResult
@@ -440,6 +449,7 @@ final class ShortcutStore: ObservableObject {
         if let data = try? JSONEncoder().encode(overrides) {
             defaults.set(data, forKey: Self.storageKey)
         }
+        MenuKeySanitizer.shared.sanitize()
     }
 
     private func saveGlobal() {
@@ -447,6 +457,62 @@ final class ShortcutStore: ObservableObject {
             defaults.set(data, forKey: Self.globalKey)
         } else {
             defaults.removeObject(forKey: Self.globalKey)
+        }
+    }
+}
+
+/// Strips conflicting macOS Edit › Spelling and Grammar key equivalents (`⌘;`
+/// Check Document Now and `⌘:` / `⇧⌘;` Show Spelling and Grammar) from the
+/// standard SwiftUI Edit menu so `browse`'s agent shortcuts always supersede
+/// macOS spellcheck across every view, sheet, text field, and `WKWebView`.
+@MainActor
+final class MenuKeySanitizer {
+    static let shared = MenuKeySanitizer()
+    private var observers: [NSObjectProtocol] = []
+
+    func start() {
+        guard observers.isEmpty else { sanitize(); return }
+        let centre = NotificationCenter.default
+        observers = [
+            centre.addObserver(forName: NSApplication.didUpdateNotification, object: nil, queue: nil) { [weak self] _ in
+                MainActor.assumeIsolated { self?.sanitize() }
+            },
+            centre.addObserver(forName: NSMenu.didBeginTrackingNotification, object: nil, queue: nil) { [weak self] _ in
+                MainActor.assumeIsolated { self?.sanitize() }
+            },
+        ]
+        sanitize()
+    }
+
+    func sanitize() {
+        guard let editMenu = NSApp.mainMenu?.items.first(where: { $0.title == "Edit" })?.submenu else { return }
+        let agentCombos: [KeyCombo] = [.toggleAgent, .expandAgent].compactMap { ShortcutStore.shared.key(for: $0) }
+        stripConflicts(in: editMenu, agentCombos: agentCombos)
+    }
+
+    private func stripConflicts(in menu: NSMenu, agentCombos: [KeyCombo]) {
+        for item in menu.items {
+            if let sub = item.submenu {
+                stripConflicts(in: sub, agentCombos: agentCombos)
+            }
+            guard !item.keyEquivalent.isEmpty else { continue }
+            let actionName = item.action.map(NSStringFromSelector) ?? ""
+            let isSpellingShortcut = actionName == "checkSpelling:" || actionName == "showGuessPanel:"
+            let flags = item.keyEquivalentModifierMask.intersection(.deviceIndependentFlagsMask)
+            let eq = item.keyEquivalent
+            // macOS encodes ⇧⌘; as keyEquivalent ":" with [.command] (or ";" with [.command, .shift]).
+            let shiftedColon = eq == ":" && flags == .command
+            let combo = KeyCombo(
+                shiftedColon ? ";" : eq,
+                command: flags.contains(.command),
+                shift: flags.contains(.shift) || shiftedColon,
+                option: flags.contains(.option),
+                control: flags.contains(.control)
+            )
+            if isSpellingShortcut || agentCombos.contains(combo) {
+                item.keyEquivalent = ""
+                item.keyEquivalentModifierMask = []
+            }
         }
     }
 }
