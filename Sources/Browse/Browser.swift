@@ -485,6 +485,13 @@ final class Browser: NSObject, ObservableObject {
     /// Open-tab finder / visual overview overlay (TabOverview.swift).
     @Published var tabSwitcher: TabSwitcherMode?
     let tabSwitcherState = TabSwitcherState()
+    /// Search query & focus signal for Settings › Search (`⌘F` inside Settings).
+    @Published var settingsSearchQuery = ""
+    @Published var settingsSearchFocusTick = 0
+
+    func focusSettingsSearch() {
+        settingsSearchFocusTick += 1
+    }
 
     var active: Tab? { tabs.first { $0.id == activeID } }
     var fieldShowing: Bool { editing || active?.isBlank ?? true }
