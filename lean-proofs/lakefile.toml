@@ -1,0 +1,9 @@
+name = "BrowseSpec"
+defaultTargets = ["Browse", "browse-spec-report"]
+
+[[lean_lib]]
+name = "Browse"
+
+[[lean_exe]]
+name = "browse-spec-report"
+root = "Main"

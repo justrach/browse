@@ -13,6 +13,11 @@ All notable changes to **browse** are documented here, newest first.
 
 ### Performance
 
+- **Core main-thread & data-structure optimizations + Lean 4 formal proofs (`lean-proofs/`, `History.swift`, `Bookmarks.swift`, `Browser.swift`, `Shortcuts.swift`)**:
+  - Replaced `History.recent()`'s O(N log N) full-history sort + 10k `URL` allocation with an O(N) top-8 partial selection (**~48× faster**, dropping from ~9.5 ms to ~0.20 ms on 10k visits), preserved `searched` / `recentCache` on non-top-8 `retitle()`, gated `Browser.objectWillChange` on actual top-8 changes, and precomputed `frecency` once in `History.save()` (**~3.8× faster**).
+  - Pre-indexed `Bookmarks` into a flat cache + O(1) `contains(url)` set with ASCII UTF-8 byte-level top-K matching for instant Omnibox typing over large imported bookmark libraries.
+  - Added an O(1) zero-allocation fast path to `MenuKeySanitizer` so 120–240 Hz `NSApplication.didUpdateNotification` events never re-walk the `Edit` menu.
+  - Added zero-dependency **Lean 4.36 formal proofs** (`lean-proofs/`, `tests/lean-proofs.sh`) machine-verifying `TopKSelection`, `ShieldFilter`, `OmniboxRank`, `VaultPolicy`, and `PageTintDark` with zero `sorry`s.
 - **Faster X / Twitter & heavy SPA scrolling (`Shield.swift`, `Forms.swift`, `Swipe.swift`, `StatusLine.swift`, `Tab.swift`)**: pruned ~489 unindexed global attribute/combinator cosmetic CSS rules (`[class^=...]`, `[data-testid^=...]`, `[href^=...]`) from the compiled Shield cosmetic list (`shield-cosmetic-v2`), replaced full-DOM `querySelectorAll('input[type="password"]')` scans in `FormRelay.script` with O(1)-collection `liveInputs` checks, eliminated synchronous `scrollWidth`/`clientWidth` layout flushes on non-scrollable divs in `Swipe.swift`, moved `StatusLine.swift` hover onto light-DOM `closest()` + `requestAnimationFrame` coalescing, and deduplicated `Tab` KVO updates.
 
 ### Fixed
