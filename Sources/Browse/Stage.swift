@@ -24,8 +24,45 @@ struct Page: View {
             // the stage was never told to take it back when it landed, and
             // the tab stayed empty. Nothing, then the page, is a change.
             WebStage(page: tab.isBlank || tab.asleep || tab.floating ? nil : tab.web, corner: corner)
-            PageOverlays(tab: tab)
+            if corner > 0 {
+                PageOverlays(tab: tab)
+                    .clipShape(RoundedRectangle(cornerRadius: corner, style: .continuous))
+            } else {
+                PageOverlays(tab: tab)
+            }
         }
+    }
+}
+
+/// Shadow-casting card backdrop behind the framed page stage (`App.swift`).
+///
+/// Observes `tab` directly so transitions between blank and live pages update
+/// without re-evaluating the whole window. When a live `WKWebView` is on screen,
+/// the backdrop is inset by 1pt and matched to `darkCanvas` so SwiftUI's
+/// `RoundedRectangle` and `StageView`'s `CALayer` continuous corner curve can
+/// never misalign and bleed a bright/dark fringe around the 4 corners.
+struct FramedPageBackdrop: View {
+    @ObservedObject var tab: Tab
+    let darkCanvas: Bool
+
+    var body: some View {
+        let livePage = !tab.isBlank && !tab.asleep && !tab.floating
+        let shape = RoundedRectangle(
+            cornerRadius: livePage ? max(0, Split.corner - 1) : Split.corner,
+            style: .continuous
+        )
+        let fill = livePage
+            ? Color(nsColor: Themes.color(\.ground, dark: darkCanvas))
+            : Palette.ground
+        shape
+            .fill(fill)
+            .padding(livePage ? 1 : 0)
+            .shadow(
+                color: .black.opacity(darkCanvas ? 0.26 : 0.06),
+                radius: darkCanvas ? 8 : 5,
+                y: 1.5
+            )
+            .allowsHitTesting(false)
     }
 }
 

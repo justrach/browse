@@ -59,13 +59,7 @@ struct AgentColumn: View {
         }
         .animation(Motion.quick, value: agent.writeMode)
         .frame(maxWidth: .infinity, maxHeight: .infinity)
-        .background {
-            if floatingCard {
-                Palette.ground.clipShape(card)
-            } else {
-                Palette.ground
-            }
-        }
+        .background(Palette.ground)
         .clipShape(RoundedRectangle(cornerRadius: floatingCard ? Split.corner : 0, style: .continuous))
         .overlay {
             if floatingCard {

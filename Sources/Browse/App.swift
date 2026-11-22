@@ -493,13 +493,7 @@ struct ContentView: View {
             if arcFrame {
                 let shape = RoundedRectangle(cornerRadius: Split.corner, style: .continuous)
                 ZStack {
-                    shape
-                        .fill(Palette.ground)
-                        .shadow(
-                            color: .black.opacity(darkCanvas ? 0.26 : 0.06),
-                            radius: darkCanvas ? 8 : 5,
-                            y: 1.5
-                        )
+                    FramedPageBackdrop(tab: tab, darkCanvas: darkCanvas)
                     // StageView rounds its own CALayer natively; avoid SwiftUI
                     // .clipShape/.shadow directly on the NSViewRepresentable so
                     // AppKit never promotes WKWebView above the Omnibox overlay.
