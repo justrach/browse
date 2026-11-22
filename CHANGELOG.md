@@ -1,15 +1,19 @@
 # Changelog
 
-What changes in Search from one version to the next, newest first.
+All notable changes to **browse** are documented here, newest first.
 
-**Unreleased** gathers what is done since the last version, as it lands:
-every fix and every addition gets its line the day it is merged. When a
-version ships, the section takes its number and date, its gist becomes the
-paragraph in `NOTES.md` (what Settings and the updater show), and the list
-is what gets posted as the update. What is planned but not done yet lives
-in [ROADMAP.md](ROADMAP.md).
+**Unreleased** tracks changes merged to `main` ahead of the next release. When a version ships via `./release.sh`, the **Unreleased** entries take the new version number and date, a concise summary is prepended to [NOTES.md](NOTES.md) for Settings and the in-app updater, and GitHub Actions publishes the signed DMG, ZIP, and `appcast.json`. Planned work lives in [ROADMAP.md](ROADMAP.md).
 
 ## Unreleased
+
+### Added
+
+- **Redesigned 5-step onboarding tour (`Welcome.swift`, `WelcomeResearch.swift`)**: live miniature preview of the unified Arc/Dia frosted glass frame (`graff` card, Dia active-tab badge, and `@`-tab mention chip), live `System / Light / Dark` appearance + layout + page-tint picker, macOS 27 Full Disk Access `+` guidance during browser import, and updated shortcut cards (`⌘L`, `⌘K`, `⇧⌘\`, `⌘;`).
+- **Automated UI layout & artifact regression test suite (`Tests/ui-layout.sh`)**: headless AppKit/SwiftUI `NSHostingView` geometry assertions plus source guardrails running on every CI build to prevent vertically-wrapped pills, overflowing palettes, narrow-header collisions, clipped Settings descriptions, and ScrollView `.mask` 120 FPS regressions.
+
+### Fixed
+
+- Locked `Pill`, `Quick`, and onboarding `Big` buttons to `.lineLimit(1).fixedSize()` so capsule controls never wrap into vertical single-letter columns, stacked Settings › Tabs › Memory profile cleanly above `Sleep now`, and removed the 3-line truncation cap on Settings `Line` descriptions.
 
 ## 1.8.1 — 22 November 2026
 
