@@ -504,8 +504,26 @@ final class Agent: ObservableObject {
         /// The tab to send along, read when the message goes, not now.
         var tab: Tab?
         var passage: AgentPassage?
+        var mentioned: [Tab] = []
     }
     @Published private(set) var queue: [Queued] = []
+
+    /// Additional open tabs explicitly `@`-mentioned in the composer (Dia-style
+    /// multi-tab context). Sent alongside the next prompt and cleared on send.
+    @Published private(set) var mentionedTabs: [Tab] = []
+
+    func mentionTab(_ tab: Tab) {
+        guard !tab.isBlank, !mentionedTabs.contains(where: { $0.id == tab.id }) else { return }
+        mentionedTabs.append(tab)
+    }
+
+    func unmentionTab(_ id: Tab.ID) {
+        mentionedTabs.removeAll { $0.id == id }
+    }
+
+    func clearMentionedTabs() {
+        if !mentionedTabs.isEmpty { mentionedTabs.removeAll() }
+    }
 
     /// The tab this conversation is about, and the only one it works in:
     /// every message carries it, graff is told to stay in it, and the
@@ -546,6 +564,7 @@ final class Agent: ObservableObject {
 
     func forgetDraft(_ id: UUID) {
         if pinned?.id == id { pin(nil) }
+        unmentionTab(id)
         drafts[id] = nil
     }
     /// Stopped by hand: the queue waits for the next thing sent rather than
@@ -715,6 +734,7 @@ final class Agent: ObservableObject {
         chatID = nil
         pinned = nil
         passage = nil
+        clearMentionedTabs()
         outcome = nil
         queue = []
         queueHeld = false
@@ -1169,13 +1189,15 @@ final class Agent: ObservableObject {
         writeMode = false
         let excerpt = passage
         passage = nil
+        let extras = mentionedTabs.filter { !$0.isBlank && $0.id != tab?.id }
+        clearMentionedTabs()
         // Mid-turn, it waits its turn.
         if phase == .working || prompting {
-            queue.append(Queued(text: text, tab: tab, passage: excerpt))
+            queue.append(Queued(text: text, tab: tab, passage: excerpt, mentioned: extras))
             return
         }
         queueHeld = false
-        submit(text, page: tab, passage: excerpt)
+        submit(text, page: tab, passage: excerpt, mentioned: extras)
     }
 
     /// NanoHarness ⌘↩ shortcut:
@@ -1197,10 +1219,12 @@ final class Agent: ObservableObject {
             guard prefs.usesAgent else { return }
             let targetTab = pinned ?? tab
             let excerpt = passage
+            let extras = mentionedTabs.filter { !$0.isBlank && $0.id != targetTab?.id }
             draft = ""
             writeMode = false
             passage = nil
-            let item = Queued(text: trimmed, tab: targetTab, passage: excerpt)
+            clearMentionedTabs()
+            let item = Queued(text: trimmed, tab: targetTab, passage: excerpt, mentioned: extras)
             queue.insert(item, at: 0)
             queueHeld = false
             if let asking { answer(asking, with: nil) }
@@ -1210,23 +1234,41 @@ final class Agent: ObservableObject {
         send(page: tab)
     }
 
-    private func submit(_ text: String, page tab: Tab?, passage: AgentPassage? = nil) {
+    private func submit(_ text: String, page tab: Tab?, passage: AgentPassage? = nil, mentioned: [Tab] = []) {
         let generation = self.generation
         let pageTitle = tab.flatMap { tab -> String? in
             guard !tab.isBlank else { return nil }
             return tab.title.isEmpty ? (tab.address?.host() ?? "This page") : tab.title
         }
+        let extraTitles = mentioned.compactMap { extra -> String? in
+            guard !extra.isBlank else { return nil }
+            return extra.title.isEmpty ? (extra.address?.host() ?? "Tab") : extra.title
+        }
+        let displayPage: String? = {
+            let names = ([pageTitle].compactMap { $0 }) + extraTitles.map { "@\($0)" }
+            return names.isEmpty ? nil : names.joined(separator: " · ")
+        }()
         lastActive = Date()
         if chatID == nil { chatID = UUID() }
-        entries.append(Entry(kind: .you, text: text, page: pageTitle, passage: passage))
+        entries.append(Entry(kind: .you, text: text, page: displayPage, passage: passage))
         outcome = nil
         keep()
         if phase == .ready { phase = .working }
         Task {
             var page: (address: String, title: String, text: String, tab: String)?
             if let tab { page = await Agent.read(tab) }
+            var extras: [(address: String, title: String, text: String, tab: String)] = []
+            for extra in mentioned {
+                if let read = await Agent.read(extra) { extras.append(read) }
+            }
             guard self.generation == generation, prefs.usesAgent else { return }
-            let blocks = Agent.blocks(text, page: page, passage: passage, only: self.pinned != nil && tab === self.pinned)
+            let blocks = Agent.blocks(
+                text,
+                page: page,
+                extras: extras,
+                passage: passage,
+                only: self.pinned != nil && tab === self.pinned
+            )
             switch phase {
             case .ready, .working:
                 prompt(blocks)
@@ -1296,7 +1338,7 @@ final class Agent: ObservableObject {
     private func sendQueued() {
         guard !queueHeld, !prompting, asking == nil, phase == .ready, !queue.isEmpty else { return }
         let first = queue.removeFirst()
-        submit(first.text, page: first.tab, passage: first.passage)
+        submit(first.text, page: first.tab, passage: first.passage, mentioned: first.mentioned)
     }
 
     /// Harness's Send now: this one goes next, and the turn under way is
@@ -1791,40 +1833,66 @@ final class Agent: ObservableObject {
         (try? JSONSerialization.data(withJSONObject: object, options: [.withoutEscapingSlashes]))?.count ?? .max
     }
 
-    /// The prompt: the page, cut to whatever room the words leave in one
-    /// line, then the words.
-    private static func blocks(_ text: String, page: (address: String, title: String, text: String, tab: String)?, passage: AgentPassage? = nil, only: Bool = false) -> [[String: Any]] {
+    /// The prompt: the active page and any `@`-mentioned tabs, trimmed fairly to
+    /// fit within one ACP line, followed by any excerpt and the user's words.
+    private static func blocks(
+        _ text: String,
+        page: (address: String, title: String, text: String, tab: String)?,
+        extras: [(address: String, title: String, text: String, tab: String)] = [],
+        passage: AgentPassage? = nil,
+        only: Bool = false
+    ) -> [[String: Any]] {
         let words: [String: Any] = ["type": "text", "text": text]
         let excerpt = passage?.blocks ?? []
-        guard let page else { return excerpt + [words] }
-        // A conversation pinned to the tab: that tab and nothing else.
-        let lead = only
-            ? "Work only in my browser tab \(page.tab): pass page \"\(page.tab)\" to every browser tool, act on it rather than opening pages of your own, and don't submit a form or go past a step that pays, sends or signs up until I say so. Here it is now:"
-            : "I'm looking at this page in my browser (tab \(page.tab)):"
-        func with(_ body: String) -> [[String: Any]] {
-            [
-                ["type": "text", "text": lead],
-                ["type": "resource", "resource": [
-                    "uri": page.address,
+        var sources: [(lead: String, address: String, whole: String)] = []
+        if let page {
+            let lead = only
+                ? "Work only in my browser tab \(page.tab): pass page \"\(page.tab)\" to every browser tool, act on it rather than opening pages of your own, and don't submit a form or go past a step that pays, sends or signs up until I say so. Here it is now:"
+                : "I'm looking at this page in my browser (tab \(page.tab)):"
+            let whole = page.title.isEmpty ? page.text : "\(page.title)\n\n\(page.text)"
+            sources.append((lead, page.address, whole))
+        }
+        for extra in extras {
+            let title = extra.title.isEmpty ? extra.address : extra.title
+            let lead = "Also referencing open browser tab \(extra.tab) (\(title)):"
+            let whole = extra.title.isEmpty ? extra.text : "\(extra.title)\n\n\(extra.text)"
+            sources.append((lead, extra.address, whole))
+        }
+        guard !sources.isEmpty else { return excerpt + [words] }
+
+        func assemble(_ bodies: [String]) -> [[String: Any]] {
+            var out: [[String: Any]] = []
+            for (src, body) in zip(sources, bodies) where !body.isEmpty {
+                out.append(["type": "text", "text": src.lead])
+                out.append(["type": "resource", "resource": [
+                    "uri": src.address,
                     "mimeType": "text/plain",
                     "text": body,
-                ]],
-            ] + excerpt + [words]
+                ]])
+            }
+            return out + excerpt + [words]
         }
-        let whole = page.title.isEmpty ? page.text : "\(page.title)\n\n\(page.text)"
-        var body = whole
-        // Room for the envelope around it — the method, the session's name —
-        // and for the introduction and an earlier conversation, which may
-        // go out ahead of it.
+
+        var bodies = sources.map(\.whole)
         let room = longestLine - 16_000
-        var size = wire(with(body))
-        while size > room, !body.isEmpty {
-            let keep = Int(Double(body.count) * Double(room) / Double(size) * 0.95)
-            body = String(body.prefix(max(0, keep)))
-            size = wire(with(body + "\n…"))
+        var size = wire(assemble(bodies))
+        while size > room {
+            let totalChars = bodies.reduce(0) { $0 + $1.count }
+            guard totalChars > 0 else { break }
+            let ratio = Double(room) / Double(size) * 0.92
+            bodies = bodies.map { body in
+                guard !body.isEmpty else { return "" }
+                let keep = max(0, Int(Double(body.count) * ratio))
+                return keep < body.count ? String(body.prefix(keep)) : body
+            }
+            size = wire(assemble(bodies.enumerated().map { idx, b in
+                b.count < sources[idx].whole.count && !b.isEmpty ? b + "\n…" : b
+            }))
         }
-        if body.isEmpty { return excerpt + [words] }
-        return with(body.count < whole.count ? body + "\n…" : body)
+        let finalBodies = bodies.enumerated().map { idx, b in
+            b.count < sources[idx].whole.count && !b.isEmpty ? b + "\n…" : b
+        }
+        return assemble(finalBodies)
     }
 
     /// The page's words, as a reader would take them: its text, not its

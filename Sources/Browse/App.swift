@@ -633,10 +633,11 @@ struct ContentView: View {
         }
     }
 
-    /// In a split, the field stands over the half in front — the empty
-    /// side ⌘D just opened, say — not across both pages.
+    /// In a split, the field stands over the half in front — unless `⌘T` /
+    /// `+ New Tab` raised the Arc-style Command Bar, which centres cleanly over
+    /// the whole stage.
     private var otherHalf: (leading: CGFloat, trailing: CGFloat) {
-        guard let pair = browser.shownSplit, let split = browser.split else { return (0, 0) }
+        guard !browser.openingNewTab, let pair = browser.shownSplit, let split = browser.split else { return (0, 0) }
         let width = browser.stageFrame.width
         let usable = max(1, width - Split.gap * 3)
         let left = Split.gap * 1.5 + usable * min(0.82, max(0.18, split.fraction))

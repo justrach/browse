@@ -121,7 +121,7 @@ extension Browser {
         }
         guard let page = active.isBlank ? last : active else { NSSound.beep(); return }
         if talkOnStage { leaveStage() }
-        if !active.isBlank { newTab() }
+        if !active.isBlank { newTab(immediate: true) }
         guard let empty = self.active, empty.id != page.id else { return }
         let pair = Split(left: page.id, right: empty.id)
         withAnimation(Motion.glide) {
