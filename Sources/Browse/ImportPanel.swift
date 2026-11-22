@@ -186,18 +186,35 @@ struct ImportPanel: View {
     @ViewBuilder
     private func options(for source: ImportSource) -> some View {
         if locked.contains(source.id) {
+            let macOS27 = ProcessInfo.processInfo.operatingSystemVersion.majorVersion >= 27
             Card {
                 if let chromium = source.chromium {
-                    Line(
-                        "Allow access to \(source.name)",
-                        "macOS protects \(source.name)'s data folder. Pick it once to import right away for this session — no Full Disk Access or relaunch needed."
-                    ) {
-                        HStack(spacing: 6) {
-                            Pill("Choose folder…", filled: true) {
-                                chooseFolder(for: chromium)
+                    if macOS27 {
+                        Line(
+                            "Full Disk Access required on macOS 27",
+                            "macOS locks \(source.name)'s data folder even after picking it in Open. Turn on Full Disk Access for browse and this sheet refreshes automatically — or import an exported file below."
+                        ) {
+                            HStack(spacing: 6) {
+                                Pill("Full Disk Access…", filled: true) {
+                                    browser.unlock(source) { look() }
+                                }
+                                Pill("Choose folder…") {
+                                    chooseFolder(for: chromium)
+                                }
                             }
-                            Pill("Full Disk Access…") {
-                                browser.unlock(source) { look() }
+                        }
+                    } else {
+                        Line(
+                            "Allow access to \(source.name)",
+                            "macOS protects \(source.name)'s data folder. Pick it once to import right away for this session — no Full Disk Access or relaunch needed."
+                        ) {
+                            HStack(spacing: 6) {
+                                Pill("Choose folder…", filled: true) {
+                                    chooseFolder(for: chromium)
+                                }
+                                Pill("Full Disk Access…") {
+                                    browser.unlock(source) { look() }
+                                }
                             }
                         }
                     }
@@ -210,7 +227,7 @@ struct ImportPanel: View {
                     }
                 } else {
                     Line("Full Disk Access", "Since macOS 27, only \(source.name) itself, and apps you give Full Disk Access, can read its folder. Turned on, this sheet looks again by itself.") {
-                        Pill("Turn It On…") {
+                        Pill("Turn It On…", filled: true) {
                             browser.unlock(source) { look() }
                         }
                     }
@@ -221,9 +238,10 @@ struct ImportPanel: View {
         }
     }
 
-    /// macOS protects another app's data. Choosing its folder in the system
-    /// panel grants Browse immediate access for this session without requiring
-    /// Full Disk Access or a relaunch (matching upstream Search).
+    /// macOS protects another app's data. Choosing a custom or non-macl folder
+    /// grants immediate session access; on macOS 27, if macOS still refuses
+    /// access to a system-protected folder, say so honestly instead of claiming
+    /// no profile was found.
     private func chooseFolder(for source: Chromium.Source) {
         let panel = NSOpenPanel()
         panel.canChooseDirectories = true
@@ -237,14 +255,27 @@ struct ImportPanel: View {
             looking = true
             DispatchQueue.global(qos: .userInitiated).async {
                 let accessed = folder.startAccessingSecurityScopedResource()
+                let resolved = folder.resolvingSymlinksInPath()
+                var permissionDenied = false
+                do {
+                    _ = try FileManager.default.contentsOfDirectory(atPath: resolved.path)
+                } catch let error as NSError {
+                    let underlying = error.userInfo[NSUnderlyingErrorKey] as? NSError
+                    permissionDenied = (error.domain == NSCocoaErrorDomain && error.code == NSFileReadNoPermissionError)
+                        || (error.domain == NSPOSIXErrorDomain && [Int(EACCES), Int(EPERM)].contains(error.code))
+                        || (underlying?.domain == NSPOSIXErrorDomain && [Int(EACCES), Int(EPERM)].contains(underlying?.code ?? 0))
+                }
                 var selected = source
-                selected.rootOverride = folder.resolvingSymlinksInPath()
-                let found = !selected.folders.isEmpty
+                selected.rootOverride = resolved
+                let found = !permissionDenied && !selected.folders.isEmpty
                 if !found && accessed { folder.stopAccessingSecurityScopedResource() }
                 DispatchQueue.main.async {
                     guard found else {
                         looking = false
-                        folderError = "No browser profile was found in \(folder.path.replacingOccurrences(of: NSHomeDirectory(), with: "~")). Choose the folder that contains Default or Profile 1."
+                        let display = folder.path.replacingOccurrences(of: NSHomeDirectory(), with: "~")
+                        folderError = permissionDenied
+                            ? "macOS still blocked access to \(display). Click Full Disk Access… above (or export bookmarks/passwords from \(source.name) and use the file button below)."
+                            : "No browser profile was found in \(display). Choose the folder that contains Default or Profile 1."
                         return
                     }
                     Chromium.useForSession(folder, for: source)
@@ -337,7 +368,8 @@ struct ImportPanel: View {
 
     private func detail(of source: ImportSource) -> String {
         if locked.contains(source.id) {
-            return source.chromium != nil
+            let macOS27 = ProcessInfo.processInfo.operatingSystemVersion.majorVersion >= 27
+            return (source.chromium != nil && !macOS27)
                 ? "macOS keeps its folder shut — choose folder to import"
                 : "macOS keeps its folder shut — needs Full Disk Access"
         }

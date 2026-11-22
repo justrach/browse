@@ -138,7 +138,7 @@ struct AgentColumn: View {
             .frame(width: 540)
             .background(Palette.ground)
         }
-        .alert("Reconnect Codegraff?", isPresented: $confirmingReconnect) {
+        .alert("Reconnect graff?", isPresented: $confirmingReconnect) {
             Button("Reconnect") { agent.reconnect() }
             Button("Cancel", role: .cancel) {}
         } message: {
@@ -209,18 +209,6 @@ struct AgentColumn: View {
                             PulseDot(color: light, size: 5.5, active: agent.phase == .starting || agent.phase == .working)
                                 .accessibilityLabel(status)
                         }
-                        if AgentTools.harnessAvailable {
-                            Text("harness")
-                                .font(.system(size: 9.5, weight: .medium, design: .monospaced))
-                                .foregroundStyle(Palette.muted.opacity(0.85))
-                                .padding(.horizontal, 5)
-                                .padding(.vertical, 1.5)
-                                .background(
-                                    Capsule()
-                                        .fill(Palette.ink.opacity(scheme == .dark ? 0.08 : 0.05))
-                                )
-                                .help("Connected to local Harness engine via MCP")
-                        }
                     }
                     if full || agent.asking != nil || !agent.phase.words.isEmpty {
                         HStack(spacing: 4) {
@@ -235,7 +223,10 @@ struct AgentColumn: View {
                         }
                     }
                 }
-                .help(agent.entries.isEmpty ? status : "\(agent.title) — \(status)")
+                .help(
+                    (agent.entries.isEmpty ? status : "\(agent.title) — \(status)")
+                        + (AgentTools.harnessAvailable ? " · Harness connected" : "")
+                )
 
                 Spacer(minLength: 4)
 
@@ -254,9 +245,13 @@ struct AgentColumn: View {
                         if prefs.agentTasks {
                             Button("Task library…") { showingTasks = true }
                         }
+                        if AgentTools.harnessAvailable {
+                            Divider()
+                            Text("Harness engine connected")
+                        }
                         Divider()
                         Button("Continue in browser…") { showingBrowserChat = true }
-                        Button("How to use Codegraff…") { showingGuide = true }
+                        Button("How to use graff…") { showingGuide = true }
                         Button("Report an agent problem…") { browser.reportAgentProblem() }
                         Divider()
                         Button("Reconnect…") { confirmingReconnect = true }
