@@ -189,7 +189,7 @@ enum Vault {
         guard status == errSecItemNotFound else { return false }
 
         var fresh = identity.merging(fields) { _, new in new }
-        fresh[kSecAttrAccessible as String] = kSecAttrAccessibleWhenUnlocked
+        fresh[kSecAttrAccessible as String] = kSecAttrAccessibleWhenUnlockedThisDeviceOnly
         return SecItemAdd(fresh as CFDictionary, nil) == errSecSuccess
     }
 
@@ -227,9 +227,10 @@ enum Vault {
         let context = LAContext()
         var trouble: NSError?
         guard context.canEvaluatePolicy(.deviceOwnerAuthentication, error: &trouble) else {
-            // No way to ask at all — a Mac with no password set. Then there is
-            // nothing to prove.
-            done(true)
+            // Fail closed unless the Mac genuinely has no login password configured.
+            let noPasscode = (trouble as? LAError)?.code == .passcodeNotSet
+                || trouble?.code == LAError.passcodeNotSet.rawValue
+            done(noPasscode)
             return
         }
         context.evaluatePolicy(.deviceOwnerAuthentication, localizedReason: reason) { ok, _ in

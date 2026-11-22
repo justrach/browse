@@ -40,6 +40,11 @@ enum SafariExport {
         // passwords in there are in the clear.
         let temp = FileManager.default.temporaryDirectory
             .appendingPathComponent("office-import-\(UUID().uuidString)", isDirectory: true)
+        try FileManager.default.createDirectory(
+            at: temp,
+            withIntermediateDirectories: true,
+            attributes: [.posixPermissions: 0o700]
+        )
         defer { try? FileManager.default.removeItem(at: temp) }
         let ditto = Process()
         ditto.executableURL = URL(fileURLWithPath: "/usr/bin/ditto")

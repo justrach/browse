@@ -6,6 +6,14 @@ All notable changes to **browse** are documented here, newest first.
 
 ## Unreleased
 
+### Added
+
+- **Single-letter visited domain autocomplete (`x` → `x.com`)**: typing a single character in the Omnibox now inline-completes to visited or bookmarked sites whose host starts with that letter (e.g. typing `x` + `↩` goes straight to `x.com`), with exact host-label matches decisively outranking longer prefixes and visited host matches ranking ahead of noisy bookmark title/path substrings.
+
+### Security
+
+- **Hardened macOS Keychain password vault (`Vault.swift`, `Import.swift`, `SafariImport.swift`, `Passwords.swift`)**: stores newly saved and imported passwords with `kSecAttrAccessibleWhenUnlockedThisDeviceOnly`, fails closed on `LocalAuthentication` errors (only bypassing if the Mac truly has `passcodeNotSet`), locks temporary browser-import SQLite/export directories to owner-only `0o700` permissions with zero-overwrite cleanup on teardown, and tightens clipboard auto-clear to 45 seconds.
+
 ## 1.8.2 — 22 November 2026
 
 ### Added
