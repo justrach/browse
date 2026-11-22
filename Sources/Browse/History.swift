@@ -16,6 +16,8 @@ struct Suggestion: Identifiable, Equatable {
     enum Kind: String {
         /// A page that is open right now.
         case open
+        /// A saved bookmark.
+        case bookmark
         /// Somewhere you have actually been.
         case visited
         /// One of the well-known addresses the field knows from the start.
@@ -26,16 +28,16 @@ struct Suggestion: Identifiable, Equatable {
         case searched
         /// A live suggestion from Google, kept only while this field is open.
         case google
-        /// The same words, for Codegraff instead (see Agent.swift).
+        /// The same words, for graff instead (see Agent.swift).
         case ask
         /// A tab open on another device synced through iCloud.
         case elsewhere
     }
 
-    /// The words to ask Codegraff, as a row. It goes nowhere of its own; the
+    /// The words to ask graff, as a row. It goes nowhere of its own; the
     /// browser hands the words over instead of opening an address.
     static func ask(_ words: String) -> Suggestion {
-        Suggestion(key: words, title: "Ask Codegraff", url: URL(fileURLWithPath: "/"), kind: .ask)
+        Suggestion(key: words, title: "Ask graff", url: URL(fileURLWithPath: "/"), kind: .ask)
     }
 
     /// The same words can be both a search and a question; the list tells

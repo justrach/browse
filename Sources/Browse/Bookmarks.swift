@@ -78,6 +78,49 @@ final class Bookmarks: ObservableObject {
         return walk(roots)
     }
 
+    /// Top saved bookmarks matching what's typed in the omnibox (`⌘L` / `⌘T`).
+    func suggestions(for typed: String, limit: Int = 2) -> [Suggestion] {
+        let needle = typed.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+        guard !needle.isEmpty, limit > 0 else { return [] }
+        var ranked: [(suggestion: Suggestion, score: Int)] = []
+        var seen = Set<String>()
+
+        func walk(_ nodes: [Bookmark]) {
+            for node in nodes {
+                if node.isFolder {
+                    walk(node.children ?? [])
+                    continue
+                }
+                guard let raw = node.url, let url = URL(string: raw),
+                      seen.insert(raw).inserted else { continue }
+                let pretty = Address.pretty(url)
+                let prettyLow = pretty.lowercased()
+                let titleLow = node.title.lowercased()
+                let score: Int
+                if titleLow.hasPrefix(needle) {
+                    score = 120
+                } else if prettyLow.hasPrefix(needle) {
+                    score = 100
+                } else if titleLow.contains(needle) {
+                    score = 75
+                } else if prettyLow.contains(needle) || raw.lowercased().contains(needle) {
+                    score = 50
+                } else {
+                    continue
+                }
+                ranked.append((
+                    Suggestion(key: pretty, title: node.title, url: url, kind: .bookmark),
+                    score
+                ))
+            }
+        }
+        walk(roots)
+        return ranked
+            .sorted { $0.score > $1.score }
+            .prefix(limit)
+            .map(\.suggestion)
+    }
+
     func remove(_ id: Bookmark.ID) {
         roots = Bookmarks.prune(id, from: roots)
         save()

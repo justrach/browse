@@ -1435,13 +1435,13 @@ struct AgentPage: View {
     var body: some View {
         Card {
             Line(
-                "Codegraff",
+                "graff",
                 "Toggle the agent sidebar with ⌘;, expand full screen with ⇧⌘;, or press . while reading. ⌘↩ asks from the address field."
             ) {
                 Switch(on: $prefs.usesAgent)
             }
             if prefs.usesAgent {
-                Text("Codegraff can read pages, fill forms, run commands and edit files on your Mac without asking before each action. Send only the work you want it to do.")
+                Text("graff can read pages, fill forms, run commands and edit files on your Mac without asking before each action. Send only the work you want it to do.")
                     .font(.system(size: 11.5))
                     .foregroundStyle(Palette.muted)
                     .fixedSize(horizontal: false, vertical: true)
@@ -1462,7 +1462,7 @@ struct AgentPage: View {
             Line("graff", location) {
                 HStack(spacing: 6) {
                     if looked, found == nil {
-                        Pill("Get Codegraff", filled: true) {
+                        Pill("Get graff", filled: true) {
                             browser.tuning = false
                             browser.open(Agent.download, foreground: true)
                         }
@@ -1474,7 +1474,7 @@ struct AgentPage: View {
                 }
             }
             Rule()
-            Line("Ask about selected text", "Right-click a passage and choose Ask Codegraff about Selection. Review the excerpt and its source before sending") {
+            Line("Ask about selected text", "Right-click a passage and choose Ask graff about Selection. Review the excerpt and its source before sending") {
                 Switch(on: $prefs.agentSelection)
             }
             Rule()
@@ -1522,7 +1522,7 @@ struct AgentPage: View {
         guard looked else { return "Looking…" }
         guard let found else {
             return prefs.agentPath.isEmpty
-                ? "Not found — install Codegraff, or show Search where graff is"
+                ? "Not found — install graff, or show browse where graff is"
                 : "Nothing to run at \(prefs.agentPath)"
         }
         return found.replacingOccurrences(of: NSHomeDirectory(), with: "~")

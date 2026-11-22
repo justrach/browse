@@ -93,7 +93,7 @@ struct AgentHome: View {
 
     private var field: some View {
         HStack(spacing: 12) {
-            TextField("", text: $typed, prompt: Text(mode == .ask ? "Ask anything, or give Codegraff a task" : "Search or type a URL")
+            TextField("", text: $typed, prompt: Text(mode == .ask ? "Ask anything, or give graff a task" : "Search or type a URL")
                 .foregroundStyle(Palette.muted.opacity(0.8)))
                 .textFieldStyle(.plain)
                 .font(.system(size: 16))
@@ -229,7 +229,7 @@ struct AgentHome: View {
                 }
             }
             if chats.all.isEmpty {
-                Text("What you ask Codegraff is kept here, a card for each conversation, to pick up again.")
+                Text("What you ask graff is kept here, a card for each conversation, to pick up again.")
                     .font(.system(size: 12.5))
                     .foregroundStyle(Palette.muted)
                     .padding(.vertical, 20)
@@ -488,9 +488,9 @@ struct AgentNotice: View {
         VStack(alignment: .leading, spacing: 10) {
             switch agent.phase {
             case .missing:
-                words("Codegraff isn't on this Mac", "Search runs the `graff` command it installs. Get it, or show Search where yours is in Settings › Agent.")
+                words("graff isn't on this Mac", "browse runs the `graff` command Codegraff installs. Get it, or show browse where yours is in Settings › Agent.")
                 HStack(spacing: 6) {
-                    Pill("Get Codegraff", filled: true) { browser.open(Agent.download, foreground: true) }
+                    Pill("Get graff", filled: true) { browser.open(Agent.download, foreground: true) }
                     Pill("Settings…") {
                         Store.settings.set("agent", forKey: "settings.page")
                         browser.tuning = true
@@ -498,13 +498,13 @@ struct AgentNotice: View {
                     Pill("Try again") { agent.restart() }
                 }
             case .signedOut:
-                words("Sign in to Codegraff", "Approve this Mac on codegraff.com. The page opens here, and sign-in finishes automatically.")
+                words("Sign in to graff", "Approve this Mac on codegraff.com. The page opens here, and sign-in finishes automatically.")
                 HStack(spacing: 6) {
                     Pill("Sign in on the web", filled: true) { agent.signIn() }
                     Pill("I've signed in") { agent.restart() }
                 }
             case .broken(let why):
-                words("Codegraff stopped", why)
+                words("graff stopped", why)
                 Pill("Reconnect", filled: true) { agent.reconnect() }
             default:
                 EmptyView()

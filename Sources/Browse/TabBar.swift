@@ -950,10 +950,10 @@ struct TabMenu: View {
                 .disabled(browser.tabs.filter { !$0.isBlank }.count < 2)
         }
         Divider()
-        // Codegraff on this tab alone (Browser.talk).
-        Button("Ask Codegraff About This Tab") { browser.talk(about: tab) }
+        // graff on this tab alone (Browser.talk).
+        Button("Ask graff About This Tab") { browser.talk(about: tab) }
             .disabled(tab.isBlank)
-        Button("Fill In the Form with Codegraff") { browser.talk(about: tab, task: Browser.fillTask) }
+        Button("Fill In the Form with graff") { browser.talk(about: tab, task: Browser.fillTask) }
             .disabled(tab.isBlank)
         Divider()
         Button("Close Tab", action: close)

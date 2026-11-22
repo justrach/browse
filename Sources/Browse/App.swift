@@ -1276,6 +1276,12 @@ struct ContentView: View {
             return true
         }
 
+        // ⇧↩ inside Find on Page steps to the previous match.
+        if browser.finding && (event.keyCode == 36 || event.keyCode == 76) && flags == .shift {
+            browser.look(forward: false)
+            return true
+        }
+
         // Keyboard navigation inside the ⌘K Tab Switcher / ⇧⌘\ Tab Overview.
         if let mode = browser.tabSwitcher {
             let plain = flags.isDisjoint(with: [.command, .option, .control, .shift])
