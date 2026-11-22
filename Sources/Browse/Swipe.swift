@@ -54,6 +54,13 @@ enum Swipe {
         if (!el) return;
         var root = el === document.documentElement, vv = window.visualViewport;
         var x = root ? (vv ? vv.pageLeft : window.scrollX) : el.scrollLeft;
+        // Fast path for vertical scrolling: never touch scrollWidth/clientWidth
+        // (which forces synchronous layout) unless horizontal offset actually moved.
+        if (!at.has(el)) {
+          if (x === 0) return;
+        } else if (Math.abs(at.get(el) - x) < 1) {
+          return;
+        }
         var max = root
           ? document.documentElement.scrollWidth - (vv ? vv.width : window.innerWidth)
           : el.scrollWidth - el.clientWidth;

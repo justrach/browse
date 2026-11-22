@@ -1147,7 +1147,7 @@ struct ContentView: View {
                 return true
             }
             if browser.editingTab != nil { return true }
-            if browser.fieldShowing, !browser.offers.isEmpty {
+            if browser.fieldShowing, !browser.offers.isEmpty, !(event.window?.firstResponder is NanoTextView) {
                 browser.walk(flags.contains(.shift) ? -1 : 1)
                 return true
             }
@@ -1175,7 +1175,7 @@ struct ContentView: View {
 
         // ⌘↩ in the address field: the words go to Codegraff, not to a page.
         if flags.contains(.command), !flags.contains(.option), !flags.contains(.control),
-           event.keyCode == 36, browser.fieldShowing {
+           event.keyCode == 36, browser.fieldShowing, !(event.window?.firstResponder is NanoTextView) {
             browser.ask(browser.typed)
             return true
         }

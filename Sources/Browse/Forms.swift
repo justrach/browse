@@ -301,6 +301,7 @@ final class FormRelay: NSObject, WKScriptMessageHandler {
       // What was last said, so a scroll can keep quiet when nothing moved
       // that anyone is listening for.
       var said = null;
+      var trackingRect = false;
       // A box the page says takes a passkey: autocomplete="username webauthn".
       function forPasskeys(el) {
         return !!(el && (el.tagName || '').toLowerCase() === 'input' &&
@@ -316,6 +317,7 @@ final class FormRelay: NSObject, WKScriptMessageHandler {
           var r = el.getBoundingClientRect();
           if (r.width > 0 && r.height > 0) rect = { x: r.left, y: r.top, w: r.width, h: r.height };
         }
+        trackingRect = rect !== null;
         var typing = editable(el);
         var now = typing + (rect ? ' ' + passwords + ' ' + rect.x + ' ' + rect.y + ' ' + rect.w + ' ' + rect.h : '');
         if (scrolled === true && now === said) return;
@@ -328,18 +330,16 @@ final class FormRelay: NSObject, WKScriptMessageHandler {
         });
       }
 
-      // The box moves when the page scrolls or the window changes size, and
-      // whatever hangs from it has to move too. Once a frame at most, and
-      // only when something did change: with the caret nowhere near a sign-in,
-      // every frame of every scroll used to send the same answer again.
+      // Only track scroll frames while a sign-in or passkey input popup is
+      // actively anchored — zero work per frame during normal 120 Hz scrolling.
       var moving = false;
       function moved() {
-        if (moving) return;
+        if (!trackingRect || moving) return;
         moving = true;
         requestAnimationFrame(function () { moving = false; caret(true); });
       }
-      window.addEventListener('scroll', moved, true);
-      window.addEventListener('resize', moved);
+      window.addEventListener('scroll', moved, { passive: true, capture: true });
+      window.addEventListener('resize', moved, { passive: true });
 
       // Going full screen, announced before it happens rather than after.
       //

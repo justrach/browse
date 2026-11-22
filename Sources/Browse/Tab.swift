@@ -111,6 +111,7 @@ enum Web {
         config.mediaTypesRequiringUserActionForPlayback = .audio
         config.preferences.inactiveSchedulingPolicy = (Store.testing && !Store.measuring) ? .none : .throttle
         inspector(config.preferences)
+        MainActor.assumeIsolated { FrameRate.apply(to: config.preferences) }
         return config
     }
 
@@ -1838,21 +1839,26 @@ final class ScrollRelay: NSObject, WKScriptMessageHandler {
         MainActor.assumeIsolated { tab?.scrolled(to: y, of: ceiling) }
     }
 
-    /// Reports at most once a frame, and passively, so a page that scrolls
-    /// smoothly without us keeps scrolling smoothly with us.
+    /// Reports passively and throttled, only posting IPC when the integer
+    /// scroll percentage actually changes — keeping WebKit's 120 Hz scrolling
+    /// completely free of per-frame layout reads and main-thread IPC traffic.
     static let script = """
     (function () {
-      var waiting = false;
+      var timer = null;
+      var lastPct = -1;
       function tell() {
+        timer = null;
         var root = document.documentElement;
         var y = window.scrollY || root.scrollTop || 0;
         var ceiling = Math.max(1, (root.scrollHeight || 0) - window.innerHeight);
+        var pct = Math.round(Math.min(1, Math.max(0, y / ceiling)) * 100);
+        if (pct === lastPct) return;
+        lastPct = pct;
         window.webkit.messageHandlers.\(name).postMessage({ y: y, max: ceiling });
       }
       window.addEventListener('scroll', function () {
-        if (waiting) return;
-        waiting = true;
-        requestAnimationFrame(function () { waiting = false; tell(); });
+        if (timer !== null) return;
+        timer = setTimeout(tell, 100);
       }, { passive: true });
       tell();
     })();

@@ -11,6 +11,15 @@ in [ROADMAP.md](ROADMAP.md).
 
 ## Unreleased
 
+### Added
+
+- **NanoHarness parity in Codegraff sidebar**: native AppKit composer with NanoHarness's crisp rounded accent caret, `/` slash-command completion popup (`/new`, `/model`, `/write`, `/expand`, `/stop`, `/feedback`, `/reconnect`, `/help`, plus live `graff` commands), `↑`/`↓` prompt history recall preserving unsent drafts, `⌘↩` interrupt / send-latest-queued shortcut, inline `"Editing in composer"` queue editing, full-page distraction-free Write mode (`⌘⇧E`) with live word count, compact context-window usage ring & percentage, jump-to-bottom pill (`↓`), and NanoHarness's seeded rotating working trailer (`Harnessing…`, `Thinking…`, `Brewing…`) with tabular elapsed timers and live `Now`/`Plan` detail lines.
+
+### Performance
+
+- **True 120 FPS scrolling by default**: enabled WebKit's 120 Hz ProMotion page rendering flag (`pages.120`) by default on fresh installs, eliminated synchronous `scrollWidth`/`clientWidth` layout reads during vertical scrolling in `Swipe.swift`, made `Forms.swift`'s scroll listener passive and zero-work unless a sign-in popup is anchored, throttled `ScrollRelay` IPC to integer-percent changes, and coalesced agent streaming chunks at ~60 Hz so rapid replies never stall 120 Hz scrolling.
+- **Zero-lag typing in composer and omnibox**: replaced SwiftUI's `TextField(..., axis: .vertical)` with a native AppKit `NSTextView` (`NanoComposerField`) backed by an isolated `ComposerBuffer`, and isolated `OmniboxState` from `Browser` so typing in the composer or `⌘L`/`⌘K` triggers zero re-renders of the transcript, sidebar, or window chrome.
+
 ## 1.7.0 — 22 November 2026
 
 ### Added
