@@ -86,8 +86,8 @@ struct ProviderMark: View {
                     .resizable()
                     .scaledToFit()
                     .foregroundStyle(tinted && asset == "claude" ? Color(red: 0.85, green: 0.47, blue: 0.34) : Palette.ink.opacity(0.82))
-            } else if key == "codegraff" {
-                Image(systemName: "sparkles")
+            } else if key == "codegraff" || key == "graff" {
+                GraffMark(size: size, color: Palette.ink.opacity(0.86))
                     .font(.system(size: size * 0.82, weight: .semibold))
                     .foregroundStyle(tinted ? Color(red: 0.01, green: 0.52, blue: 1.0) : Palette.ink.opacity(0.82))
             } else {

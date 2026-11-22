@@ -97,18 +97,19 @@ struct AsideBar: View {
 
                     if browser.prefs.usesAgent {
                         Button { browser.toggleAgent() } label: {
-                            HStack(spacing: 5) {
-                                Image(systemName: "sparkle")
-                                    .font(.system(size: 10.5, weight: .semibold))
-                                    .foregroundStyle(agentOpen ? Palette.accent : Palette.ink.opacity(0.84))
-                                Text("Ask")
-                                    .font(.system(size: 12.5, weight: .medium))
+                            HStack(spacing: 5.5) {
+                                GraffMark(
+                                    size: 14,
+                                    color: agentOpen ? Palette.accent : Palette.ink.opacity(0.86)
+                                )
+                                Text("graff")
+                                    .font(.system(size: 12.5, weight: .semibold, design: .rounded))
                                     .foregroundStyle(agentOpen ? Palette.accent : Palette.ink)
                                 if !agentOpen, let toggleKey {
                                     ShortcutBadge(keys: toggleKey)
                                 }
                             }
-                            .padding(.leading, 10)
+                            .padding(.leading, 9)
                             .padding(.trailing, (!agentOpen && toggleKey != nil) ? 6 : 10)
                             .frame(height: 28)
                             .background(
@@ -133,7 +134,7 @@ struct AsideBar: View {
                         }
                         .buttonStyle(TactilePress())
                         .onHover { askHover = $0 }
-                        .help((agentOpen ? "Hide Agent Sidebar" : "Ask Codegraff") + (toggleKey.map { "   \($0)" } ?? ""))
+                        .help((agentOpen ? "Hide graff" : "Open graff") + (toggleKey.map { "   \($0)" } ?? ""))
                         .padding(.leading, 4)
                     }
                 }

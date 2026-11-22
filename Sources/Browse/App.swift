@@ -346,6 +346,9 @@ struct ContentView: View {
     /// on every frame of the spring animation.
     @State private var agentRoom: CGFloat?
     @State private var agentRoomTicket = 0
+    /// Brief frosted edge shimmer while the webpage card settles after a
+    /// sidebar or Agent panel slide.
+    @State private var pageSettling = false
 
 
     /// True when the Arc/Dia-style unified frosted frame wraps the floating
@@ -505,6 +508,12 @@ struct ContentView: View {
                             lineWidth: 0.75
                         )
                         .allowsHitTesting(false)
+                    PageShimmerRim(
+                        corner: Split.corner,
+                        dark: darkCanvas,
+                        working: consulting && browser.agent.phase == .working && browser.agent.withPage && !tab.isBlank,
+                        settling: pageSettling
+                    )
                 }
                 .padding(.leading, sidebar ? 0 : Split.gap)
                 .padding(.trailing, roomedAgent > 0 ? 0 : Split.gap)
@@ -631,6 +640,8 @@ struct ContentView: View {
             pageViews.forEach { $0.splitLiveResizing = false }
             return
         }
+        let sliding = (old == 0 && new > 0) || (old > 0 && new == 0)
+        if sliding { pageSettling = true }
         if !arriving {
             withTransaction(still) { agentRoom = new }
         }
@@ -641,6 +652,12 @@ struct ContentView: View {
                 withTransaction(still) { agentRoom = agentTrailing }
             }
             pageViews.forEach { $0.splitLiveResizing = false }
+            if sliding {
+                DispatchQueue.main.asyncAfter(deadline: .now() + 0.10) {
+                    guard ticket == agentRoomTicket else { return }
+                    pageSettling = false
+                }
+            }
         }
     }
 
