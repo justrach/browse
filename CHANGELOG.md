@@ -11,6 +11,8 @@ in [ROADMAP.md](ROADMAP.md).
 
 ## Unreleased
 
+## 1.7.1 — 22 November 2026
+
 ### Added
 
 - **NanoHarness parity in Codegraff sidebar**: native AppKit composer with NanoHarness's crisp rounded accent caret, `/` slash-command completion popup (`/new`, `/model`, `/write`, `/expand`, `/stop`, `/feedback`, `/reconnect`, `/help`, plus live `graff` commands), `↑`/`↓` prompt history recall preserving unsent drafts, `⌘↩` interrupt / send-latest-queued shortcut, inline `"Editing in composer"` queue editing, full-page distraction-free Write mode (`⌘⇧E`) with live word count, compact context-window usage ring & percentage, jump-to-bottom pill (`↓`), and NanoHarness's seeded rotating working trailer (`Harnessing…`, `Thinking…`, `Brewing…`) with tabular elapsed timers and live `Now`/`Plan` detail lines.
