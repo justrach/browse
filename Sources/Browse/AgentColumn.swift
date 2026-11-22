@@ -577,6 +577,23 @@ struct ModelPicker: View {
                         .truncationMode(.tail)
                         .contentTransition(.numericText())
                 }
+                if agent.serviceTier != .standard, current.supportedServiceTiers.contains(agent.serviceTier) {
+                    let isUltra = agent.serviceTier == .ultrafast
+                    HStack(spacing: 2) {
+                        Image(systemName: isUltra ? "bolt.fill" : "bolt")
+                            .font(.system(size: 8.5, weight: .bold))
+                        Text(agent.serviceTier.shortLabel)
+                            .font(.system(size: 9.5, weight: .semibold))
+                            .lineLimit(1)
+                    }
+                    .foregroundStyle(isUltra ? Color.orange : Palette.accent)
+                    .padding(.horizontal, 4.5)
+                    .padding(.vertical, 1.5)
+                    .background(
+                        Capsule().fill((isUltra ? Color.orange : Palette.accent).opacity(0.16))
+                    )
+                    .fixedSize()
+                }
                 Image(systemName: "chevron.down")
                     .font(.system(size: 7.5, weight: .semibold))
                     .foregroundStyle(Palette.muted)
@@ -692,6 +709,59 @@ private struct NanoModelPopover: View {
         }
         .padding(.horizontal, 12)
         .padding(.vertical, 10)
+    }
+
+    /// NanoHarness-style Speed selector (`Standard` | `Fast` | `Ultra Fast`) for
+    /// models that support Codex / ChatGPT priority or ultrafast service tiers.
+    private var serviceTierBar: some View {
+        let tiers = current.supportedServiceTiers
+        let active = tiers.contains(agent.serviceTier) ? agent.serviceTier : .standard
+
+        return VStack(alignment: .leading, spacing: 7) {
+            HStack(spacing: 6) {
+                Text("SPEED")
+                    .font(.system(size: 10, weight: .semibold, design: .monospaced))
+                    .foregroundStyle(Palette.muted)
+                Spacer(minLength: 4)
+                Text(active.hint)
+                    .font(.system(size: 10, weight: .medium))
+                    .foregroundStyle(Palette.muted.opacity(0.85))
+                    .lineLimit(1)
+            }
+            HStack(spacing: 4) {
+                ForEach(tiers) { tier in
+                    let on = tier == active
+                    let tint: Color = tier == .ultrafast ? .orange : Palette.accent
+                    Button { agent.choose(serviceTier: tier) } label: {
+                        HStack(spacing: 4) {
+                            if tier != .standard {
+                                Image(systemName: tier == .ultrafast ? "bolt.fill" : "bolt")
+                                    .font(.system(size: 9.5, weight: .semibold))
+                            }
+                            Text(tier.label)
+                                .font(.system(size: 11, weight: on ? .semibold : .medium))
+                                .lineLimit(1)
+                                .fixedSize()
+                        }
+                        .foregroundStyle(on ? (tier == .standard ? Palette.ink : tint) : Palette.muted)
+                        .frame(maxWidth: .infinity)
+                        .padding(.vertical, 5)
+                        .background(
+                            RoundedRectangle(cornerRadius: 7, style: .continuous)
+                                .fill(on ? (tier == .standard ? Palette.ink.opacity(0.09) : tint.opacity(0.16)) : Palette.ink.opacity(0.03))
+                        )
+                        .overlay(
+                            RoundedRectangle(cornerRadius: 7, style: .continuous)
+                                .strokeBorder(on ? (tier == .standard ? Palette.ink.opacity(0.18) : tint.opacity(0.38)) : Palette.hairline, lineWidth: 0.75)
+                        )
+                        .contentShape(Rectangle())
+                    }
+                    .buttonStyle(.plain)
+                }
+            }
+        }
+        .padding(.horizontal, 12)
+        .padding(.vertical, 9)
     }
 
     // MARK: - Searchable model catalog (352pt)
@@ -832,6 +902,10 @@ private struct NanoModelPopover: View {
 
             if currentLevels.count > 1 && trimmedQuery.isEmpty {
                 reasoningBar
+                Rectangle().fill(Palette.hairline).frame(height: 1)
+            }
+            if !current.supportedServiceTiers.isEmpty && trimmedQuery.isEmpty {
+                serviceTierBar
                 Rectangle().fill(Palette.hairline).frame(height: 1)
             }
 
@@ -1328,13 +1402,33 @@ struct EntryRow: View {
                     AgentPassageCard(passage: passage, visit: visit)
                         .frame(maxWidth: .infinity, alignment: .leading)
                 }
-                Text(entry.text)
-                    .font(.system(size: full ? 14.5 : 13))
-                    .foregroundStyle(Palette.ink)
-                    .textSelection(.enabled)
-                    .padding(.horizontal, full ? 15 : 11)
-                    .padding(.vertical, full ? 9 : 7)
-                    .background(full ? Palette.wash : Palette.ink.opacity(0.035), in: RoundedRectangle(cornerRadius: full ? 18 : 14, style: .continuous))
+                if let images = entry.images, !images.isEmpty {
+                    HStack(spacing: 6) {
+                        ForEach(images) { item in
+                            if let nsImg = item.nsImage {
+                                Image(nsImage: nsImg)
+                                    .resizable()
+                                    .aspectRatio(contentMode: .fill)
+                                    .frame(width: 112, height: 80)
+                                    .clipShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
+                                    .overlay(
+                                        RoundedRectangle(cornerRadius: 10, style: .continuous)
+                                            .strokeBorder(Palette.hairline, lineWidth: 0.75)
+                                    )
+                                    .help("\(item.label) (\(item.width)×\(item.height))")
+                            }
+                        }
+                    }
+                }
+                if !entry.text.isEmpty {
+                    Text(entry.text)
+                        .font(.system(size: full ? 14.5 : 13))
+                        .foregroundStyle(Palette.ink)
+                        .textSelection(.enabled)
+                        .padding(.horizontal, full ? 15 : 11)
+                        .padding(.vertical, full ? 9 : 7)
+                        .background(full ? Palette.wash : Palette.ink.opacity(0.035), in: RoundedRectangle(cornerRadius: full ? 18 : 14, style: .continuous))
+                }
             }
             .frame(maxWidth: .infinity, alignment: .trailing)
             .padding(.leading, full ? 80 : 28)

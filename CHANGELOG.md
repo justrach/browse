@@ -6,6 +6,15 @@ All notable changes to **browse** are documented here, newest first.
 
 ## Unreleased
 
+### Added
+
+- **Image pasting, drag-and-drop, and photo attach in `graff` (`Agent.swift`, `NanoComposerField.swift`, `AgentComposer.swift`, `AgentColumn.swift`)**: paste screenshots or copied images (`⌘V`), drag image files onto the composer, or click the photo button to attach up to 6 images (`56×56` removable composer thumbnails + `112×80` chat thumbnails), sent natively as ACP `image` vision blocks (including image-only prompts).
+- **Fast & Ultra Fast speed modes (`Agent.swift`, `AgentColumn.swift`, `AgentComposer.swift`, `NanoComposerField.swift`, `Prefs.swift`)**: added NanoHarness-style `SPEED` selector (`Standard` | `Fast` | `Ultra Fast`) inside the Model Picker popover for supported Codex / ChatGPT models (e.g. `gpt-6.2-sol`, `gpt-6.2-astra`), live lightning status badge on the model chip, persistent preference, and `/fast` + `/ultrafast` slash commands.
+
+### Fixed
+
+- **Dark Mode window chrome staying Dark Mode on dark SPAs (`Design.swift`)**: `PageTint` no longer flips a Dark Mode window frame and top bar into bright white `.aqua` chrome when a site's unpainted WebKit `underPageBackgroundColor` defaults to `#FFFFFF` or specifies a light-only `theme-color`.
+
 ## 1.8.4 — 22 November 2026
 
 ### Fixed
