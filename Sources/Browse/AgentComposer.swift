@@ -1,4 +1,5 @@
 import SwiftUI
+import UniformTypeIdentifiers
 
 /// The same input on the Ask page and beside a site. Backed by a dedicated
 /// native AppKit `NanoComposerField` + isolated `ComposerBuffer` so typing
@@ -29,6 +30,8 @@ struct AgentComposer: View {
     @State private var mentionHover = false
     @State private var modelOpenRequest = 0
     @State private var writeHover = false
+    @State private var attachHover = false
+    @State private var imageDropTargeted = false
 
     init(
         browser: Browser,
@@ -180,6 +183,14 @@ struct AgentComposer: View {
         case .model:
             agent.draft = ""
             modelOpenRequest &+= 1
+        case .fast:
+            agent.draft = ""
+            agent.choose(serviceTier: agent.serviceTier == .fast ? .standard : .fast)
+            localFocusToken &+= 1
+        case .ultrafast:
+            agent.draft = ""
+            agent.choose(serviceTier: agent.serviceTier == .ultrafast ? .standard : .ultrafast)
+            localFocusToken &+= 1
         case .stop:
             agent.draft = ""
             agent.stop()
@@ -291,6 +302,9 @@ struct AgentComposer: View {
                 if !agent.mentionedTabs.isEmpty, agent.asking?.isQuestion != true {
                     mentionedStrip
                 }
+                if !agent.pendingImages.isEmpty, agent.asking?.isQuestion != true {
+                    pendingImagesStrip
+                }
 
                 VStack(alignment: .leading, spacing: full ? 8 : 6) {
                     ZStack(alignment: .topLeading) {
@@ -347,7 +361,10 @@ struct AgentComposer: View {
                             onRecall: stepRecall,
                             onEscape: handleEscape,
                             onToggleWriteMode: openWriteMode,
-                            onTab: switchToSearch
+                            onTab: switchToSearch,
+                            onPasteImages: { images in
+                                agent.attachImages(images)
+                            }
                         )
                         .frame(height: max(minH, min(maxH, measuredHeight)))
                     }
@@ -362,6 +379,22 @@ struct AgentComposer: View {
                             ContextUsageRing(used: ctx.used, window: ctx.window)
                         }
                         if agent.asking?.isQuestion != true, composer.editingQueueID == nil {
+                            Button(action: pickImageFiles) {
+                                Image(systemName: "photo.badge.plus")
+                                    .font(.system(size: 11, weight: .medium))
+                                    .foregroundStyle(attachHover ? Palette.ink : Palette.muted.opacity(0.82))
+                                    .frame(width: 24, height: 24)
+                                    .background(
+                                        RoundedRectangle(cornerRadius: 6, style: .continuous)
+                                            .fill(attachHover ? Palette.hover : .clear)
+                                    )
+                                    .contentShape(Rectangle())
+                            }
+                            .buttonStyle(TactilePress())
+                            .onHover { attachHover = $0 }
+                            .animation(Motion.quick, value: attachHover)
+                            .help("Attach image (or paste with ⌘V / drag & drop)")
+                            .accessibilityLabel("Attach image")
                             if browser.tabs.contains(where: { !$0.isBlank }) {
                                 Button(action: insertAtMention) {
                                     Text("@")
@@ -410,19 +443,24 @@ struct AgentComposer: View {
             .overlay(
                 RoundedRectangle(cornerRadius: radius, style: .continuous)
                     .strokeBorder(
-                        editorFocused
-                            ? Palette.accent.opacity(dark ? 0.55 : 0.45)
-                            : (dark ? Color.white.opacity(0.10) : Color.black.opacity(0.10)),
-                        lineWidth: 0.75
+                        imageDropTargeted
+                            ? Palette.accent.opacity(0.85)
+                            : (editorFocused
+                                ? Palette.accent.opacity(dark ? 0.55 : 0.45)
+                                : (dark ? Color.white.opacity(0.10) : Color.black.opacity(0.10))),
+                        lineWidth: imageDropTargeted ? 1.5 : 0.75
                     )
             )
+            .onDrop(of: [.image, .fileURL], isTargeted: $imageDropTargeted, perform: handleImageDrop)
             .shadow(color: .black.opacity(dark ? 0.22 : 0.045), radius: 3, y: 1)
             .shadow(color: .black.opacity(dark ? 0.20 : 0.055), radius: 14, y: 5)
             .animation(Motion.quick, value: editorFocused)
+            .animation(Motion.quick, value: imageDropTargeted)
         }
         .animation(Motion.quick, value: slashMenuOpen)
         .animation(Motion.quick, value: mentionMenuOpen)
         .animation(Motion.quick, value: agent.mentionedTabs.map(\.id))
+        .animation(Motion.quick, value: agent.pendingImages.map(\.id))
         .animation(Motion.settle, value: agent.queue.map(\.id))
         .padding(.horizontal, full ? 12 : 14)
         .padding(.top, full ? 4 : 6)
@@ -523,6 +561,94 @@ struct AgentComposer: View {
                 .strokeBorder(Palette.hairline, lineWidth: 0.75)
         )
         .shadow(color: .black.opacity(0.14), radius: 14, y: 4)
+    }
+
+    /// Pasted / dropped / picked image thumbnails docked neatly inside the composer card.
+    private var pendingImagesStrip: some View {
+        ScrollView(.horizontal, showsIndicators: false) {
+            HStack(spacing: 8) {
+                ForEach(agent.pendingImages) { item in
+                    ZStack(alignment: .topTrailing) {
+                        Group {
+                            if let nsImg = item.nsImage {
+                                Image(nsImage: nsImg)
+                                    .resizable()
+                                    .aspectRatio(contentMode: .fill)
+                            } else {
+                                Color.secondary.opacity(0.15)
+                                    .overlay(Image(systemName: "photo").foregroundStyle(Palette.muted))
+                            }
+                        }
+                        .frame(width: 56, height: 56)
+                        .clipShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
+                        .overlay(
+                            RoundedRectangle(cornerRadius: 8, style: .continuous)
+                                .strokeBorder(Palette.hairline, lineWidth: 0.75)
+                        )
+
+                        Button { agent.removeImage(item.id) } label: {
+                            Image(systemName: "xmark")
+                                .font(.system(size: 8, weight: .bold))
+                                .foregroundStyle(.white)
+                                .frame(width: 16, height: 16)
+                                .background(Circle().fill(Color.black.opacity(0.72)))
+                        }
+                        .buttonStyle(.plain)
+                        .offset(x: 4, y: -4)
+                        .help("Remove \(item.label)")
+                    }
+                    .padding(.top, 4)
+                    .padding(.trailing, 4)
+                    .help("\(item.label) (\(item.width)×\(item.height))")
+                }
+            }
+            .padding(.horizontal, full ? 14 : 11)
+            .padding(.top, 6)
+            .padding(.bottom, 4)
+        }
+    }
+
+    private func pickImageFiles() {
+        let panel = NSOpenPanel()
+        panel.allowedContentTypes = [.png, .jpeg, .webP, .gif, .heic, .tiff, .bmp]
+        panel.allowsMultipleSelection = true
+        panel.canChooseDirectories = false
+        panel.prompt = "Attach"
+        guard panel.runModal() == .OK else { return }
+        let images = Agent.PastedImage.fromFileURLs(panel.urls)
+        agent.attachImages(images)
+        localFocusToken &+= 1
+    }
+
+    private func handleImageDrop(_ providers: [NSItemProvider]) -> Bool {
+        var matched = false
+        for provider in providers {
+            if provider.hasItemConformingToTypeIdentifier(UTType.fileURL.identifier) {
+                matched = true
+                provider.loadItem(forTypeIdentifier: UTType.fileURL.identifier, options: nil) { item, _ in
+                    let url: URL?
+                    if let data = item as? Data {
+                        url = URL(dataRepresentation: data, relativeTo: nil)
+                    } else {
+                        url = item as? URL
+                    }
+                    guard let url else { return }
+                    let encoded = Agent.PastedImage.fromFileURLs([url])
+                    if !encoded.isEmpty {
+                        DispatchQueue.main.async { agent.attachImages(encoded) }
+                    }
+                }
+            } else if provider.hasItemConformingToTypeIdentifier(UTType.image.identifier) {
+                matched = true
+                provider.loadDataRepresentation(forTypeIdentifier: UTType.image.identifier) { data, _ in
+                    guard let data, let nsImg = NSImage(data: data),
+                          let encoded = Agent.PastedImage.encode(nsImg, label: "Dropped image")
+                    else { return }
+                    DispatchQueue.main.async { agent.attachImages([encoded]) }
+                }
+            }
+        }
+        return matched
     }
 
     /// Attached `@`-mentioned tab pills docked neatly inside the composer card.
@@ -799,7 +925,10 @@ struct NanoWritePage: View {
                         onSlashDismiss: {},
                         onRecall: { _ in },
                         onEscape: close,
-                        onToggleWriteMode: close
+                        onToggleWriteMode: close,
+                        onPasteImages: { images in
+                            agent.attachImages(images)
+                        }
                     )
                     .frame(maxWidth: maxW, maxHeight: .infinity)
                 }
