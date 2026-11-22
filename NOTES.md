@@ -1,3 +1,5 @@
+Fixed ⌘L to always supersede web pages, focus the address bar immediately on mount, dismiss blocking overlays, and select the entire URL.
+
 Single-letter visited domain autocomplete in the Omnibox (x → x.com) with visited-first exact host ranking, plus hardened macOS Keychain password vault (device-only accessibility, fail-closed Touch ID auth, 0o700 zero-wiped import snapshots, and 45s clipboard auto-clear).
 
 Redesigned 5-step onboarding tour, automatic macOS Full Disk Access list registration, ⌘; / ⇧⌘; superseding macOS spellcheck and web page handlers, capsule pill layout fixes, and automated UI layout regression tests.
