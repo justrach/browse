@@ -165,18 +165,30 @@ check(
     "graff composer supports image pasting (⌘V) and Standard / Fast / Ultra Fast speed modes",
 )
 
-# 13. Heavy SPA (X/Twitter) performance guardrails.
+# 13. Repo-wide heavy SPA (X/Twitter) performance guardrails.
 forms_src = read("Sources/Browse/Forms.swift")
 swipe_src = read("Sources/Browse/Swipe.swift")
 shield_src = read("Sources/Browse/Shield.swift")
+status_src = read("Sources/Browse/StatusLine.swift")
 check(
     "function hasPasswordInput()" in forms_src
-    and 'querySelectorAll(\'input[type="password"]\')' not in forms_src,
-    "Forms.swift scans cached liveInputs instead of full-DOM querySelectorAll on every mutation/click",
+    and 'querySelectorAll(\'input[type="password"]\')' not in all_swift,
+    "No full-DOM querySelectorAll('input[type=\"password\"]') anywhere in Sources/Browse/",
+)
+mutation_files = sorted(
+    p.name for p in SRC.glob("*.swift")
+    if "new MutationObserver" in p.read_text(encoding="utf-8")
 )
 check(
-    "pruneSlowGlobalCosmetics" in shield_src and "if (can) {" in swipe_src,
-    "Shield prunes unindexed global cosmetic selectors and Swipe avoids layout reads on non-scrollable divs",
+    mutation_files == ["Forms.swift", "StoreRelay.swift"],
+    f"Only audited, fast-bailed MutationObservers exist in Sources/Browse/ (found {mutation_files})",
+)
+check(
+    "pruneSlowGlobalCosmetics" in shield_src
+    and '"[id^=' not in shield_src
+    and "if (can) {" in swipe_src
+    and "requestAnimationFrame" in status_src,
+    "Shield prunes unindexed global selectors, Swipe guards layout reads, and StatusLine coalesces mouseover via rAF",
 )
 
 if failures:

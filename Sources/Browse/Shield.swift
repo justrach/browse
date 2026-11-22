@@ -86,8 +86,8 @@ final class Shield: ObservableObject {
     /// deliberately short — a generous cosmetic list is how a blocker starts
     /// eating the page it was meant to clean.
     private static let slots = [
-        ".adsbygoogle", "ins.adsbygoogle", "[id^=\"google_ads_\"]",
-        "[id^=\"div-gpt-ad\"]", "[id^=\"taboola-\"]", "#taboola-below-article",
+        ".adsbygoogle", "ins.adsbygoogle", "div[id^=\"google_ads_\"]",
+        "div[id^=\"div-gpt-ad\"]", "div[id^=\"taboola-\"]", "#taboola-below-article",
         "iframe[src*=\"doubleclick.net\"]", "iframe[src*=\"googlesyndication\"]",
         "iframe[src*=\"amazon-adsystem\"]",
     ]
