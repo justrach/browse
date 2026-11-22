@@ -16,6 +16,9 @@ struct SideBar: View {
     /// The width the column had when the edge was picked up.
     @State private var grabbed: CGFloat?
     @State private var onEdge = false
+    @State private var headerHover = false
+    @State private var clearHover = false
+    @ObservedObject private var shortcuts = ShortcutStore.shared
 
     /// A pin, picked up out of the grid — a separate state from the loose
     /// rows above, since the two gestures never happen at once but move on
@@ -57,33 +60,30 @@ struct SideBar: View {
                     .frame(width: Metrics.helm)
                     .allowsHitTesting(false)
                 DragStrip()
+                Color.clear
+                    .frame(width: 38)
+                    .allowsHitTesting(false)
             }
             .frame(height: Metrics.strip)
 
             VStack(alignment: .leading, spacing: 0) {
-                // The traffic lights' corner, with back, forward and reload
-                // sitting right of them — the same three doors as the top
-                // bar, moved beside the lights since there's no far end of a
-                // row to put them at in this mode.
+                // The traffic lights' corner, with available nav buttons beside
+                // them and the sidebar toggle tucked cleanly into the top-right
+                // corner — no horizontal rule cutting across the column edge.
+                let foldKey = shortcuts.key(for: .toggleFold)?.display
                 HStack(spacing: 0) {
                     Color.clear.frame(width: Metrics.sideLights)
                     Helm(browser: browser)
                     Spacer(minLength: 0)
-                    // The page's address, to paste somewhere else.
-                    Door(icon: "link", help: "Copy Address   ⇧⌘C") { browser.copyAddress() }
-                        .disabled(browser.active?.isBlank != false)
-                        .opacity(browser.active?.isBlank != false ? 0.3 : 1)
-                }
-                .frame(height: Metrics.strip)
-                .overlay(alignment: .bottom) {
-                    if prefs.compactTopBar {
-                        Rectangle()
-                            .fill(seam)
-                            .frame(height: 1)
-                            .padding(.horizontal, -10)
+                    Door(
+                        icon: "sidebar.left",
+                        help: "Hide Sidebar" + (foldKey.map { "   \($0)" } ?? "")
+                    ) {
+                        browser.toggleFold()
                     }
                 }
-                .padding(.bottom, 6)
+                .frame(height: Metrics.strip)
+                .padding(.bottom, 2)
 
                 // The spaces side by side, as pages: two fingers sideways move
                 // the one on screen and the next one together, the next one
@@ -149,7 +149,10 @@ struct SideBar: View {
     /// page's colour the theme's grey reads as a pale seam; a shade of
     /// whatever's there doesn't.
     private var seam: Color {
-        tint.map { $0.dark ? Color.white.opacity(0.1) : Color.black.opacity(0.08) } ?? Palette.hairline
+        if let tint {
+            return tint.dark ? Color.white.opacity(0.09) : Color.black.opacity(0.065)
+        }
+        return scheme == .dark ? Color.white.opacity(0.08) : Color.black.opacity(0.065)
     }
 
     /// The column's edge: pull it to make the column wider or narrower,
@@ -528,9 +531,8 @@ struct SideBar: View {
 
     private static let todayHeight: CGFloat = 26
 
-    /// Clean section header above loose tabs: space name (or "Tabs"), New Tab
-    /// button, and Clear loose tabs. Shows a subtle rule only when pinned tiles
-    /// sit above it so there's never a stray line under the title bar.
+    /// Clean section header above loose tabs: space name (or "Tabs"), a subtle
+    /// Clear pill on hover when loose tabs exist, and New Tab.
     private func today(loose: Bool) -> some View {
         let label: String = {
             if prefs.usesSpaces, let space = browser.spaces.first(where: { $0.id == browser.spaceID }), !space.name.isEmpty {
@@ -545,23 +547,41 @@ struct SideBar: View {
                     .frame(height: 1)
                     .padding(.horizontal, 6)
             }
-            HStack(spacing: 2) {
+            HStack(spacing: 4) {
                 Text(label)
-                    .font(.system(size: 11, weight: .medium))
-                    .foregroundStyle(Palette.muted.opacity(0.75))
+                    .font(.system(size: 11, weight: .semibold))
+                    .foregroundStyle(Palette.muted.opacity(0.68))
                     .lineLimit(1)
                     .padding(.leading, 10)
                 Spacer(minLength: 4)
-                Nib(icon: "plus", help: "New Tab   ⌘T") { browser.newTab() }
-                if loose {
-                    Nib(icon: "trash", help: "Close Tabs That Aren't Pinned") { browser.clearLoose() }
-                        .transition(.opacity)
+                if loose && headerHover {
+                    Button { browser.clearLoose() } label: {
+                        Text("Clear")
+                            .font(.system(size: 10.5, weight: .medium))
+                            .foregroundStyle(clearHover ? Palette.ink.opacity(0.85) : Palette.muted)
+                            .padding(.horizontal, 7)
+                            .frame(height: 20)
+                            .background(
+                                Capsule()
+                                    .fill(Palette.ink.opacity(clearHover ? 0.085 : 0.045))
+                            )
+                            .contentShape(Capsule())
+                    }
+                    .buttonStyle(.plain)
+                    .onHover { clearHover = $0 }
+                    .help("Close Tabs That Aren't Pinned")
+                    .transition(.opacity.combined(with: .scale(scale: 0.92)))
                 }
+                Nib(icon: "plus", help: "New Tab   ⌘T") { browser.newTab() }
             }
             .frame(height: SideBar.todayHeight)
+            .contentShape(Rectangle())
+            .onHover { headerHover = $0 }
         }
         .padding(.bottom, SideBar.gap)
         .animation(Motion.quick, value: loose)
+        .animation(Motion.quick, value: headerHover)
+        .animation(Motion.quick, value: clearHover)
     }
 
     /// Quiet utility row anchored at the bottom of the sidebar.
@@ -918,11 +938,14 @@ private struct Nib: View {
     var body: some View {
         Button(action: act) {
             Image(systemName: icon)
-                .font(.system(size: 10, weight: .medium))
-                .foregroundStyle(hovering ? Palette.ink.opacity(0.75) : Palette.muted)
+                .font(.system(size: 10.5, weight: .medium))
+                .foregroundStyle(hovering ? Palette.ink.opacity(0.85) : Palette.muted.opacity(0.78))
                 .frame(width: 22, height: 22)
-                .background(Circle().fill(Palette.ink.opacity(hovering ? 0.07 : 0)))
-                .contentShape(Circle())
+                .background(
+                    RoundedRectangle(cornerRadius: 6.5, style: .continuous)
+                        .fill(Palette.ink.opacity(hovering ? 0.075 : 0))
+                )
+                .contentShape(RoundedRectangle(cornerRadius: 6.5, style: .continuous))
         }
         .buttonStyle(.plain)
         .onHover { hovering = $0 }
@@ -943,14 +966,14 @@ struct Door: View {
     var body: some View {
         Button(action: act) {
             Image(systemName: icon)
-                .font(.system(size: 11, weight: .medium))
-                .foregroundStyle(on ? Palette.ink : (hovering ? Palette.ink.opacity(0.7) : Palette.muted))
-                .frame(width: 26, height: 26)
+                .font(.system(size: 12, weight: .regular))
+                .foregroundStyle(on ? Palette.ink : (hovering ? Palette.ink.opacity(0.82) : Palette.muted.opacity(0.84)))
+                .frame(width: 28, height: 28)
                 .background(
-                    RoundedRectangle(cornerRadius: 8, style: .continuous)
+                    RoundedRectangle(cornerRadius: 7.5, style: .continuous)
                         .fill(on ? Palette.wash : (hovering ? Palette.hover : .clear))
                 )
-                .contentShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
+                .contentShape(RoundedRectangle(cornerRadius: 7.5, style: .continuous))
         }
         .buttonStyle(.plain)
         .onHover { hovering = $0 }
