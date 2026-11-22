@@ -341,6 +341,10 @@ struct PageTint: Equatable {
         // window it's in.
         let glass = scheme == .dark ? 0.12 : 0.94
         let seen = (0.299 * r + 0.587 * g + 0.114 * b) * strength + glass * (1 - strength)
+        // Never flip a Dark Mode window frame into bright white chrome (e.g. dark SPAs
+        // whose unpainted WebKit underPageBackgroundColor defaults to #FFFFFF, or sites
+        // that hardcode a light theme-color without dark-mode support).
+        if scheme == .dark, seen >= 0.5 { return nil }
         dark = seen < 0.5
         color = NSColor(srgbRed: r, green: g, blue: b, alpha: 1)
     }

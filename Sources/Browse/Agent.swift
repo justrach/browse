@@ -93,6 +93,8 @@ final class Agent: ObservableObject {
         /// The page that went with something you said.
         var page: String?
         var passage: AgentPassage?
+        /// Pasted or attached images sent with a user message.
+        var images: [PastedImage]?
         /// A tool call typed as Harness types it: Run, Read, Edit… with its
         /// one line of detail (see AgentSteps.swift).
         var step: Step?
@@ -133,6 +135,174 @@ final class Agent: ObservableObject {
         var isQuestion: Bool { wants == .question }
     }
 
+    /// An image pasted, dropped, or picked into the composer and sent as a
+    /// native ACP `image` content block (`{type: "image", data, mimeType}`).
+    struct PastedImage: Identifiable, Equatable, Codable {
+        var id = UUID()
+        let mimeType: String
+        let base64: String
+        let label: String
+        let width: Int
+        let height: Int
+
+        static let maxAttachments = 6
+        static let maxEncodedBytes = 10 * 1024 * 1024
+
+        var acpBlock: [String: Any] {
+            ["type": "image", "data": base64, "mimeType": mimeType]
+        }
+
+        var nsImage: NSImage? {
+            guard let data = Data(base64Encoded: base64) else { return nil }
+            return NSImage(data: data)
+        }
+
+        static func encode(_ image: NSImage, label: String = "Pasted image") -> PastedImage? {
+            guard let cg = image.cgImage(forProposedRect: nil, context: nil, hints: nil) else {
+                // Fallback via TIFF representation for vector/PDF/multi-rep images.
+                guard let tiff = image.tiffRepresentation,
+                      let rep = NSBitmapImageRep(data: tiff),
+                      let cg2 = rep.cgImage else { return nil }
+                return encode(cgImage: cg2, label: label)
+            }
+            return encode(cgImage: cg, label: label)
+        }
+
+        private static func encode(cgImage: CGImage, label: String) -> PastedImage? {
+            let maxEdge = 2048
+            let srcW = cgImage.width
+            let srcH = cgImage.height
+            guard srcW > 0, srcH > 0 else { return nil }
+            let targetCG: CGImage
+            if max(srcW, srcH) > maxEdge {
+                let scale = Double(maxEdge) / Double(max(srcW, srcH))
+                let newW = max(1, Int((Double(srcW) * scale).rounded()))
+                let newH = max(1, Int((Double(srcH) * scale).rounded()))
+                let cs = cgImage.colorSpace ?? CGColorSpaceCreateDeviceRGB()
+                if let ctx = CGContext(
+                    data: nil, width: newW, height: newH,
+                    bitsPerComponent: 8, bytesPerRow: 0,
+                    space: cs,
+                    bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue
+                ) {
+                    ctx.interpolationQuality = .high
+                    ctx.draw(cgImage, in: CGRect(x: 0, y: 0, width: newW, height: newH))
+                    targetCG = ctx.makeImage() ?? cgImage
+                } else {
+                    targetCG = cgImage
+                }
+            } else {
+                targetCG = cgImage
+            }
+
+            let rep = NSBitmapImageRep(cgImage: targetCG)
+            let alpha = targetCG.alphaInfo
+            let hasAlpha = alpha != .none && alpha != .noneSkipFirst && alpha != .noneSkipLast
+            let png = rep.representation(using: .png, properties: [:])
+            let chosen: (data: Data, mime: String)?
+            if let png, png.count <= 900_000 || hasAlpha {
+                chosen = png.count <= maxEncodedBytes ? (png, "image/png") : nil
+            } else if let jpg = rep.representation(using: .jpeg, properties: [.compressionFactor: 0.85]),
+                      jpg.count <= maxEncodedBytes {
+                chosen = (jpg, "image/jpeg")
+            } else if let png, png.count <= maxEncodedBytes {
+                chosen = (png, "image/png")
+            } else {
+                chosen = nil
+            }
+            guard let chosen else { return nil }
+            return PastedImage(
+                mimeType: chosen.mime,
+                base64: chosen.data.base64EncodedString(),
+                label: label,
+                width: targetCG.width,
+                height: targetCG.height
+            )
+        }
+
+        static func fromFileURLs(_ urls: [URL]) -> [PastedImage] {
+            let exts: Set<String> = ["png", "jpg", "jpeg", "webp", "gif", "heic", "heif", "tiff", "tif", "bmp"]
+            var out: [PastedImage] = []
+            for url in urls where url.isFileURL {
+                guard exts.contains(url.pathExtension.lowercased()),
+                      let img = NSImage(contentsOf: url),
+                      let encoded = encode(img, label: url.lastPathComponent)
+                else { continue }
+                out.append(encoded)
+                if out.count >= maxAttachments { break }
+            }
+            return out
+        }
+
+        /// Extracts pasted images from `NSPasteboard` (screenshots, Copy Image
+        /// from browsers/Meld/Figma, or copied image files from Finder).
+        static func fromPasteboard(_ pb: NSPasteboard = .general) -> [PastedImage] {
+            if let urls = pb.readObjects(forClasses: [NSURL.self], options: [.urlReadingFileURLsOnly: true]) as? [URL] {
+                let fromFiles = fromFileURLs(urls)
+                if !fromFiles.isEmpty { return fromFiles }
+            }
+            let imageTypes: [NSPasteboard.PasteboardType] = [
+                .png,
+                NSPasteboard.PasteboardType("public.jpeg"),
+                NSPasteboard.PasteboardType("public.heic"),
+                NSPasteboard.PasteboardType("org.webmproject.webp"),
+                .tiff,
+            ]
+            for type in imageTypes {
+                if let data = pb.data(forType: type), let img = NSImage(data: data),
+                   let encoded = encode(img, label: "Pasted image") {
+                    return [encoded]
+                }
+            }
+            if let imgs = pb.readObjects(forClasses: [NSImage.self], options: nil) as? [NSImage],
+               let first = imgs.first, let encoded = encode(first, label: "Pasted image") {
+                return [encoded]
+            }
+            return []
+        }
+    }
+
+    /// Codex / ChatGPT service tier (matching NanoHarness Standard / Fast / Ultra Fast).
+    enum ServiceTier: String, CaseIterable, Equatable, Identifiable {
+        case standard = "default"
+        case fast = "fast"
+        case ultrafast = "ultrafast"
+
+        var id: String { rawValue }
+
+        var label: String {
+            switch self {
+            case .standard: return "Standard"
+            case .fast: return "Fast"
+            case .ultrafast: return "Ultra Fast"
+            }
+        }
+
+        var shortLabel: String {
+            switch self {
+            case .standard: return ""
+            case .fast: return "Fast"
+            case .ultrafast: return "Ultra"
+            }
+        }
+
+        var hint: String {
+            switch self {
+            case .standard: return "Standard response speed"
+            case .fast: return "Faster responses with priority tier"
+            case .ultrafast: return "Maximum speed tier on supported models"
+            }
+        }
+
+        var slashCommand: String {
+            switch self {
+            case .standard: return "/fast off"
+            case .fast: return "/fast on"
+            case .ultrafast: return "/fast ultrafast"
+            }
+        }
+    }
+
     /// A model graff can reach from here, as `graff/models` lists it.
     struct Model: Identifiable, Equatable {
         let provider: String
@@ -142,7 +312,16 @@ final class Agent: ObservableObject {
         var billing: String? = nil
         var effortLevels: [String] = []
         var fastSupported = false
+        var ultrafastSupported = false
+        var serviceTiers: [String] = []
         var id: String { "\(provider)/\(name)" }
+
+        var supportedServiceTiers: [ServiceTier] {
+            let hasFast = fastSupported || serviceTiers.contains { $0.caseInsensitiveCompare("fast") == .orderedSame || $0.caseInsensitiveCompare("priority") == .orderedSame }
+            let hasUltra = ultrafastSupported || serviceTiers.contains { $0.caseInsensitiveCompare("ultrafast") == .orderedSame }
+            guard hasFast || hasUltra else { return [] }
+            return hasUltra ? [.standard, .fast, .ultrafast] : [.standard, .fast]
+        }
 
         static func == (a: Model, b: Model) -> Bool { a.id == b.id }
 
@@ -400,6 +579,10 @@ final class Agent: ObservableObject {
     /// The model graff says it is running.
     @Published private(set) var model: Model?
     @Published private(set) var effort: Effort?
+    /// Active Codex / ChatGPT service tier (Standard / Fast / Ultra Fast).
+    @Published private(set) var serviceTier: ServiceTier = .standard
+    private var pendingServiceTier: ServiceTier?
+    private var applyingServiceTier = false
     /// Isolated typing buffer observed only by the composer and Write view.
     let composer = ComposerBuffer()
     /// Flips only when draft transitions between empty and non-empty so views
@@ -505,8 +688,30 @@ final class Agent: ObservableObject {
         var tab: Tab?
         var passage: AgentPassage?
         var mentioned: [Tab] = []
+        var images: [PastedImage] = []
     }
     @Published private(set) var queue: [Queued] = []
+
+    /// Images pasted, dropped, or picked into the composer for the next prompt.
+    @Published private(set) var pendingImages: [PastedImage] = []
+
+    func attachImages(_ images: [PastedImage]) {
+        guard !images.isEmpty else { return }
+        let room = max(0, PastedImage.maxAttachments - pendingImages.count)
+        guard room > 0 else { return }
+        pendingImages.append(contentsOf: images.prefix(room))
+        if !hasDraft { hasDraft = true }
+    }
+
+    func removeImage(_ id: PastedImage.ID) {
+        pendingImages.removeAll { $0.id == id }
+        let nonEmpty = !composer.text.isEmpty || !pendingImages.isEmpty
+        if hasDraft != nonEmpty { hasDraft = nonEmpty }
+    }
+
+    func clearImages() {
+        if !pendingImages.isEmpty { pendingImages.removeAll() }
+    }
 
     /// Additional open tabs explicitly `@`-mentioned in the composer (Dia-style
     /// multi-tab context). Sent alongside the next prompt and cleared on send.
@@ -606,7 +811,7 @@ final class Agent: ObservableObject {
 
     var canSend: Bool {
         guard prefs.usesAgent else { return false }
-        guard !draft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { return false }
+        guard !draft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || !pendingImages.isEmpty else { return false }
         if asking?.isQuestion == true { return true }
         switch phase {
         case .ready, .asleep, .working: return true
@@ -735,6 +940,7 @@ final class Agent: ObservableObject {
         pinned = nil
         passage = nil
         clearMentionedTabs()
+        clearImages()
         outcome = nil
         queue = []
         queueHeld = false
@@ -1004,6 +1210,8 @@ final class Agent: ObservableObject {
                 let billing = (cost == "plan" && separate) ? "plan*" : cost
                 let effortLevels = (row["effortLevels"] as? [Any] ?? []).compactMap { $0 as? String }
                 let fast = row["fastSupported"] as? Bool == true
+                let ultrafast = row["ultrafastSupported"] as? Bool == true
+                let serviceTiers = (row["serviceTiers"] as? [Any] ?? []).compactMap { $0 as? String }
                 let model = Model(
                     provider: provider,
                     name: name,
@@ -1011,7 +1219,9 @@ final class Agent: ObservableObject {
                     rawMaker: rawMaker,
                     billing: billing,
                     effortLevels: effortLevels,
-                    fastSupported: fast
+                    fastSupported: fast,
+                    ultrafastSupported: ultrafast,
+                    serviceTiers: serviceTiers
                 )
                 // Pictures, video, batch-only: nothing to have a chat with.
                 guard model.talks else { return nil }
@@ -1021,11 +1231,60 @@ final class Agent: ObservableObject {
                let provider = current["provider"] as? String, let name = current["model"] as? String {
                 let now = models.first { $0.provider == provider && $0.name == name } ?? Model(provider: provider, name: name)
                 self.model = now
+                // Parse active service tier from graff's live state.
+                if let rawTier = current["serviceTier"] as? String, let parsed = ServiceTier(rawValue: rawTier) {
+                    self.serviceTier = parsed
+                } else if current["fast"] as? Bool == true {
+                    self.serviceTier = .fast
+                } else {
+                    self.serviceTier = .standard
+                }
+                // Apply remembered service tier preference if supported by this model.
+                let wantedRaw = self.prefs.agentServiceTier
+                if !wantedRaw.isEmpty,
+                   let wanted = ServiceTier(rawValue: wantedRaw),
+                   now.supportedServiceTiers.contains(wanted),
+                   wanted != self.serviceTier {
+                    self.choose(serviceTier: wanted)
+                }
                 // The one it is on first, as Harness lists them.
                 models.removeAll { $0 == now }
                 models.insert(now, at: 0)
             }
             self.models = models
+        }
+    }
+
+    /// Switches Codex / ChatGPT service tier (`Standard` / `Fast` / `Ultra Fast`)
+    /// via graff's persistent `/fast` slash command without polluting the chat transcript.
+    func choose(serviceTier tier: ServiceTier) {
+        if let model, !model.supportedServiceTiers.isEmpty, !model.supportedServiceTiers.contains(tier) {
+            return
+        }
+        prefs.agentServiceTier = tier.rawValue
+        guard tier != serviceTier || pendingServiceTier != nil else { return }
+        serviceTier = tier
+        if session == nil || prompting || phase == .working {
+            pendingServiceTier = tier
+            return
+        }
+        applyServiceTierNow(tier)
+    }
+
+    private func applyServiceTierNow(_ tier: ServiceTier) {
+        guard let session else {
+            pendingServiceTier = tier
+            return
+        }
+        pendingServiceTier = nil
+        applyingServiceTier = true
+        call("session/prompt", ["sessionId": session, "prompt": [["type": "text", "text": tier.slashCommand]]]) { [weak self] _ in
+            guard let self else { return }
+            self.applyingServiceTier = false
+            self.listModels()
+            if let next = self.pendingServiceTier {
+                self.applyServiceTierNow(next)
+            }
         }
     }
 
@@ -1169,13 +1428,15 @@ final class Agent: ObservableObject {
         guard prefs.usesAgent else { return }
         let tab = pinned ?? tab
         let text = draft.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !text.isEmpty else { return }
-        if let details = AgentFeedbackDraft.command(text), let browser = AgentTools.shared.browser {
+        let images = pendingImages
+        guard !text.isEmpty || !images.isEmpty else { return }
+        if !text.isEmpty, let details = AgentFeedbackDraft.command(text), let browser = AgentTools.shared.browser {
             draft = ""
             browser.reportAgentProblem(details)
             return
         }
         if let asking, asking.isQuestion {
+            guard !text.isEmpty else { return }
             draft = ""
             entries.append(Entry(kind: .you, text: text))
             respond(asking, text: text)
@@ -1189,15 +1450,16 @@ final class Agent: ObservableObject {
         writeMode = false
         let excerpt = passage
         passage = nil
+        clearImages()
         let extras = mentionedTabs.filter { !$0.isBlank && $0.id != tab?.id }
         clearMentionedTabs()
         // Mid-turn, it waits its turn.
         if phase == .working || prompting {
-            queue.append(Queued(text: text, tab: tab, passage: excerpt, mentioned: extras))
+            queue.append(Queued(text: text, tab: tab, passage: excerpt, mentioned: extras, images: images))
             return
         }
         queueHeld = false
-        submit(text, page: tab, passage: excerpt, mentioned: extras)
+        submit(text, page: tab, passage: excerpt, mentioned: extras, images: images)
     }
 
     /// NanoHarness ⌘↩ shortcut:
@@ -1211,7 +1473,7 @@ final class Agent: ObservableObject {
             return
         }
         let trimmed = draft.trimmingCharacters(in: .whitespacesAndNewlines)
-        if trimmed.isEmpty {
+        if trimmed.isEmpty && pendingImages.isEmpty {
             if let newest = queue.last { sendNow(newest.id) }
             return
         }
@@ -1219,12 +1481,14 @@ final class Agent: ObservableObject {
             guard prefs.usesAgent else { return }
             let targetTab = pinned ?? tab
             let excerpt = passage
+            let images = pendingImages
             let extras = mentionedTabs.filter { !$0.isBlank && $0.id != targetTab?.id }
             draft = ""
             writeMode = false
             passage = nil
+            clearImages()
             clearMentionedTabs()
-            let item = Queued(text: trimmed, tab: targetTab, passage: excerpt, mentioned: extras)
+            let item = Queued(text: trimmed, tab: targetTab, passage: excerpt, mentioned: extras, images: images)
             queue.insert(item, at: 0)
             queueHeld = false
             if let asking { answer(asking, with: nil) }
@@ -1234,7 +1498,7 @@ final class Agent: ObservableObject {
         send(page: tab)
     }
 
-    private func submit(_ text: String, page tab: Tab?, passage: AgentPassage? = nil, mentioned: [Tab] = []) {
+    private func submit(_ text: String, page tab: Tab?, passage: AgentPassage? = nil, mentioned: [Tab] = [], images: [PastedImage] = []) {
         let generation = self.generation
         let pageTitle = tab.flatMap { tab -> String? in
             guard !tab.isBlank else { return nil }
@@ -1250,7 +1514,7 @@ final class Agent: ObservableObject {
         }()
         lastActive = Date()
         if chatID == nil { chatID = UUID() }
-        entries.append(Entry(kind: .you, text: text, page: displayPage, passage: passage))
+        entries.append(Entry(kind: .you, text: text, page: displayPage, passage: passage, images: images.isEmpty ? nil : images))
         outcome = nil
         keep()
         if phase == .ready { phase = .working }
@@ -1267,6 +1531,7 @@ final class Agent: ObservableObject {
                 page: page,
                 extras: extras,
                 passage: passage,
+                images: images,
                 only: self.pinned != nil && tab === self.pinned
             )
             switch phase {
@@ -1276,7 +1541,7 @@ final class Agent: ObservableObject {
                 held = blocks
                 wake()
             default:
-                entries.append(Entry(kind: .note, text: "Codegraff isn't running"))
+                entries.append(Entry(kind: .note, text: "graff isn't running"))
             }
         }
     }
@@ -1327,6 +1592,9 @@ final class Agent: ObservableObject {
                 }
             }
             self.keep()
+            if let pendingTier = self.pendingServiceTier, !self.prompting, self.phase == .ready {
+                self.applyServiceTierNow(pendingTier)
+            }
             self.sendQueued()
         }
     }
@@ -1338,7 +1606,7 @@ final class Agent: ObservableObject {
     private func sendQueued() {
         guard !queueHeld, !prompting, asking == nil, phase == .ready, !queue.isEmpty else { return }
         let first = queue.removeFirst()
-        submit(first.text, page: first.tab, passage: first.passage, mentioned: first.mentioned)
+        submit(first.text, page: first.tab, passage: first.passage, mentioned: first.mentioned, images: first.images)
     }
 
     /// Harness's Send now: this one goes next, and the turn under way is
@@ -1443,7 +1711,7 @@ final class Agent: ObservableObject {
         if let method, let id, !(id is NSNull) {
             asked(method, id: id, params: message["params"] as? [String: Any] ?? [:])
         } else if let method {
-            guard method == "session/update", !replaying,
+            guard method == "session/update", !replaying, !applyingServiceTier,
                   let params = message["params"] as? [String: Any],
                   let update = params["update"] as? [String: Any]
             else { return }
@@ -1840,15 +2108,17 @@ final class Agent: ObservableObject {
     }
 
     /// The prompt: the active page and any `@`-mentioned tabs, trimmed fairly to
-    /// fit within one ACP line, followed by any excerpt and the user's words.
+    /// fit within one ACP line, followed by any excerpt, pasted images, and the user's words.
     private static func blocks(
         _ text: String,
         page: (address: String, title: String, text: String, tab: String)?,
         extras: [(address: String, title: String, text: String, tab: String)] = [],
         passage: AgentPassage? = nil,
+        images: [PastedImage] = [],
         only: Bool = false
     ) -> [[String: Any]] {
-        let words: [String: Any] = ["type": "text", "text": text]
+        let imageBlocks = images.map(\.acpBlock)
+        let words: [[String: Any]] = text.isEmpty ? [] : [["type": "text", "text": text]]
         let excerpt = passage?.blocks ?? []
         var sources: [(lead: String, address: String, whole: String)] = []
         if let page {
@@ -1864,7 +2134,7 @@ final class Agent: ObservableObject {
             let whole = extra.title.isEmpty ? extra.text : "\(extra.title)\n\n\(extra.text)"
             sources.append((lead, extra.address, whole))
         }
-        guard !sources.isEmpty else { return excerpt + [words] }
+        guard !sources.isEmpty else { return excerpt + imageBlocks + words }
 
         func assemble(_ bodies: [String]) -> [[String: Any]] {
             var out: [[String: Any]] = []
@@ -1876,7 +2146,7 @@ final class Agent: ObservableObject {
                     "text": body,
                 ]])
             }
-            return out + excerpt + [words]
+            return out + excerpt + words
         }
 
         var bodies = sources.map(\.whole)
@@ -1898,7 +2168,8 @@ final class Agent: ObservableObject {
         let finalBodies = bodies.enumerated().map { idx, b in
             b.count < sources[idx].whole.count && !b.isEmpty ? b + "\n…" : b
         }
-        return assemble(finalBodies)
+        // Append native ACP image blocks after text trimming (graff accepts up to 64 MiB per line).
+        return assemble(finalBodies) + imageBlocks
     }
 
     /// The page's words, as a reader would take them: its text, not its

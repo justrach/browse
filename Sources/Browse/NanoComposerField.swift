@@ -54,6 +54,8 @@ struct NanoSlashCommand: Identifiable, Equatable {
     enum Action: Equatable {
         case newChat
         case model
+        case fast
+        case ultrafast
         case stop
         case expand
         case writeMode
@@ -72,7 +74,9 @@ struct NanoSlashCommand: Identifiable, Equatable {
     static func catalog(agentCommands: [String], working: Bool, full: Bool) -> [NanoSlashCommand] {
         var list: [NanoSlashCommand] = [
             NanoSlashCommand(id: "new", name: "new", description: "Start a new conversation", icon: "square.and.pencil", action: .newChat),
-            NanoSlashCommand(id: "model", name: "model", description: "Switch model or reasoning effort", icon: "cpu", action: .model),
+            NanoSlashCommand(id: "model", name: "model", description: "Switch model, reasoning, or speed", icon: "cpu", action: .model),
+            NanoSlashCommand(id: "fast", name: "fast", description: "Toggle Fast mode (priority tier)", icon: "bolt", action: .fast),
+            NanoSlashCommand(id: "ultrafast", name: "ultrafast", description: "Toggle Ultra Fast mode (GPT-6.2)", icon: "bolt.fill", action: .ultrafast),
             NanoSlashCommand(id: "write", name: "write", description: "Open full-page editor (⌘⇧E)", icon: "doc.text", action: .writeMode),
             NanoSlashCommand(id: "expand", name: "expand", description: full ? "Move sidebar beside page (⇧⌘;)" : "Expand conversation full screen (⇧⌘;)", icon: full ? "sidebar.right" : "arrow.up.left.and.arrow.down.right", action: .expand),
         ]
@@ -138,6 +142,7 @@ struct NanoComposerField: NSViewRepresentable {
     let onEscape: () -> Void
     let onToggleWriteMode: () -> Void
     var onTab: (() -> Void)? = nil
+    var onPasteImages: (([Agent.PastedImage]) -> Void)? = nil
 
     func makeCoordinator() -> Coordinator { Coordinator(parent: self) }
 
@@ -396,6 +401,24 @@ final class NanoTextView: NSTextView {
             return true
         }
         return super.performKeyEquivalent(with: event)
+    }
+
+    override func paste(_ sender: Any?) {
+        if handleImagePaste() { return }
+        super.pasteAsPlainText(sender)
+    }
+
+    override func pasteAsPlainText(_ sender: Any?) {
+        if handleImagePaste() { return }
+        super.pasteAsPlainText(sender)
+    }
+
+    private func handleImagePaste() -> Bool {
+        guard let onPasteImages = coordinator?.parent.onPasteImages else { return false }
+        let images = Agent.PastedImage.fromPasteboard(.general)
+        guard !images.isEmpty else { return false }
+        onPasteImages(images)
+        return true
     }
 
     override func keyDown(with event: NSEvent) {

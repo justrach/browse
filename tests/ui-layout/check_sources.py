@@ -150,6 +150,21 @@ check(
     "⌘L is alwaysOurs and FocusableAddressField reliably focuses & selects all on mount",
 )
 
+# 12. Dark Mode PageTint guard, image paste in NanoTextView, and Fast/Ultra Fast service tiers.
+design_src = read("Sources/Browse/Design.swift")
+agent_src = read("Sources/Browse/Agent.swift")
+check(
+    "if scheme == .dark, seen >= 0.5 { return nil }" in design_src,
+    "PageTint never flips a Dark Mode window frame into bright white chrome",
+)
+check(
+    "override func paste(_ sender: Any?)" in composer_src
+    and "struct PastedImage:" in agent_src
+    and "enum ServiceTier:" in agent_src
+    and "serviceTierBar" in agent_col,
+    "graff composer supports image pasting (⌘V) and Standard / Fast / Ultra Fast speed modes",
+)
+
 if failures:
     print(f"\n{len(failures)} source guardrail check(s) failed.", file=sys.stderr)
     sys.exit(1)

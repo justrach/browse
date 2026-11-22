@@ -323,6 +323,10 @@ final class Preferences: ObservableObject {
     @Published var agentEffort: String {
         didSet { store.set(agentEffort, forKey: "agent.effort") }
     }
+    /// Codex / ChatGPT service tier: "", "default", "fast", or "ultrafast".
+    @Published var agentServiceTier: String {
+        didSet { store.set(agentServiceTier, forKey: "agent.serviceTier") }
+    }
     @Published var agentWidth: CGFloat {
         didSet { store.set(Double(agentWidth), forKey: "agent.width") }
     }
@@ -415,6 +419,7 @@ final class Preferences: ObservableObject {
         agentPath = store.string(forKey: "agent.path") ?? ""
         agentModel = store.string(forKey: "agent.model") ?? ""
         agentEffort = store.string(forKey: "agent.effort") ?? ""
+        agentServiceTier = store.string(forKey: "agent.serviceTier") ?? ""
         let agentWide = store.object(forKey: "agent.width") as? Double ?? Double(Metrics.agent)
         agentWidth = min(Metrics.agentMax, max(Metrics.agentMin, CGFloat(agentWide)))
         let flicks = store.bool(forKey: "float.flicks")
