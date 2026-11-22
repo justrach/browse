@@ -403,3 +403,265 @@ struct ShortcutBadge: View {
             .fixedSize()
     }
 }
+
+/// Vector mark from NanoHarness (`apps/nano/assets/icons/harness-logo.svg`):
+/// the open ink C-ring, `</>` code brackets, and six pixel fragments.
+struct GraffMark: View {
+    var size: CGFloat = 16
+    var color: Color = Palette.ink
+
+    var body: some View {
+        Canvas { ctx, sz in
+            let s = min(sz.width, sz.height) / 1000.0
+            let ox = (sz.width - 1000.0 * s) * 0.5
+            let oy = (sz.height - 1000.0 * s) * 0.5
+            func pt(_ x: CGFloat, _ y: CGFloat) -> CGPoint {
+                CGPoint(x: ox + x * s, y: oy + y * s)
+            }
+
+            // Open outer C-ring.
+            var ring = Path()
+            ring.move(to: pt(778, 275))
+            ring.addCurve(to: pt(418, 205), control1: pt(678, 180), control2: pt(545, 160))
+            ring.addCurve(to: pt(222, 526), control1: pt(272, 255), control2: pt(212, 389))
+            ring.addCurve(to: pt(531, 814), control1: pt(234, 700), control2: pt(371, 812))
+            ring.addCurve(to: pt(794, 722), control1: pt(650, 817), control2: pt(733, 772))
+            ctx.stroke(
+                ring,
+                with: .color(color),
+                style: StrokeStyle(lineWidth: max(1.2, 108 * s), lineCap: .round, lineJoin: .round)
+            )
+
+            // Center `</>` code brackets.
+            var code = Path()
+            code.move(to: pt(456, 457))
+            code.addLine(to: pt(383, 500))
+            code.addLine(to: pt(456, 543))
+            code.move(to: pt(536, 437))
+            code.addLine(to: pt(493, 563))
+            code.move(to: pt(578, 457))
+            code.addLine(to: pt(651, 500))
+            code.addLine(to: pt(578, 543))
+            ctx.stroke(
+                code,
+                with: .color(color),
+                style: StrokeStyle(lineWidth: max(0.9, 36 * s), lineCap: .round, lineJoin: .round)
+            )
+
+            // Six pixel fragments along the open trailing edge.
+            let pixels: [(CGFloat, CGFloat, CGFloat, CGFloat)] = [
+                (802, 455, 27, 4),
+                (849, 495, 38, 5),
+                (790, 552, 48, 6),
+                (860, 574, 23, 4),
+                (823, 630, 34, 5),
+                (893, 662, 18, 3),
+            ]
+            for (x, y, w, r) in pixels {
+                let rect = CGRect(x: ox + x * s, y: oy + y * s, width: max(1.0, w * s), height: max(1.0, w * s))
+                ctx.fill(Path(roundedRect: rect, cornerRadius: max(0.3, r * s)), with: .color(color))
+            }
+        }
+        .frame(width: size, height: size)
+        .accessibilityHidden(true)
+    }
+}
+
+/// Organic "alien gooey" metaball & sinuous snake bridge connecting the active
+/// webpage card across the 6pt gutter directly into the graff card.
+///
+/// - When `connected` is true, concave Bézier fillets physically fuse the two
+///   cards' surfaces and rims right beside the page-context anchor, with a
+///   sinuous liquid tendril weaving through the neck.
+/// - When `working` is true, the snake tendril gently undulates at 60 Hz; at
+///   rest it draws statically at 0% CPU.
+/// - When `connected` is false, it smoothly pinches off and fades out.
+struct GooeyTabBridge: View {
+    let connected: Bool
+    let working: Bool
+    let dark: Bool
+
+    var body: some View {
+        Group {
+            if working && !Motion.reduced {
+                TimelineView(.animation(minimumInterval: 1.0 / 60.0)) { timeline in
+                    bridgeCanvas(phase: timeline.date.timeIntervalSinceReferenceDate * 2.4)
+                }
+            } else {
+                bridgeCanvas(phase: 0)
+            }
+        }
+        .frame(width: 22, height: 150)
+        .scaleEffect(x: connected ? 1.0 : 0.15, y: connected ? 1.0 : 0.72, anchor: .trailing)
+        .opacity(connected ? 1 : 0)
+        .animation(Motion.settle, value: connected)
+        .allowsHitTesting(false)
+    }
+
+    private func bridgeCanvas(phase: Double) -> some View {
+        Canvas { ctx, size in
+            // Gutter spans x = 8..14 (6pt wide), with 8pt overlap onto each
+            // card so the metaball fillets merge seamlessly into both surfaces.
+            let midY = size.height * 0.5
+            let leftX: CGFloat = 6.5
+            let rightX: CGFloat = 15.5
+            let midX = (leftX + rightX) * 0.5
+            let halfFlare: CGFloat = 46
+            let wobble = working ? CGFloat(sin(phase)) * 2.8 : 0
+            let pinchHalf: CGFloat = 14 + (working ? CGFloat(cos(phase * 1.3)) * 2.2 : 0)
+
+            // 1. Solid liquid metaball bridge matching the card ground.
+            var blob = Path()
+            blob.move(to: CGPoint(x: leftX, y: midY - halfFlare))
+            blob.addCurve(
+                to: CGPoint(x: rightX, y: midY - halfFlare),
+                control1: CGPoint(x: leftX, y: midY - pinchHalf + wobble),
+                control2: CGPoint(x: rightX, y: midY - pinchHalf - wobble)
+            )
+            blob.addLine(to: CGPoint(x: rightX, y: midY + halfFlare))
+            blob.addCurve(
+                to: CGPoint(x: leftX, y: midY + halfFlare),
+                control1: CGPoint(x: rightX, y: midY + pinchHalf - wobble),
+                control2: CGPoint(x: leftX, y: midY + pinchHalf + wobble)
+            )
+            blob.closeSubpath()
+            ctx.fill(blob, with: .color(Palette.ground))
+
+            // 2. Concave upper & lower liquid fillets tracing the exact card rim.
+            let rim = dark ? Color.white.opacity(0.11) : Color.black.opacity(0.085)
+            var topEdge = Path()
+            topEdge.move(to: CGPoint(x: leftX + 1.2, y: midY - halfFlare))
+            topEdge.addCurve(
+                to: CGPoint(x: rightX - 1.2, y: midY - halfFlare),
+                control1: CGPoint(x: leftX + 1.2, y: midY - pinchHalf + wobble),
+                control2: CGPoint(x: rightX - 1.2, y: midY - pinchHalf - wobble)
+            )
+            var bottomEdge = Path()
+            bottomEdge.move(to: CGPoint(x: leftX + 1.2, y: midY + halfFlare))
+            bottomEdge.addCurve(
+                to: CGPoint(x: rightX - 1.2, y: midY + halfFlare),
+                control1: CGPoint(x: leftX + 1.2, y: midY + pinchHalf + wobble),
+                control2: CGPoint(x: rightX - 1.2, y: midY + pinchHalf - wobble)
+            )
+            ctx.stroke(topEdge, with: .color(rim), lineWidth: 0.75)
+            ctx.stroke(bottomEdge, with: .color(rim), lineWidth: 0.75)
+
+            // 3. Sinuous "snake" energy filament weaving vertically & bridging
+            //    from the active webpage card into graff.
+            var snake = Path()
+            let steps = 28
+            let span: CGFloat = 112
+            let startY = midY - span * 0.5
+            for i in 0...steps {
+                let t = CGFloat(i) / CGFloat(steps)
+                let y = startY + t * span
+                // Smoothly cross from left card edge (x=leftX+1.5) to right card edge (x=rightX-1.5)
+                // with a gentle organic S-wave.
+                let cross = (1 - cos(t * .pi)) * 0.5
+                let baseX = (leftX + 1.5) + cross * (rightX - leftX - 3.0)
+                let wave = sin(Double(t) * .pi * 3.0 - phase * 1.8) * Double(sin(t * .pi)) * (working ? 2.6 : 1.1)
+                let p = CGPoint(x: baseX + CGFloat(wave), y: y)
+                if i == 0 { snake.move(to: p) } else { snake.addLine(to: p) }
+            }
+            let glow = Gradient(colors: [
+                .clear,
+                Palette.accent.opacity(working ? 0.65 : 0.24),
+                Color(red: 0.32, green: 0.80, blue: 0.68).opacity(working ? 0.72 : 0.22),
+                Palette.accent.opacity(working ? 0.65 : 0.24),
+                .clear,
+            ])
+            // Soft outer halo + crisp inner snake core.
+            ctx.stroke(
+                snake,
+                with: .linearGradient(glow, startPoint: CGPoint(x: midX, y: startY), endPoint: CGPoint(x: midX, y: startY + span)),
+                style: StrokeStyle(lineWidth: working ? 5.0 : 3.0, lineCap: .round, lineJoin: .round)
+            )
+            ctx.stroke(
+                snake,
+                with: .linearGradient(glow, startPoint: CGPoint(x: midX, y: startY), endPoint: CGPoint(x: midX, y: startY + span)),
+                style: StrokeStyle(lineWidth: working ? 1.8 : 1.2, lineCap: .round, lineJoin: .round)
+            )
+        }
+    }
+}
+
+/// Subtle, GPU-composited Dia-style shimmer rim & edge sheen for the floating
+/// webpage card:
+/// - `working`: softly glides an ambient luminous highlight around the 10pt
+///   squircle rim while Codegraff is actively working with the page.
+/// - `settling`: sweeps a brief frosted sheen across the trailing edge during
+///   sidebar/panel layout transitions so one-shot WebKit reflows feel fluid.
+struct PageShimmerRim: View {
+    let corner: CGFloat
+    let dark: Bool
+    let working: Bool
+    let settling: Bool
+
+    @State private var spin: Double = 0
+    @State private var sweep: CGFloat = -0.35
+
+    var body: some View {
+        let shape = RoundedRectangle(cornerRadius: corner, style: .continuous)
+        ZStack {
+            if working {
+                let colors: [Color] = dark
+                    ? [
+                        Color.white.opacity(0.05),
+                        Palette.accent.opacity(0.55),
+                        Color(red: 0.56, green: 0.78, blue: 1.0).opacity(0.45),
+                        Color.white.opacity(0.05),
+                    ]
+                    : [
+                        Color.black.opacity(0.03),
+                        Palette.accent.opacity(0.45),
+                        Color(red: 0.36, green: 0.62, blue: 0.98).opacity(0.38),
+                        Color.black.opacity(0.03),
+                    ]
+                shape
+                    .strokeBorder(
+                        AngularGradient(
+                            gradient: Gradient(colors: colors),
+                            center: .center,
+                            angle: .degrees(Motion.reduced ? 45 : spin)
+                        ),
+                        lineWidth: 1.5
+                    )
+                    .transition(.opacity)
+                    .onAppear {
+                        guard !Motion.reduced else { return }
+                        spin = 0
+                        withAnimation(.linear(duration: 3.2).repeatForever(autoreverses: false)) {
+                            spin = 360
+                        }
+                    }
+                    .onDisappear { spin = 0 }
+            }
+
+            if settling {
+                // Soft trailing-edge frosted shimmer that smooths over the
+                // single-pass WebKit reflow when panels slide open or shut.
+                LinearGradient(
+                    stops: [
+                        .init(color: .clear, location: max(0, sweep - 0.35)),
+                        .init(color: (dark ? Color.white : Color.white).opacity(dark ? 0.08 : 0.42), location: max(0, min(1, sweep))),
+                        .init(color: .clear, location: min(1, sweep + 0.35)),
+                    ],
+                    startPoint: .leading,
+                    endPoint: .trailing
+                )
+                .clipShape(shape)
+                .transition(.opacity)
+                .onAppear {
+                    guard !Motion.reduced else { return }
+                    sweep = 0.25
+                    withAnimation(.easeOut(duration: 0.32)) {
+                        sweep = 1.25
+                    }
+                }
+            }
+        }
+        .allowsHitTesting(false)
+        .animation(.easeOut(duration: 0.22), value: working)
+        .animation(.easeOut(duration: 0.18), value: settling)
+    }
+}

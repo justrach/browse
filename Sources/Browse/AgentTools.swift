@@ -195,23 +195,44 @@ final class AgentTools: ObservableObject {
         all.forEach { $0.resume(returning: ok) }
     }
 
+    /// Locate the local Harness CLI (`harness mcp`) so Browse's graff worker
+    /// can talk directly to the running NanoHarness engine on 127.0.0.1:27664.
+    nonisolated static func harnessExecutable() -> URL? {
+        guard !Store.testing else { return nil }
+        let home = FileManager.default.homeDirectoryForCurrentUser
+        let candidates = [
+            URL(fileURLWithPath: "/Applications/Harness.app/Contents/MacOS/harness"),
+            home.appendingPathComponent("Applications/Harness.app/Contents/MacOS/harness"),
+            home.appendingPathComponent(".harness/bin/harness"),
+        ]
+        return candidates.first { FileManager.default.isExecutableFile(atPath: $0.path) }
+    }
+
+    nonisolated static var harnessAvailable: Bool { harnessExecutable() != nil }
+
     /// The .mcp.json in graff's folder: this server, under the name graff
-    /// will show its tools by. The same goes in `own`, which graff reads
-    /// instead of the user's own MCP config when it runs lean (see
-    /// Agent.environment): then these are the only tools it adds to its own.
+    /// will show its tools by, plus the local Harness engine (`harness mcp`)
+    /// when Harness.app is installed. The same goes in `own`, which graff reads
+    /// instead of the user's own MCP config when it runs lean.
     private func announce() -> Bool {
         guard let port else { return false }
-        let config: [String: Any] = [
-            "mcpServers": [
-                "browse": [
-                    "url": "http://127.0.0.1:\(port)/mcp",
-                    "headers": ["Authorization": "Bearer \(token)"],
-                    // Served in full up front, not behind graff's tool
-                    // search: in a browser these tools are the point.
-                    "eager": true,
-                ] as [String: Any],
-            ],
+        var servers: [String: Any] = [
+            "browse": [
+                "url": "http://127.0.0.1:\(port)/mcp",
+                "headers": ["Authorization": "Bearer \(token)"],
+                // Served in full up front, not behind graff's tool
+                // search: in a browser these tools are the point.
+                "eager": true,
+            ] as [String: Any],
         ]
+        if let harness = AgentTools.harnessExecutable() {
+            servers["harness"] = [
+                "command": harness.path,
+                "args": ["mcp"],
+                "eager": false,
+            ] as [String: Any]
+        }
+        let config: [String: Any] = ["mcpServers": servers]
         return AgentTools.write(config, to: Agent.folder.appendingPathComponent(".mcp.json"))
             && AgentTools.write(config, to: AgentTools.own)
     }

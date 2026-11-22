@@ -33,6 +33,7 @@ struct AgentColumn: View {
     /// The width the column had when the edge was picked up.
     @State private var grabbed: CGFloat?
     @State private var onEdge = false
+    @State private var seamPulse = false
 
     @Environment(\.colorScheme) private var scheme
 
@@ -88,11 +89,24 @@ struct AgentColumn: View {
         .frame(maxWidth: full ? .infinity : nil, maxHeight: .infinity)
         .overlay(alignment: .leading) {
             if !full {
+                let pageLinked = floatingCard && agent.withPage && browser.active?.isBlank == false
                 ZStack(alignment: .leading) {
                     if !floatingCard {
                         Rectangle()
                             .fill(Palette.hairline)
                             .frame(width: 1)
+                    }
+                    if floatingCard {
+                        VStack {
+                            Spacer(minLength: 0)
+                            GooeyTabBridge(
+                                connected: pageLinked,
+                                working: agent.phase == .working,
+                                dark: scheme == .dark
+                            )
+                            .offset(x: -8)
+                            .padding(.bottom, 58)
+                        }
                     }
                     edge
                 }
@@ -191,14 +205,27 @@ struct AgentColumn: View {
             HStack(spacing: 6) {
                 VStack(alignment: .leading, spacing: 2) {
                     HStack(spacing: 6) {
-                        Text("Codegraff")
-                            .font(.system(size: 13, weight: .semibold))
+                        GraffMark(size: 17, color: Palette.ink.opacity(0.92))
+                        Text("graff")
+                            .font(.system(size: 13.5, weight: .semibold, design: .rounded))
                             .foregroundStyle(Palette.ink)
                             .lineLimit(1)
                             .fixedSize()
                         if !full {
                             PulseDot(color: light, size: 5.5, active: agent.phase == .starting || agent.phase == .working)
                                 .accessibilityLabel(status)
+                        }
+                        if AgentTools.harnessAvailable {
+                            Text("harness")
+                                .font(.system(size: 9.5, weight: .medium, design: .monospaced))
+                                .foregroundStyle(Palette.muted.opacity(0.85))
+                                .padding(.horizontal, 5)
+                                .padding(.vertical, 1.5)
+                                .background(
+                                    Capsule()
+                                        .fill(Palette.ink.opacity(scheme == .dark ? 0.08 : 0.05))
+                                )
+                                .help("Connected to local Harness engine via MCP")
                         }
                     }
                     if full || agent.asking != nil || !agent.phase.words.isEmpty {
@@ -324,7 +351,7 @@ struct AgentColumn: View {
                     ZStack(alignment: .bottom) {
                         ScrollView {
                             measure(
-                                LazyVStack(alignment: .leading, spacing: full ? 20 : 12) {
+                                VStack(alignment: .leading, spacing: full ? 20 : 12) {
                                     if full, let first = agent.entries.first {
                                         Text(Self.day(first.at))
                                             .font(.system(size: 12))
@@ -360,13 +387,18 @@ struct AgentColumn: View {
                             )
                         }
                         .defaultScrollAnchor(.bottom)
-                        .mask {
-                            VStack(spacing: 0) {
-                                if !full {
-                                    LinearGradient(colors: [.clear, .black], startPoint: .top, endPoint: .bottom)
-                                        .frame(height: 10)
-                                }
-                                Rectangle()
+                        // Lightweight top fade overlay instead of `.mask(...)` on the
+                        // entire ScrollView, avoiding an offscreen compositing pass on
+                        // every 120 Hz scroll frame.
+                        .overlay(alignment: .top) {
+                            if !full {
+                                LinearGradient(
+                                    colors: [Palette.ground, Palette.ground.opacity(0)],
+                                    startPoint: .top,
+                                    endPoint: .bottom
+                                )
+                                .frame(height: 12)
+                                .allowsHitTesting(false)
                             }
                         }
 
@@ -428,9 +460,7 @@ struct AgentColumn: View {
                             )
                         RoundedRectangle(cornerRadius: 10, style: .continuous)
                             .strokeBorder(Palette.ink.opacity(0.11), lineWidth: 0.75)
-                        Image(systemName: "sparkles")
-                            .font(.system(size: 14, weight: .medium))
-                            .foregroundStyle(Palette.ink.opacity(0.88))
+                        GraffMark(size: 20, color: Palette.ink.opacity(0.9))
                     }
                     .frame(width: 34, height: 34)
                     .shadow(color: .black.opacity(0.05), radius: 4, y: 1.5)
@@ -462,30 +492,88 @@ struct AgentColumn: View {
 
     /// The column's edge: pulled left to widen it, double-clicked to put it
     /// back, as the sidebar's is.
+    /// Middle gutter resize handle between the webpage card and Codegraff:
+    /// shows a crisp Split-View-style guide rail + grip pill on hover/drag,
+    /// and a gentle luminous pulse while Codegraff is working with the page.
     private var edge: some View {
-        Capsule()
-            .fill(Palette.ink.opacity(onEdge || grabbed != nil ? 0.18 : 0))
-            .frame(width: 2, height: 32)
-            .frame(maxHeight: .infinity)
-            .frame(width: 9)
-            .contentShape(Rectangle())
-            .onHover { over in
-                onEdge = over
-                if over { NSCursor.resizeLeftRight.push() } else { NSCursor.pop() }
-            }
-            .gesture(
-                DragGesture(minimumDistance: 1, coordinateSpace: .global)
-                    .onChanged { value in
-                        if grabbed == nil { grabbed = prefs.agentWidth }
-                        let wanted = (grabbed ?? prefs.agentWidth) - value.translation.width
-                        prefs.agentWidth = min(Metrics.agentMax, max(Metrics.agentMin, wanted))
+        let dragging = grabbed != nil
+        let active = onEdge || dragging
+        let workingOnPage = agent.phase == .working && agent.withPage && !full
+        return ZStack {
+            // Subtle ambient shimmer line in the middle gutter while Codegraff works.
+            if workingOnPage && !active {
+                Capsule()
+                    .fill(
+                        LinearGradient(
+                            colors: [
+                                .clear,
+                                Palette.accent.opacity(seamPulse ? 0.45 : 0.18),
+                                Color(red: 0.45, green: 0.70, blue: 1.0).opacity(seamPulse ? 0.38 : 0.14),
+                                .clear,
+                            ],
+                            startPoint: .top,
+                            endPoint: .bottom
+                        )
+                    )
+                    .frame(width: 2, height: 140)
+                    .onAppear {
+                        guard !Motion.reduced else { return }
+                        withAnimation(.easeInOut(duration: 1.5).repeatForever(autoreverses: true)) {
+                            seamPulse = true
+                        }
                     }
-                    .onEnded { _ in grabbed = nil }
-            )
-            .modifier(OneClick(double: true) {
-                withAnimation(Motion.settle) { prefs.agentWidth = Metrics.agent }
-            })
-            .animation(Motion.quick, value: onEdge)
+                    .onDisappear { seamPulse = false }
+                    .transition(.opacity)
+            }
+            // Full-height hairline guide on hover or drag.
+            Rectangle()
+                .fill(dragging ? Palette.accent.opacity(0.45) : Palette.ink.opacity(onEdge ? 0.12 : 0))
+                .frame(width: 1)
+                .padding(.vertical, 12)
+            // Tactile center grip pill (matching Split View's divider).
+            Capsule()
+                .fill(dragging ? Palette.accent : Palette.ink.opacity(onEdge ? 0.34 : 0.08))
+                .frame(width: dragging ? 3.5 : (onEdge ? 3 : 2.5), height: dragging ? 46 : (onEdge ? 38 : 24))
+        }
+        .frame(maxHeight: .infinity)
+        .frame(width: 14)
+        .offset(x: -4)
+        .contentShape(Rectangle())
+        .onHover { over in
+            onEdge = over
+            if over { NSCursor.resizeLeftRight.push() } else { NSCursor.pop() }
+        }
+        .gesture(
+            DragGesture(minimumDistance: 1, coordinateSpace: .global)
+                .onChanged { value in
+                    if grabbed == nil {
+                        grabbed = prefs.agentWidth
+                        if let pair = browser.shownSplit {
+                            pair.left.built?.splitLiveResizing = true
+                            pair.right.built?.splitLiveResizing = true
+                        } else {
+                            browser.active?.built?.splitLiveResizing = true
+                        }
+                    }
+                    let wanted = (grabbed ?? prefs.agentWidth) - value.translation.width
+                    prefs.agentWidth = min(Metrics.agentMax, max(Metrics.agentMin, wanted))
+                }
+                .onEnded { _ in
+                    grabbed = nil
+                    if let pair = browser.shownSplit {
+                        pair.left.built?.splitLiveResizing = false
+                        pair.right.built?.splitLiveResizing = false
+                    } else {
+                        browser.active?.built?.splitLiveResizing = false
+                    }
+                }
+        )
+        .modifier(OneClick(double: true) {
+            NSHapticFeedbackManager.defaultPerformer.perform(.alignment, performanceTime: .now)
+            withAnimation(Motion.settle) { prefs.agentWidth = Metrics.agent }
+        })
+        .animation(Motion.quick, value: active)
+        .animation(Motion.quick, value: workingOnPage)
     }
 }
 

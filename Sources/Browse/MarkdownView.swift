@@ -42,7 +42,35 @@ enum MarkdownBlock: Equatable {
 }
 
 enum MarkdownParser {
+    private static let cacheLock = NSLock()
+    private static var cache: [String: [MarkdownBlock]] = [:]
+    private static var cacheOrder: [String] = []
+    private static let cacheLimit = 128
+
     static func parse(_ text: String) -> [MarkdownBlock] {
+        cacheLock.lock()
+        if let hit = cache[text] {
+            cacheLock.unlock()
+            return hit
+        }
+        cacheLock.unlock()
+
+        let parsed = parseUncached(text)
+
+        cacheLock.lock()
+        if cache[text] == nil {
+            cache[text] = parsed
+            cacheOrder.append(text)
+            if cacheOrder.count > cacheLimit, let oldest = cacheOrder.first {
+                cacheOrder.removeFirst()
+                cache.removeValue(forKey: oldest)
+            }
+        }
+        cacheLock.unlock()
+        return parsed
+    }
+
+    private static func parseUncached(_ text: String) -> [MarkdownBlock] {
         let lines = text.replacingOccurrences(of: "\r\n", with: "\n").components(separatedBy: "\n")
         var out: [MarkdownBlock] = []
         var para: [String] = []
