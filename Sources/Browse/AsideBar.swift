@@ -51,7 +51,7 @@ struct AsideBar: View {
                 }
                 .fixedSize()
 
-                // When the sidebar is folded, show Back / Forward / Reload here.
+                // When the sidebar is folded, show available nav controls (Back / Forward / Reload) here.
                 if !sidebarOpen {
                     Helm(browser: browser)
                         .fixedSize()
