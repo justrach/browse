@@ -6,6 +6,8 @@ All notable changes to **browse** are documented here, newest first.
 
 ## Unreleased
 
+## 1.8.2 — 22 November 2026
+
 ### Added
 
 - **Redesigned 5-step onboarding tour (`Welcome.swift`, `WelcomeResearch.swift`)**: live miniature preview of the unified Arc/Dia frosted glass frame (`graff` card, Dia active-tab badge, and `@`-tab mention chip), live `System / Light / Dark` appearance + layout + page-tint picker, macOS 27 Full Disk Access `+` guidance during browser import, and updated shortcut cards (`⌘L`, `⌘K`, `⇧⌘\`, `⌘;`).
