@@ -588,7 +588,7 @@ struct ContentView: View {
         guard let pair = browser.shownSplit, let split = browser.split else { return (0, 0) }
         let width = browser.stageFrame.width
         let usable = max(1, width - Split.gap * 3)
-        let left = Split.gap * 1.5 + usable * min(0.8, max(0.2, split.fraction))
+        let left = Split.gap * 1.5 + usable * min(0.82, max(0.18, split.fraction))
         return pair.left.id == browser.activeID ? (0, width - left) : (left, 0)
     }
 

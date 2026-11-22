@@ -302,9 +302,7 @@ struct SideBar: View {
         let pinBlock = pinRows == 0 ? 0
             : CGFloat(pinRows) * pinHeight + CGFloat(pinRows - 1) * SideBar.pinGap + 10
         let loose = CGFloat(browser.tabs.count - pins) * (SideBar.row + SideBar.gap)
-        let chats = prefs.usesAgent ? CGFloat(min(SideChats.most, browser.agent.chats.all.count)) * (SideChats.row + SideBar.gap) : 0
-        let ask = prefs.usesAgent ? SideBar.row + SideBar.gap + chats : 0
-        return Metrics.strip + pinBlock + ask + SideBar.todayHeight + loose + 8
+        return Metrics.strip + pinBlock + SideBar.todayHeight + loose + 8
     }
 
     // MARK: - the pinned squares
@@ -511,13 +509,6 @@ struct SideBar: View {
     /// The loose tabs and the row that makes another, which scroll as one.
     private var rows: some View {
         VStack(alignment: .leading, spacing: 0) {
-            // Codegraff's own tab, ahead of the others (see AskTab).
-            if prefs.usesAgent {
-                AskTab(browser: browser, pill: pill, title: "Ask Codegraff")
-                    .frame(height: SideBar.row)
-                    .padding(.bottom, SideBar.gap)
-                SideChats(browser: browser, agent: browser.agent, chats: browser.agent.chats)
-            }
             today(loose: !looseTabs.isEmpty)
             loose
         }
@@ -886,74 +877,6 @@ struct Speaker: View {
         .buttonStyle(.plain)
         .onHover { hovering = $0 }
         .help(tab.muted ? "Unmute Tab" : "Mute Tab")
-        .animation(Motion.quick, value: hovering)
-    }
-}
-
-/// The latest chats with Codegraff, under its row, pinned ones first: one
-/// pressed puts that conversation back on the stage, picked up with graff
-/// where it was left. Right-click renames, pins or deletes it; the Ask page
-/// has them all, and a search.
-private struct SideChats: View {
-    @ObservedObject var browser: Browser
-    @ObservedObject var agent: Agent
-    @ObservedObject var chats: Chats
-
-    @State private var renaming: Chat?
-
-    static let most = 4
-    static let row: CGFloat = 28
-
-    var body: some View {
-        VStack(spacing: SideBar.gap) {
-            ForEach(Array(chats.ordered.prefix(Self.most))) { chat in
-                ChatRow(chat: chat, live: browser.talkOnStage && agent.chatID == chat.id) {
-                    browser.takeStage()
-                    agent.resume(chat)
-                }
-                .contextMenu { ChatMenu(chat: chat, agent: agent) { renaming = chat } }
-            }
-        }
-        .padding(.bottom, chats.all.isEmpty ? 0 : SideBar.gap)
-        .modifier(ChatRenamer(chats: chats, chat: $renaming))
-    }
-}
-
-/// One chat, as a line tucked under Codegraff's. The one on screen is
-/// marked quietly: the raised glass is Codegraff's own row's.
-private struct ChatRow: View {
-    let chat: Chat
-    let live: Bool
-    let open: () -> Void
-
-    @State private var hovering = false
-
-    var body: some View {
-        Button(action: open) {
-            HStack(spacing: 8) {
-                Image(systemName: chat.isPinned ? "pin.fill" : "bubble.left")
-                    .font(.system(size: 9.5))
-                    .foregroundStyle(Palette.muted)
-                    .frame(width: 14)
-                Text(chat.title.isEmpty ? "Untitled" : chat.title)
-                    .font(.system(size: 12.5))
-                    .lineLimit(1)
-                    .truncationMode(.tail)
-                    .foregroundStyle(live || hovering ? Palette.ink : Palette.ink.opacity(0.66))
-                Spacer(minLength: 0)
-            }
-            .padding(.leading, 22)
-            .padding(.trailing, 10)
-            .frame(height: SideChats.row)
-            .background(
-                RoundedRectangle(cornerRadius: 8, style: .continuous)
-                    .fill(Palette.ink.opacity(live ? 0.07 : hovering ? 0.045 : 0))
-            )
-            .contentShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
-        }
-        .buttonStyle(.plain)
-        .onHover { hovering = $0 }
-        .help(chat.title)
         .animation(Motion.quick, value: hovering)
     }
 }

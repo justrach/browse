@@ -14,6 +14,7 @@ in [ROADMAP.md](ROADMAP.md).
 ### Added
 
 - **NanoHarness parity in Codegraff sidebar**: native AppKit composer with NanoHarness's crisp rounded accent caret, `/` slash-command completion popup (`/new`, `/model`, `/write`, `/expand`, `/stop`, `/feedback`, `/reconnect`, `/help`, plus live `graff` commands), `↑`/`↓` prompt history recall preserving unsent drafts, `⌘↩` interrupt / send-latest-queued shortcut, inline `"Editing in composer"` queue editing, full-page distraction-free Write mode (`⌘⇧E`) with live word count, compact context-window usage ring & percentage, jump-to-bottom pill (`↓`), and NanoHarness's seeded rotating working trailer (`Harnessing…`, `Thinking…`, `Brewing…`) with tabular elapsed timers and live `Now`/`Plan` detail lines.
+- **Cleaner left sidebar & refined Split View resizing**: removed the redundant `Ask Codegraff` and recent-chat list from the top of the left tab sidebar; refined Split View cards with subtle hairline frames (replacing heavy borders and drop shadows), active indicator dot and hoverable header buttons, and a wider `16pt` split resize divider with a full-height hover/drag accent guide rail and `18%–82%` resize range.
 
 ### Performance
 

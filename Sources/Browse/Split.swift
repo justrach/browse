@@ -38,9 +38,9 @@ struct Split: Equatable {
 
     /// The frame around and between the two pages, their corners, and the
     /// strip over each that names it.
-    static let gap: CGFloat = 8
+    static let gap: CGFloat = 6
     static let corner: CGFloat = 10
-    static let header: CGFloat = 30
+    static let header: CGFloat = 28
 
     /// Shares the gap settles on when let go near one: thirds and halves.
     static let stops: [CGFloat] = [1.0 / 3, 0.5, 2.0 / 3]
@@ -228,7 +228,7 @@ struct SplitStage<Overlay: View>: View {
             browser: browser,
             left: left,
             right: right,
-            fraction: min(0.8, max(0.2, browser.split?.fraction ?? 0.5)),
+            fraction: min(0.82, max(0.18, browser.split?.fraction ?? 0.5)),
             activeID: browser.activeID,
             darkChrome: darkChrome,
             overlay: overlay,
@@ -401,7 +401,7 @@ private final class SplitContainerView<Overlay: View>: NSView {
     private func dragBy(_ dx: CGFloat) {
         let usable = max(1, bounds.width - Split.gap * 3)
         var wanted = dragStartFraction + dx / usable
-        if let stop = Split.stops.first(where: { abs($0 - wanted) < 0.018 }) {
+        if let stop = Split.stops.first(where: { abs($0 - wanted) < 0.014 }) {
             wanted = stop
             if snappedStop != stop {
                 snappedStop = stop
@@ -414,7 +414,7 @@ private final class SplitContainerView<Overlay: View>: NSView {
     }
 
     private func applyLiveFraction(_ wanted: CGFloat, showPill: Bool) {
-        let clamped = min(0.8, max(0.2, wanted))
+        let clamped = min(0.82, max(0.18, wanted))
         guard clamped != liveFraction || showPill else { return }
         liveFraction = clamped
         layoutPanes(fraction: clamped, live: true)
@@ -482,9 +482,9 @@ private final class SplitContainerView<Overlay: View>: NSView {
         leftSlot.layoutSlot(frame: CGRect(x: gap, y: 0, width: leftWidth, height: paneHeight), live: live)
         rightSlot.layoutSlot(frame: CGRect(x: gap * 2 + leftWidth, y: 0, width: rightWidth, height: paneHeight), live: live)
 
-        let hitWidth = gap + 4
+        let hitWidth: CGFloat = 16
         let dividerX = gap + leftWidth + gap / 2 - hitWidth / 2
-        divider.frame = CGRect(x: dividerX, y: Split.header, width: hitWidth, height: max(0, paneHeight - Split.header))
+        divider.frame = CGRect(x: dividerX.rounded(), y: Split.header, width: hitWidth, height: max(0, paneHeight - Split.header))
 
         if isDragging {
             let leftPct = Int((fraction * 100).rounded())
@@ -544,7 +544,7 @@ private final class SplitPaneSlot<Overlay: View>: NSView {
         shadowView.wantsLayer = true
         shadowView.layer?.masksToBounds = false
         shadowView.layer?.shadowColor = NSColor.black.cgColor
-        shadowView.layer?.shadowOffset = CGSize(width: 0, height: -2)
+        shadowView.layer?.shadowOffset = CGSize(width: 0, height: -1)
         shadowView.layer?.actions = noAnim
 
         clipView.wantsLayer = true
@@ -601,10 +601,10 @@ private final class SplitPaneSlot<Overlay: View>: NSView {
             let inkColor: NSColor = darkChrome ? .white : .black
             CATransaction.begin()
             CATransaction.setAnimationDuration(0.14)
-            shadowView.layer?.shadowOpacity = front ? 0.18 : 0.07
-            shadowView.layer?.shadowRadius = front ? 10 : 4
-            borderLayer.borderWidth = front ? 1.5 : 1.0
-            borderLayer.borderColor = inkColor.withAlphaComponent(front ? 0.28 : 0.08).cgColor
+            shadowView.layer?.shadowOpacity = front ? 0.055 : 0.015
+            shadowView.layer?.shadowRadius = front ? 4 : 1.5
+            borderLayer.borderWidth = 1.0
+            borderLayer.borderColor = inkColor.withAlphaComponent(front ? 0.15 : 0.07).cgColor
             CATransaction.commit()
         }
     }
@@ -656,12 +656,13 @@ private final class SplitPaneSlot<Overlay: View>: NSView {
 @MainActor
 private final class SplitHeaderView: NSView {
     private let isLeft: Bool
+    private let activeDot = CALayer()
     private let iconView = NSImageView()
     private let monogramField = NSTextField(labelWithString: "")
     private let titleField = NSTextField(labelWithString: "")
-    private let swapBtn = NSButton()
-    private let aloneBtn = NSButton()
-    private let closeBtn = NSButton()
+    private let swapBtn = SplitHeaderButton()
+    private let aloneBtn = SplitHeaderButton()
+    private let closeBtn = SplitHeaderButton()
 
     private weak var browser: Browser?
     private weak var tab: Tab?
@@ -698,6 +699,8 @@ private final class SplitHeaderView: NSView {
         configureButton(aloneBtn, symbol: "arrow.up.left.and.arrow.down.right", help: "Just This One", action: #selector(justThisOne))
         configureButton(closeBtn, symbol: "xmark", help: "Close This Side — the tab stays open", action: #selector(closeSide))
 
+        activeDot.cornerRadius = 2.5
+        layer?.addSublayer(activeDot)
         addSubview(iconView)
         addSubview(monogramField)
         addSubview(titleField)
@@ -709,12 +712,12 @@ private final class SplitHeaderView: NSView {
     @available(*, unavailable)
     required init?(coder: NSCoder) { fatalError() }
 
-    private func configureButton(_ btn: NSButton, symbol: String, help: String, action: Selector) {
+    private func configureButton(_ btn: SplitHeaderButton, symbol: String, help: String, action: Selector) {
         btn.isBordered = false
         btn.bezelStyle = .regularSquare
         btn.imagePosition = .imageOnly
         btn.image = NSImage(systemSymbolName: symbol, accessibilityDescription: help)?
-            .withSymbolConfiguration(.init(pointSize: 10, weight: .semibold))
+            .withSymbolConfiguration(.init(pointSize: 9.5, weight: .semibold))
         btn.toolTip = help
         btn.target = self
         btn.action = action
@@ -727,9 +730,11 @@ private final class SplitHeaderView: NSView {
         self.darkChrome = darkChrome
 
         let ink: NSColor = darkChrome ? .white : .black
+        activeDot.backgroundColor = NSColor(Palette.accent).cgColor
+        activeDot.opacity = front ? 0.9 : 0
         titleField.stringValue = tab.label
-        titleField.font = NSFont.systemFont(ofSize: 12, weight: front ? .semibold : .regular)
-        titleField.textColor = ink.withAlphaComponent(front ? 0.9 : 0.6)
+        titleField.font = NSFont.systemFont(ofSize: 11.5, weight: front ? .semibold : .regular)
+        titleField.textColor = ink.withAlphaComponent(front ? 0.9 : 0.55)
 
         if tab.isBlank {
             iconView.isHidden = true
@@ -749,6 +754,7 @@ private final class SplitHeaderView: NSView {
         let btnTint = ink.withAlphaComponent(0.55)
         for btn in [swapBtn, aloneBtn, closeBtn] {
             btn.contentTintColor = btnTint
+            btn.setHoverTint(ink.withAlphaComponent(0.08))
             btn.alphaValue = (hovering || front) ? 1 : 0
         }
         needsLayout = true
@@ -798,13 +804,19 @@ private final class SplitHeaderView: NSView {
         closeBtn.frame = CGRect(x: buttonsX + (btnW + btnGap) * 2, y: btnY, width: btnW, height: btnW)
 
         var x: CGFloat = 6 + dragTravel
+        if front {
+            activeDot.frame = CGRect(x: x, y: ((h - 5) / 2).rounded(), width: 5, height: 5)
+            x += 11
+        } else {
+            activeDot.frame = .zero
+        }
         if !iconView.isHidden || !monogramField.isHidden {
-            let iconRect = CGRect(x: x, y: ((h - 14) / 2).rounded(), width: 14, height: 14)
+            let iconRect = CGRect(x: x, y: ((h - 13) / 2).rounded(), width: 13, height: 13)
             iconView.frame = iconRect
             monogramField.frame = iconRect
-            x += 21
+            x += 19
         }
-        let titleH: CGFloat = 16
+        let titleH: CGFloat = 15
         let titleW = max(0, buttonsX - 4 - x)
         titleField.frame = CGRect(x: x, y: ((h - titleH) / 2).rounded(), width: titleW, height: titleH)
     }
@@ -855,8 +867,50 @@ private final class SplitHeaderView: NSView {
     @objc private func leaveSplit() { browser?.unsplit() }
 }
 
-/// Native AppKit split handle: hover feedback, cursor rects, direct mouse
-/// tracking and double-click snap back to 50 : 50.
+/// Subtle hoverable icon button for split headers.
+@MainActor
+private final class SplitHeaderButton: NSButton {
+    private var hoverTint: NSColor = NSColor.black.withAlphaComponent(0.08)
+    private var tracking: NSTrackingArea?
+
+    override init(frame frameRect: NSRect) {
+        super.init(frame: frameRect)
+        wantsLayer = true
+        layer?.cornerRadius = 6
+        layer?.cornerCurve = .continuous
+    }
+
+    @available(*, unavailable)
+    required init?(coder: NSCoder) { fatalError() }
+
+    func setHoverTint(_ color: NSColor) {
+        hoverTint = color
+    }
+
+    override func updateTrackingAreas() {
+        super.updateTrackingAreas()
+        if let tracking { removeTrackingArea(tracking) }
+        let area = NSTrackingArea(
+            rect: bounds,
+            options: [.mouseEnteredAndExited, .activeInKeyWindow, .inVisibleRect],
+            owner: self,
+            userInfo: nil
+        )
+        addTrackingArea(area)
+        tracking = area
+    }
+
+    override func mouseEntered(with event: NSEvent) {
+        layer?.backgroundColor = hoverTint.cgColor
+    }
+
+    override func mouseExited(with event: NSEvent) {
+        layer?.backgroundColor = nil
+    }
+}
+
+/// Native AppKit split handle: generous 16pt hit area, full-height hover/drag
+/// guide rail, tactile accent grab capsule, and double-click snap back to 50 : 50.
 @MainActor
 private final class SplitDividerView: NSView {
     var onDragBegin: (() -> Void)?
@@ -864,6 +918,7 @@ private final class SplitDividerView: NSView {
     var onDragEnd: (() -> Void)?
     var onDoubleClick: (() -> Void)?
 
+    private let guideLine = CALayer()
     private let pill = CALayer()
     private var darkChrome = false
     private var hovering = false
@@ -877,6 +932,8 @@ private final class SplitDividerView: NSView {
     override init(frame frameRect: NSRect) {
         super.init(frame: frameRect)
         wantsLayer = true
+        guideLine.cornerRadius = 0.75
+        layer?.addSublayer(guideLine)
         layer?.addSublayer(pill)
         stylePill(animated: false)
     }
@@ -947,8 +1004,15 @@ private final class SplitDividerView: NSView {
 
     private func positionPill() {
         let active = hovering || dragging
-        let w: CGFloat = active ? 4.5 : 3.0
-        let h: CGFloat = active ? 52 : 44
+        let railW: CGFloat = dragging ? 2.0 : 1.5
+        guideLine.frame = CGRect(
+            x: ((bounds.width - railW) / 2).rounded(.toNearestOrAwayFromZero),
+            y: 6,
+            width: railW,
+            height: max(0, bounds.height - 12)
+        )
+        let w: CGFloat = active ? 4.0 : 2.5
+        let h: CGFloat = active ? 48 : 32
         pill.frame = CGRect(
             x: ((bounds.width - w) / 2).rounded(.toNearestOrAwayFromZero),
             y: ((bounds.height - h) / 2).rounded(),
@@ -960,10 +1024,17 @@ private final class SplitDividerView: NSView {
 
     private func stylePill(animated: Bool) {
         let base: NSColor = darkChrome ? .white : .black
-        let alpha: CGFloat = dragging ? 0.55 : (hovering ? 0.38 : 0.14)
+        let accent = NSColor(Palette.accent)
+        let pillColor: NSColor = dragging
+            ? accent
+            : base.withAlphaComponent(hovering ? 0.42 : 0.16)
+        let railColor: NSColor = dragging
+            ? accent.withAlphaComponent(0.55)
+            : (hovering ? base.withAlphaComponent(0.14) : .clear)
         CATransaction.begin()
         CATransaction.setAnimationDuration(animated ? 0.14 : 0)
-        pill.backgroundColor = base.withAlphaComponent(alpha).cgColor
+        guideLine.backgroundColor = railColor.cgColor
+        pill.backgroundColor = pillColor.cgColor
         positionPill()
         CATransaction.commit()
     }
