@@ -117,6 +117,15 @@ check(
     "PageView and NanoTextView intercept performKeyEquivalent for ⌘; / ⇧⌘;",
 )
 
+# 9. Full Disk Access flow auto-registers browse in SystemPolicyAllFiles list.
+browser_src = read("Sources/Browse/Browser.swift")
+import_panel_src = read("Sources/Browse/ImportPanel.swift")
+check(
+    "func registerForFullDiskAccessList()" in browser_src
+    and "Browser.registerForFullDiskAccessList()" in import_panel_src,
+    "Full Disk Access flow auto-registers browse in System Settings list",
+)
+
 if failures:
     print(f"\n{len(failures)} source guardrail check(s) failed.", file=sys.stderr)
     sys.exit(1)
