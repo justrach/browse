@@ -134,7 +134,6 @@ struct Line<Control: View>: View {
                     Text(detail)
                         .font(.system(size: 11.5))
                         .foregroundStyle(Palette.muted)
-                        .lineLimit(3)
                         .fixedSize(horizontal: false, vertical: true)
                 }
             }
@@ -225,6 +224,8 @@ struct Quick: View {
         Button(action: act) {
             Text(title)
                 .font(.system(size: 11.5))
+                .lineLimit(1)
+                .fixedSize()
                 .foregroundStyle(tint)
                 .padding(.horizontal, 8)
                 .padding(.vertical, 4)
