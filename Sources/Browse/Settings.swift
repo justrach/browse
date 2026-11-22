@@ -11,11 +11,20 @@ struct SettingsPanel: View {
 
     @ObservedObject private var updater = Updater.shared
     @ObservedObject private var shield = Shield.shared
+    @ObservedObject private var shortcuts = ShortcutStore.shared
     @State private var isDefault = Links.isDefault
     @State private var page: Page = Page(rawValue: Store.settings.string(forKey: "settings.page") ?? "") ?? .general
     /// The rail's row under the pointer, if any (see `pages`).
     @State private var hovered: Page?
+    @FocusState private var searchFocused: Bool
     @Namespace private var glow
+    @Environment(\.colorScheme) private var scheme
+
+    private var trimmedQuery: String {
+        browser.settingsSearchQuery.trimmingCharacters(in: .whitespacesAndNewlines)
+    }
+
+    private var searching: Bool { !trimmedQuery.isEmpty }
 
     enum Page: String, CaseIterable, Identifiable {
         case general, themes, tabs, shortcuts, extensions, agent, passwords, downloads, privacy, sync, about
@@ -52,9 +61,9 @@ struct SettingsPanel: View {
         }
     }
 
-    private static let rail: CGFloat = 168
-    private static let width: CGFloat = 660
-    private static let height: CGFloat = 500
+    private static let rail: CGFloat = 186
+    private static let width: CGFloat = 688
+    private static let height: CGFloat = 520
 
     var body: some View {
         HStack(spacing: 0) {
@@ -71,20 +80,78 @@ struct SettingsPanel: View {
         .clipShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
         .shadow(color: .black.opacity(0.16), radius: 34, y: 12)
         .onChange(of: page) { _, page in Store.settings.set(page.rawValue, forKey: "settings.page") }
+        .onChange(of: browser.settingsSearchFocusTick) { _, _ in
+            DispatchQueue.main.async { searchFocused = true }
+        }
+        .onDisappear {
+            browser.settingsSearchQuery = ""
+        }
     }
 
     // MARK: - the rail
 
     private var pages: some View {
-        VStack(alignment: .leading, spacing: 2) {
+        let dark = scheme == .dark
+        return VStack(alignment: .leading, spacing: 2) {
             Text("Settings")
                 .font(.system(size: 13, weight: .semibold))
                 .foregroundStyle(Palette.ink)
                 .padding(.horizontal, 10)
                 .padding(.top, 14)
-                .padding(.bottom, 12)
+                .padding(.bottom, 8)
+
+            // Search bar (⌘F focuses from anywhere in Settings).
+            HStack(spacing: 6) {
+                Image(systemName: "magnifyingglass")
+                    .font(.system(size: 11, weight: .medium))
+                    .foregroundStyle(Palette.muted)
+                TextField("Search", text: $browser.settingsSearchQuery)
+                    .textFieldStyle(.plain)
+                    .font(.system(size: 12.5))
+                    .foregroundStyle(Palette.ink)
+                    .focused($searchFocused)
+                    .onSubmit {
+                        if let first = searchMatches.first {
+                            jump(to: first)
+                        }
+                    }
+                if !browser.settingsSearchQuery.isEmpty {
+                    Button {
+                        browser.settingsSearchQuery = ""
+                    } label: {
+                        Image(systemName: "xmark.circle.fill")
+                            .font(.system(size: 11.5))
+                            .foregroundStyle(Palette.muted.opacity(0.85))
+                    }
+                    .buttonStyle(.plain)
+                    .help("Clear search")
+                } else if !searchFocused {
+                    Text("⌘F")
+                        .font(.system(size: 10, weight: .medium, design: .rounded))
+                        .foregroundStyle(Palette.muted.opacity(0.75))
+                }
+            }
+            .padding(.horizontal, 8)
+            .frame(height: 28)
+            .background(
+                RoundedRectangle(cornerRadius: 8, style: .continuous)
+                    .fill(Palette.ground.opacity(dark ? 0.92 : 1))
+            )
+            .overlay(
+                RoundedRectangle(cornerRadius: 8, style: .continuous)
+                    .strokeBorder(
+                        searchFocused ? Palette.accent.opacity(0.55) : Palette.hairline,
+                        lineWidth: searchFocused ? 1 : 0.75
+                    )
+            )
+            .padding(.horizontal, 4)
+            .padding(.bottom, 8)
+
             ForEach(Page.allCases) { item in
-                PageRow(page: item, on: page == item, hovering: hovered == item, glow: glow) { page = item }
+                PageRow(page: item, on: !searching && page == item, hovering: hovered == item, glow: glow) {
+                    browser.settingsSearchQuery = ""
+                    page = item
+                }
                     // One row under the pointer for the whole rail, not one
                     // flag per row: a row that missed the pointer leaving —
                     // a quick sweep does that — stayed lit beside the one
@@ -102,6 +169,7 @@ struct SettingsPanel: View {
         // Out of the rail altogether: nothing under the pointer.
         .onHover { if !$0 { hovered = nil } }
         .animation(Motion.quick, value: hovered)
+        .animation(Motion.quick, value: searchFocused)
     }
 
     private struct PageRow: View {
@@ -150,10 +218,19 @@ struct SettingsPanel: View {
 
     private var content: some View {
         VStack(alignment: .leading, spacing: 0) {
-            HStack {
-                Text(page.title)
+            HStack(spacing: 8) {
+                Text(searching ? "Search Results" : page.title)
                     .font(.system(size: 17, weight: .semibold))
                     .foregroundStyle(Palette.ink)
+                if searching {
+                    let count = searchMatches.count
+                    Text(count == 1 ? "1 match" : "\(count) matches")
+                        .font(.system(size: 11, weight: .medium))
+                        .foregroundStyle(Palette.muted)
+                        .padding(.horizontal, 7)
+                        .padding(.vertical, 2.5)
+                        .background(Capsule().fill(Palette.wash))
+                }
                 Spacer()
                 Door(icon: "xmark", help: "Done   esc") { browser.tuning = false }
             }
@@ -161,18 +238,22 @@ struct SettingsPanel: View {
 
             ScrollView(showsIndicators: false) {
                 VStack(alignment: .leading, spacing: 18) {
-                    switch page {
-                    case .general: general
-                    case .themes: ThemesPage(browser: browser, prefs: prefs)
-                    case .tabs: tabs
-                    case .shortcuts: ShortcutsPage(browser: browser)
-                    case .extensions: ExtensionsPage(browser: browser)
-                    case .agent: AgentPage(browser: browser, prefs: prefs, agent: browser.agent)
-                    case .passwords: passwords
-                    case .downloads: downloads
-                    case .privacy: privacy
-                    case .sync: SyncPage(browser: browser, prefs: prefs)
-                    case .about: about
+                    if searching {
+                        searchResults
+                    } else {
+                        switch page {
+                        case .general: general
+                        case .themes: ThemesPage(browser: browser, prefs: prefs)
+                        case .tabs: tabs
+                        case .shortcuts: ShortcutsPage(browser: browser)
+                        case .extensions: ExtensionsPage(browser: browser)
+                        case .agent: AgentPage(browser: browser, prefs: prefs, agent: browser.agent)
+                        case .passwords: passwords
+                        case .downloads: downloads
+                        case .privacy: privacy
+                        case .sync: SyncPage(browser: browser, prefs: prefs)
+                        case .about: about
+                        }
                     }
                 }
                 .padding(.bottom, 4)
@@ -182,6 +263,253 @@ struct SettingsPanel: View {
         .padding(.top, 18)
         .padding(.bottom, 18)
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+    }
+
+    // MARK: - settings search
+
+    private struct SearchEntry: Identifiable {
+        let id: String
+        let page: Page
+        let title: String
+        let detail: String
+        let keywords: String
+        let badge: String?
+
+        init(_ page: Page, _ title: String, _ detail: String, keywords: String = "", badge: String? = nil) {
+            self.id = "\(page.rawValue)::\(title)"
+            self.page = page
+            self.title = title
+            self.detail = detail
+            self.keywords = keywords
+            self.badge = badge
+        }
+    }
+
+    private static let catalog: [SearchEntry] = [
+        // General
+        SearchEntry(.general, "Open links from other apps", "Make browse the default browser on this Mac", keywords: "default browser links mail slack"),
+        SearchEntry(.general, "Search with", "Default search engine (Google, DuckDuckGo, Kagi, custom)", keywords: "search engine google duckduckgo kagi custom url"),
+        SearchEntry(.general, "Show recent searches", "Offer recent searches in an empty address field", keywords: "omnibox history suggestions"),
+        SearchEntry(.general, "Google search suggestions", "Autocomplete suggestions while typing in the address bar", keywords: "autocomplete google search"),
+        SearchEntry(.general, "Appearance", "Light, dark, or System appearance", keywords: "dark mode light mode theme color scheme"),
+        SearchEntry(.general, "Page zoom", "Default zoom level for websites", keywords: "font size scale text larger smaller"),
+        SearchEntry(.general, "Correct spelling as you type", "macOS autocorrect inside web pages", keywords: "spellcheck grammar capitalize"),
+        SearchEntry(.general, "Peek at a link with a shift-click", "Preview links in an overlay panel over the current page", keywords: "little arc preview shift click"),
+        SearchEntry(.general, "Open links from other apps in a small window", "Little window for quick reading from external apps", keywords: "little window popup external links"),
+        SearchEntry(.general, "Handoff", "Continue the active page on iPhone, iPad, or another Mac", keywords: "continuity apple account iphone ipad"),
+        SearchEntry(.general, "Show where links go", "Status preview bar at the bottom of the page when hovering links", keywords: "status bar url hover bottom"),
+        SearchEntry(.general, "Scroll with the middle button", "Middle-click autoscroll", keywords: "mouse wheel autoscroll windows"),
+        SearchEntry(.general, "Pages at 120 Hz", "Smooth 120 FPS ProMotion scrolling and animations", keywords: "120fps promotion refresh rate battery 60hz smooth"),
+        SearchEntry(.general, "Flick the floating video to a corner", "Two-finger flick gesture for picture-in-picture video", keywords: "pip picture in picture gesture"),
+        SearchEntry(.general, "Float the video when you switch tabs", "Automatic picture-in-picture when leaving a tab", keywords: "pip youtube video float"),
+        SearchEntry(.general, "Float the video when you switch apps", "Automatic picture-in-picture when switching applications", keywords: "pip youtube video float background"),
+        SearchEntry(.general, "Let a script drive browse", "Local bench automation socket", keywords: "bench automation cli testing socket"),
+
+        // Themes
+        SearchEntry(.themes, "Themes", "Pick or create colour themes for light and dark mode", keywords: "color colour palette custom json style"),
+        SearchEntry(.themes, "Make one with graff", "Generate a custom browser theme from a description", keywords: "ai theme generator colors"),
+
+        // Tabs
+        SearchEntry(.tabs, "Tabs in a sidebar", "Vertical sidebar on the left instead of top tab strip", keywords: "arc dia vertical sidebar layout"),
+        SearchEntry(.tabs, "Hide the sidebar until the pointer reaches the edge", "Auto-hide sidebar for full-width reading", keywords: "fold autohide edge peek"),
+        SearchEntry(.tabs, "Colour the sidebar like the page", "Tint the frosted sidebar glass with the active page hue", keywords: "color tint glass theme ambient"),
+        SearchEntry(.tabs, "Compact top address bar", "Aside-style unified top bar with URL pill and graff toggle", keywords: "header toolbar url bar aside"),
+        SearchEntry(.tabs, "Tabs show", "Favicons or letters on tabs and pins", keywords: "icons favicons monogram letters glyph"),
+        SearchEntry(.tabs, "Show the bookmarks bar", "Bookmarks row above the page", keywords: "favorites bar folders"),
+        SearchEntry(.tabs, "Show how far you've read", "Reading progress fill on the active tab", keywords: "scroll progress indicator"),
+        SearchEntry(.tabs, "Sleep tabs you aren't using", "Suspend background tabs to save RAM and battery", keywords: "memory saver suspend hibernate ram"),
+        SearchEntry(.tabs, "Memory profile", "Low RAM vs Balanced tab sleeping schedule", keywords: "ram memory low balanced sleep now"),
+        SearchEntry(.tabs, "Spaces", "Separate sets of tabs and profiles switched with ⌃1–⌃9", keywords: "workspaces profiles containers arc"),
+
+        // Extensions
+        SearchEntry(.extensions, "Chrome extensions", "Install and manage Chrome Web Store or unpacked extensions", keywords: "addons plugins chrome web store"),
+        SearchEntry(.extensions, "Import extensions from another browser", "Bring over Chrome, Arc, or Brave extensions", keywords: "import chrome arc brave"),
+        SearchEntry(.extensions, "Allow on private tabs", "Run extensions inside private browsing tabs", keywords: "incognito private extensions"),
+        SearchEntry(.extensions, "Load an unpacked extension", "Load a local manifest.json extension folder", keywords: "developer unpacked local folder"),
+
+        // Agent
+        SearchEntry(.agent, "graff", "Built-in browser agent and local Harness MCP tools", keywords: "codegraff ai agent assistant mcp harness acp"),
+        SearchEntry(.agent, "Ask about selected text", "Right-click any selection to send it to graff", keywords: "selection passage context menu"),
+        SearchEntry(.agent, "Task library", "Reusable prompt templates saved on this Mac", keywords: "prompts templates instructions"),
+        SearchEntry(.agent, "Keep a draft per tab", "Remember unsent graff drafts independently for each tab", keywords: "drafts tabs composer"),
+        SearchEntry(.agent, "Continue in browser", "Access this conversation from another device", keywords: "remote mobile browser chat"),
+        SearchEntry(.agent, "Other accounts", "Sign into Codex, Kimi, and other providers via graff login", keywords: "providers models api key login"),
+
+        // Passwords
+        SearchEntry(.passwords, "Your passwords", "View saved logins in the macOS Keychain with Touch ID", keywords: "vault logins credentials keychain touch id"),
+        SearchEntry(.passwords, "Offer to save passwords", "Prompt to save new logins per site", keywords: "autosave credentials"),
+        SearchEntry(.passwords, "Fill in sign-ins", "Autofill saved accounts in login forms", keywords: "autofill login forms"),
+        SearchEntry(.passwords, "Offer passkeys", "Touch ID and iCloud Keychain passkeys", keywords: "webauthn fido2 touch id icloud"),
+        SearchEntry(.passwords, "Bring yours in (Import)", "Import passwords, bookmarks, history, and sign-ins from Chrome or other browsers", keywords: "import chrome safari arc brave firefox csv html"),
+
+        // Downloads
+        SearchEntry(.downloads, "Save to", "Default downloads folder location", keywords: "downloads directory folder path"),
+        SearchEntry(.downloads, "Ask where to save each file", "Show save dialog before every download", keywords: "prompt save dialog"),
+
+        // Privacy
+        SearchEntry(.privacy, "Block ads and trackers", "Built-in content blocker shield", keywords: "adblock shield trackers ublock content blocker"),
+        SearchEntry(.privacy, "Prevent cross-site tracking", "Safari-style tracking prevention and third-party cookie blocking", keywords: "cookies tracking itp privacy"),
+        SearchEntry(.privacy, "Camera and microphone", "Reset per-site camera and mic permissions", keywords: "webcam audio permissions media"),
+        SearchEntry(.privacy, "Clear history", "Remove visited pages and browsing history", keywords: "delete history clear data"),
+        SearchEntry(.privacy, "Cookies and sign-ins", "Sign out of every site and clear site storage", keywords: "logout cookies localstorage clear"),
+        SearchEntry(.privacy, "Clear cache", "Remove cached page assets", keywords: "cache storage clear"),
+
+        // Sync
+        SearchEntry(.sync, "Sync now", "Sync open tabs, bookmarks, spaces, and settings across Macs", keywords: "icloud cloud sync devices"),
+        SearchEntry(.sync, "Add another Mac", "Pair another Mac with your sync code", keywords: "pair device code"),
+
+        // About
+        SearchEntry(.about, "Updates", "Check for new browse releases and automatic updates", keywords: "version update appcast changelog"),
+        SearchEntry(.about, "Install updates automatically", "Download and apply updates in the background", keywords: "auto update"),
+        SearchEntry(.about, "Keyboard shortcuts", "View the full keyboard shortcuts guide", keywords: "hotkeys keybindings help"),
+        SearchEntry(.about, "Feedback & Source code", "Send feedback, view GitHub repo, releases, and license", keywords: "github issue bug report license"),
+    ]
+
+    private var searchMatches: [SearchEntry] {
+        let tokens = trimmedQuery.lowercased().split(whereSeparator: \.isWhitespace).map(String.init)
+        guard !tokens.isEmpty else { return [] }
+
+        let shortcutEntries: [SearchEntry] = BrowserCommand.all.map { cmd in
+            let keyText = shortcuts.key(for: cmd.id)?.display
+            return SearchEntry(
+                .shortcuts,
+                cmd.title,
+                "\(cmd.section.rawValue) shortcut",
+                keywords: "shortcut hotkey keybinding \(cmd.section.rawValue) \(keyText ?? "")",
+                badge: keyText
+            )
+        }
+
+        let pool = Self.catalog + shortcutEntries
+        return pool.compactMap { entry -> (entry: SearchEntry, score: Int)? in
+            let title = entry.title.lowercased()
+            let detail = entry.detail.lowercased()
+            let keywords = entry.keywords.lowercased()
+            let pageName = entry.page.title.lowercased()
+            var score = 0
+            for token in tokens {
+                if title.hasPrefix(token) {
+                    score += 120
+                } else if title.contains(token) {
+                    score += 85
+                } else if pageName.contains(token) {
+                    score += 65
+                } else if detail.contains(token) {
+                    score += 45
+                } else if keywords.contains(token) {
+                    score += 35
+                } else {
+                    return nil
+                }
+            }
+            return (entry, score)
+        }
+        .sorted {
+            if $0.score != $1.score { return $0.score > $1.score }
+            return $0.entry.title < $1.entry.title
+        }
+        .prefix(24)
+        .map(\.entry)
+    }
+
+    private func jump(to entry: SearchEntry) {
+        browser.settingsSearchQuery = ""
+        searchFocused = false
+        withAnimation(Motion.quick) {
+            page = entry.page
+        }
+    }
+
+    @ViewBuilder
+    private var searchResults: some View {
+        let matches = searchMatches
+        if matches.isEmpty {
+            VStack(spacing: 8) {
+                Image(systemName: "magnifyingglass")
+                    .font(.system(size: 22, weight: .light))
+                    .foregroundStyle(Palette.muted.opacity(0.65))
+                Text("No settings match “\(trimmedQuery)”")
+                    .font(.system(size: 13.5, weight: .medium))
+                    .foregroundStyle(Palette.ink.opacity(0.88))
+                Text("Try searching for appearance, tabs, 120 Hz, import, privacy, or graff.")
+                    .font(.system(size: 12))
+                    .foregroundStyle(Palette.muted)
+                    .multilineTextAlignment(.center)
+            }
+            .frame(maxWidth: .infinity)
+            .padding(.top, 84)
+        } else {
+            let grouped = Page.allCases.compactMap { section -> (page: Page, items: [SearchEntry])? in
+                let items = matches.filter { $0.page == section }
+                return items.isEmpty ? nil : (section, items)
+            }
+            ForEach(grouped, id: \.page.id) { group in
+                VStack(alignment: .leading, spacing: 6) {
+                    HStack(spacing: 6) {
+                        Image(systemName: group.page.icon)
+                            .font(.system(size: 10.5, weight: .medium))
+                            .foregroundStyle(Palette.muted)
+                        Text(group.page.title)
+                            .font(.system(size: 11.5, weight: .semibold))
+                            .foregroundStyle(Palette.muted)
+                    }
+                    .padding(.leading, 4)
+
+                    Card {
+                        ForEach(Array(group.items.enumerated()), id: \.element.id) { idx, item in
+                            if idx > 0 { Rule() }
+                            SearchResultRow(entry: item) { jump(to: item) }
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    private struct SearchResultRow: View {
+        let entry: SearchEntry
+        let act: () -> Void
+        @State private var hovering = false
+
+        var body: some View {
+            Button(action: act) {
+                HStack(spacing: 10) {
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text(entry.title)
+                            .font(.system(size: 13, weight: .medium))
+                            .foregroundStyle(Palette.ink)
+                            .lineLimit(1)
+                        Text(entry.detail)
+                            .font(.system(size: 11.5))
+                            .foregroundStyle(Palette.muted)
+                            .lineLimit(1)
+                            .truncationMode(.tail)
+                    }
+                    Spacer(minLength: 8)
+                    if let badge = entry.badge {
+                        Text(badge)
+                            .font(.system(size: 11, weight: .medium, design: .rounded))
+                            .foregroundStyle(Palette.ink.opacity(0.8))
+                            .padding(.horizontal, 6)
+                            .padding(.vertical, 2)
+                            .background(
+                                RoundedRectangle(cornerRadius: 5, style: .continuous)
+                                    .fill(Palette.wash)
+                            )
+                    }
+                    Image(systemName: "chevron.right")
+                        .font(.system(size: 10.5, weight: .semibold))
+                        .foregroundStyle(hovering ? Palette.ink.opacity(0.75) : Palette.muted.opacity(0.6))
+                }
+                .padding(.horizontal, 14)
+                .padding(.vertical, 10)
+                .background(hovering ? Palette.hover : .clear)
+                .contentShape(Rectangle())
+            }
+            .buttonStyle(.plain)
+            .onHover { hovering = $0 }
+            .animation(Motion.quick, value: hovering)
+        }
     }
 
     // MARK: - general

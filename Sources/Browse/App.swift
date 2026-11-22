@@ -1219,7 +1219,11 @@ struct ContentView: View {
                 return true
             }
             if browser.tuning {
-                browser.tuning = false
+                if !browser.settingsSearchQuery.isEmpty {
+                    browser.settingsSearchQuery = ""
+                } else {
+                    browser.tuning = false
+                }
                 return true
             }
             if browser.showingShortcuts {
@@ -1418,7 +1422,11 @@ struct ContentView: View {
         case .printPage:
             browser.printPage()
         case .findOnPage:
-            browser.openFind()
+            if browser.tuning {
+                browser.focusSettingsSearch()
+            } else {
+                browser.openFind()
+            }
         case .findNext:
             browser.look(forward: true)
         case .findPrevious:
