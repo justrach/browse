@@ -132,23 +132,32 @@ final class FormRelay: NSObject, WKScriptMessageHandler {
       if (window.__officeForms) return;
 
       // Live HTMLCollection for O(1) check before touching querySelectorAll or
-      // layout APIs — keeps DOM-heavy pages and benchmarks (Speedometer) fast.
+      // layout APIs — keeps DOM-heavy pages (X/Twitter, Speedometer) fast.
       var liveInputs = document.getElementsByTagName('input');
+
+      // O(liveInputs.length) check — on SPAs like X/Twitter there are 1–2 inputs
+      // inside a 15,000-node DOM, so scanning liveInputs avoids walking the entire
+      // document tree with querySelectorAll on every click or timeline mutation.
+      function hasPasswordInput() {
+        for (var i = 0; i < liveInputs.length; i++) {
+          if (liveInputs[i].type === 'password') return true;
+        }
+        return false;
+      }
 
       // The password box, and the last box before it that could hold a name.
       function pair() {
         if (!liveInputs.length) return null;
-        var boxes = document.querySelectorAll('input[type="password"]');
-        if (!boxes.length) return null;
         var pass = null;
-        for (var p = 0; p < boxes.length; p++) {
-          var b = boxes[p];
+        for (var p = 0; p < liveInputs.length; p++) {
+          var b = liveInputs[p];
+          if (b.type !== 'password') continue;
           var r = b.getBoundingClientRect();
           if (r.width > 0 && r.height > 0) { pass = b; break; }
         }
         if (!pass) return null;
         var scope = pass.form || (pass.closest && pass.closest('form')) || document;
-        var all = scope.querySelectorAll('input');
+        var all = scope === document ? liveInputs : scope.querySelectorAll('input');
         var user = null;
         for (var i = 0; i < all.length; i++) {
           if (all[i] === pass) break;
@@ -233,6 +242,7 @@ final class FormRelay: NSObject, WKScriptMessageHandler {
       }, true);
       // Plenty of sign-in buttons aren't in a form and never fire submit.
       document.addEventListener('click', function (e) {
+        if (!hasPasswordInput()) return;
         var el = e.target;
         if (!el || !el.closest) return;
         if (el.closest('button, input[type="submit"], [role="button"]')) {
@@ -252,14 +262,14 @@ final class FormRelay: NSObject, WKScriptMessageHandler {
       // password step of a sign-in that asks for the name first.
       setTimeout(tell, 700);
       setTimeout(tell, 2200);
-      // Debounced so high-frequency DOM mutations (SPAs, Speedometer) never
-      // trigger synchronous querySelectorAll + getBoundingClientRect per edit.
+      // Debounced so high-frequency DOM mutations (X/Twitter, SPAs, Speedometer)
+      // never schedule timers or touch layout when no password input is present.
       var settling = null;
       var scanTimer = null;
       function scanMutation() {
         scanTimer = null;
         if (!told) {
-          if (liveInputs.length) tell();
+          if (hasPasswordInput()) tell();
           return;
         }
         if (pair()) return;
@@ -271,7 +281,7 @@ final class FormRelay: NSObject, WKScriptMessageHandler {
         }, 400);
       }
       new MutationObserver(function () {
-        if (scanTimer || (!told && !liveInputs.length)) return;
+        if (scanTimer || (!told && !hasPasswordInput())) return;
         scanTimer = setTimeout(scanMutation, 250);
       }).observe(document.documentElement, { childList: true, subtree: true });
 
@@ -369,9 +379,14 @@ final class FormRelay: NSObject, WKScriptMessageHandler {
           };
         });
 
+      var lastActive = null;
       document.addEventListener('focusin', caret, true);
       document.addEventListener('focusout', function () { setTimeout(caret, 0); }, true);
-      document.addEventListener('mouseup', function () { setTimeout(caret, 0); }, true);
+      document.addEventListener('mouseup', function () {
+        if (document.activeElement === lastActive && !trackingRect) return;
+        lastActive = document.activeElement;
+        setTimeout(caret, 0);
+      }, true);
       caret();
     })();
     """

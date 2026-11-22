@@ -34,25 +34,56 @@ final class HoveredLink: NSObject, WKScriptMessageHandler {
             webkit.messageHandlers.link.postMessage(address);
         }
 
-        // The composed path reaches links inside open shadow trees, where `target` stops at the host.
-        function linkIn(path) {
-            for (const node of path) {
-                if (node.nodeType !== 1 || (node.localName !== 'a' && node.localName !== 'area')) continue;
-                // An SVG link's href is an object, and its address may be relative.
-                const href = typeof node.href === 'string' ? node.href : node.href && node.href.baseVal;
-                if (!href) continue;
-                try {
-                    const address = new URL(href, node.baseURI).href;
-                    // A script link goes nowhere worth showing.
-                    return address.startsWith('javascript:') ? '' : address.slice(0, 600);
-                } catch {
-                    return '';
-                }
+        function hrefOf(node) {
+            const href = typeof node.href === 'string' ? node.href : node.href && node.href.baseVal;
+            if (!href) return '';
+            try {
+                const address = new URL(href, node.baseURI).href;
+                return address.startsWith('javascript:') ? '' : address.slice(0, 600);
+            } catch {
+                return '';
+            }
+        }
+
+        function linkFromTarget(target) {
+            if (!target) return '';
+            // Fast light-DOM walk via closest() avoids allocating a 25-element
+            // composedPath() array on every mouseover pixel in deep SPAs like X.
+            if (target.nodeType === 1 && !target.shadowRoot && target.closest) {
+                const hit = target.closest('a[href], area[href]');
+                return hit ? hrefOf(hit) : '';
             }
             return '';
         }
 
-        addEventListener('mouseover', event => report(linkIn(event.composedPath())), { passive: true, capture: true });
+        // The composed path reaches links inside open shadow trees, where `target` stops at the host.
+        function linkIn(path) {
+            for (const node of path) {
+                if (node.nodeType !== 1 || (node.localName !== 'a' && node.localName !== 'area')) continue;
+                const address = hrefOf(node);
+                if (address) return address;
+            }
+            return '';
+        }
+
+        let pendingEvent = null;
+        let raf = 0;
+        addEventListener('mouseover', event => {
+            if (!state.on) return;
+            pendingEvent = event;
+            if (raf) return;
+            raf = requestAnimationFrame(() => {
+                raf = 0;
+                const ev = pendingEvent;
+                pendingEvent = null;
+                if (!ev || !state.on) return;
+                const t = ev.target;
+                const addr = (t && t.nodeType === 1 && !t.shadowRoot)
+                    ? linkFromTarget(t)
+                    : linkIn(ev.composedPath());
+                report(addr);
+            });
+        }, { passive: true, capture: true });
         // Leaving the frame altogether: there is no next element to enter.
         addEventListener('mouseout', event => { if (!event.relatedTarget) report(''); }, { passive: true, capture: true });
         addEventListener('pagehide', () => report(''));
