@@ -276,7 +276,8 @@ final class Tab: ObservableObject, Identifiable {
 
     private func readHue() {
         guard let web = built else { return }
-        hue = isBlank ? nil : (web.themeColor ?? web.underPageBackgroundColor)
+        let next = isBlank ? nil : (web.themeColor ?? web.underPageBackgroundColor)
+        if next != hue { hue = next }
     }
 
     /// Leaving reading mode reloads rather than putting the old markup back:
@@ -570,7 +571,11 @@ final class Tab: ObservableObject, Identifiable {
 
         watch = [
             web.observe(\.title, options: [.new]) { [weak self] _, _ in
-                MainActor.assumeIsolated { self?.title = self?.built?.title ?? "" }
+                MainActor.assumeIsolated {
+                    guard let self else { return }
+                    let next = self.built?.title ?? ""
+                    if self.title != next { self.title = next }
+                }
             },
             web.observe(\.url, options: [.new]) { [weak self] _, _ in
                 MainActor.assumeIsolated {
@@ -599,16 +604,32 @@ final class Tab: ObservableObject, Identifiable {
                 }
             },
             web.observe(\.estimatedProgress, options: [.new]) { [weak self] _, _ in
-                MainActor.assumeIsolated { self?.progress = self?.built?.estimatedProgress ?? 0 }
+                MainActor.assumeIsolated {
+                    guard let self else { return }
+                    let next = self.built?.estimatedProgress ?? 0
+                    if abs(self.progress - next) > 0.01 || next == 0 || next == 1 { self.progress = next }
+                }
             },
             web.observe(\.isLoading, options: [.new]) { [weak self] _, _ in
-                MainActor.assumeIsolated { self?.loading = self?.built?.isLoading ?? false }
+                MainActor.assumeIsolated {
+                    guard let self else { return }
+                    let next = self.built?.isLoading ?? false
+                    if self.loading != next { self.loading = next }
+                }
             },
             web.observe(\.canGoBack, options: [.new]) { [weak self] _, _ in
-                MainActor.assumeIsolated { self?.canGoBack = self?.built?.canGoBack ?? false }
+                MainActor.assumeIsolated {
+                    guard let self else { return }
+                    let next = self.built?.canGoBack ?? false
+                    if self.canGoBack != next { self.canGoBack = next }
+                }
             },
             web.observe(\.canGoForward, options: [.new]) { [weak self] _, _ in
-                MainActor.assumeIsolated { self?.canGoForward = self?.built?.canGoForward ?? false }
+                MainActor.assumeIsolated {
+                    guard let self else { return }
+                    let next = self.built?.canGoForward ?? false
+                    if self.canGoForward != next { self.canGoForward = next }
+                }
             },
             web.observe(\.themeColor, options: [.new]) { [weak self] _, _ in
                 MainActor.assumeIsolated { self?.readHue() }
