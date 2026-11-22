@@ -1608,7 +1608,11 @@ final class Snapshot {
     init(of source: URL) throws {
         folder = FileManager.default.temporaryDirectory
             .appendingPathComponent("office-import-\(UUID().uuidString)", isDirectory: true)
-        try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
+        try FileManager.default.createDirectory(
+            at: folder,
+            withIntermediateDirectories: true,
+            attributes: [.posixPermissions: 0o700]
+        )
         file = folder.appendingPathComponent(source.lastPathComponent)
         do {
             try FileManager.default.copyItem(at: source, to: file)
@@ -1623,5 +1627,17 @@ final class Snapshot {
         }
     }
 
-    deinit { try? FileManager.default.removeItem(at: folder) }
+    deinit {
+        if let files = try? FileManager.default.contentsOfDirectory(at: folder, includingPropertiesForKeys: [.fileSizeKey]) {
+            for item in files {
+                if let size = (try? item.resourceValues(forKeys: [.fileSizeKey]))?.fileSize,
+                   size > 0, size <= 16 * 1024 * 1024,
+                   let handle = try? FileHandle(forWritingTo: item) {
+                    try? handle.write(contentsOf: Data(count: size))
+                    try? handle.close()
+                }
+            }
+        }
+        try? FileManager.default.removeItem(at: folder)
+    }
 }

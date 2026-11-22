@@ -369,10 +369,16 @@ final class History: ObservableObject {
 
     /// What the field should draw greyed out after the caret: the rest of the
     /// best match, or nothing if it doesn't carry on from what was typed.
+    /// A single character ("x") completes to a visited or bookmarked site you
+    /// actually go to (e.g. "x.com"), never to unvisited built-in defaults or
+    /// past search phrases.
     func completion(for typed: String, among options: [Suggestion]) -> String? {
         let lower = typed.lowercased()
-        guard !lower.isEmpty, lower.count >= 2 else { return nil }
-        guard let hit = options.first(where: { $0.key.lowercased().hasPrefix(lower) }) else { return nil }
+        guard !lower.isEmpty else { return nil }
+        let eligible = lower.count == 1
+            ? options.filter { $0.kind == .visited || $0.kind == .bookmark }
+            : options
+        guard let hit = eligible.first(where: { $0.key.lowercased().hasPrefix(lower) }) else { return nil }
         let rest = String(hit.key.dropFirst(lower.count))
         return rest.isEmpty ? nil : rest
     }
@@ -392,8 +398,15 @@ final class History: ObservableObject {
         if let ascii,
            let score = key.utf8.withContiguousStorageIfAvailable({ bytes -> Double? in
                guard bytes.allSatisfy({ $0 >= 0x20 && $0 < 0x7F }) else { return nil }
-               if bytes.starts(with: ascii) { return 6 }
                let host = bytes[..<(bytes.firstIndex(of: 0x2F) ?? bytes.endIndex)]
+               if bytes.starts(with: ascii) {
+                   // Exact host-label match (e.g. "x" -> "x.com") decisively outranks
+                   // longer host prefixes ("xpericheck.com").
+                   if host.count > ascii.count, host[host.index(host.startIndex, offsetBy: ascii.count)] == 0x2E {
+                       return 8
+                   }
+                   return 6
+               }
                if let dot = host.firstIndex(of: 0x2E), host[(dot + 1)...].starts(with: ascii) { return 3 }
                if ascii.count >= 2, ascii.count <= host.count {
                    for start in 0...(host.count - ascii.count) {
@@ -404,10 +417,13 @@ final class History: ObservableObject {
            }), let score {
             return score == 0 ? nil : score
         }
-        if key.hasPrefix(needle) { return 6 }
-        // Read in place: this runs for every place in the history on every
-        // key, and splitting each key into new strings was most of its cost.
         let host = key[..<(key.firstIndex(of: "/") ?? key.endIndex)]
+        if key.hasPrefix(needle) {
+            if host.count > needle.count, host[host.index(host.startIndex, offsetBy: needle.count)] == "." {
+                return 8
+            }
+            return 6
+        }
         // "google" finding mail.google.com without the subdomain.
         if let dot = host.firstIndex(of: "."), host[host.index(after: dot)...].hasPrefix(needle) { return 3 }
         // Only from two letters up. A single letter matching anywhere inside

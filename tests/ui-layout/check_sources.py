@@ -126,6 +126,20 @@ check(
     "Full Disk Access flow auto-registers browse in System Settings list",
 )
 
+# 10. Password Vault security guardrails: device-only Keychain, fail-closed auth, 0o700 import snapshots.
+vault_src = read("Sources/Browse/Vault.swift")
+import_src = read("Sources/Browse/Import.swift")
+safari_import_src = read("Sources/Browse/SafariImport.swift")
+check(
+    "kSecAttrAccessibleWhenUnlockedThisDeviceOnly" in vault_src
+    and "LAError.passcodeNotSet" in vault_src,
+    "Vault stores secrets WhenUnlockedThisDeviceOnly and fails closed on LAError",
+)
+check(
+    "0o700" in import_src and "0o700" in safari_import_src,
+    "Browser import temporary directories enforce owner-only 0o700 permissions",
+)
+
 if failures:
     print(f"\n{len(failures)} source guardrail check(s) failed.", file=sys.stderr)
     sys.exit(1)

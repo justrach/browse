@@ -74,10 +74,15 @@ struct PasswordsPanel: View {
                             .foregroundStyle(Palette.muted)
                     }
                 }
-                Text("macOS asks once for that browser's keychain key. Nothing is changed there; everything lands in your own keychain, under Search.")
-                    .font(.system(size: 11.5))
-                    .foregroundStyle(Palette.muted)
-                    .fixedSize(horizontal: false, vertical: true)
+                HStack(spacing: 6) {
+                    Image(systemName: "lock.shield.fill")
+                        .font(.system(size: 11))
+                        .foregroundStyle(Palette.accent)
+                    Text("Encrypted in your macOS Keychain (this Mac only) · Touch ID required to show or copy · Never written to disk.")
+                        .font(.system(size: 11.5))
+                        .foregroundStyle(Palette.muted)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
             }
         }
         .animation(Motion.settle, value: adding)
