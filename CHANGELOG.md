@@ -8,6 +8,7 @@ All notable changes to **browse** are documented here, newest first.
 
 ### Fixed
 
+- **Passkey sign-in on Apple Developer / Apple Account / iCloud (`Passkeys.swift`)**: implemented the WebAuthn `largeBlob` extension (`read`, `write`, and `support`, sealed over the existing one-time ECDH P-256 + HKDF-SHA256 + AES-GCM bridge and advertised via `extension:largeBlob` in `PublicKeyCredential.getClientCapabilities()`). Apple's `idmsa.apple.com` sign-in requires `largeBlob.blob` (`extensionData`) on passkey assertions and previously rejected otherwise-valid assertions with *"Your browser needs to be updated to support signing in with a passkey."*
 - **Eliminated bright corner bleed artifacts on rounded page cards (`App.swift`, `Stage.swift`, `AgentColumn.swift`)**: replaced the full-size `Palette.ground` backdrop behind `StageView` with `FramedPageBackdrop`, which insets the shadow-casting backdrop by `1pt` and matches `darkCanvas` whenever a live `WKWebView` is displayed — preventing subpixel misalignment between SwiftUI's `RoundedRectangle` and CoreAnimation's `CALayer.cornerCurve = .continuous` from bleeding white/light crescent fringes around the four corners on dark pages. Also clipped `PageOverlays` to the card corner radius and removed redundant double-clipping in `AgentColumn`.
 
 ## 1.8.5 — 22 November 2026
