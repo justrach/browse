@@ -8,6 +8,7 @@ All notable changes to **browse** are documented here, newest first.
 
 ### Added
 
+- **Smart website & web search fallback in `⌘K` Command Switcher (`Browser.swift`, `TabOverview.swift`)**: when a `⌘K` query doesn't match any open tab, the palette seamlessly becomes a quick launcher & search bar — surfacing direct URLs, matching bookmarks & visited sites (prioritizing exact visited host labels like `apple` → `apple.com`), and web search with your configured engine, all navigable with `↑`/`↓`, `↩` (open), and `⌘D` (open in Split View).
 - **Auto-hiding Full Screen top panel with pure black bezel canvas (`App.swift`, `Fold.swift`, `AsideBar.swift`, `Side.swift`, `Split.swift`, `Browser.swift`)**: entering macOS Full Screen switches the surrounding frame canvas to pure `#000000` black (blending seamlessly into the macOS menu bar and physical display bezel, with dark chrome on the peeking top bar, sidebar, and Split View headers) and frees up the 44pt top panel (`AsideBar` / `TabBar`) into a uniform 6pt top bezel with a single centered reveal handle (reclaiming 38pt of vertical screen space). Hovering the top edge or clicking the centered handle smoothly slides the floating top bar down over the page without WebKit reflow.
 
 ## 1.8.6 — 23 November 2026

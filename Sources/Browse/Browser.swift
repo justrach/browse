@@ -36,12 +36,30 @@ struct SwitcherItem: Identifiable {
     var id: Tab.ID { tab.id }
 }
 
+/// Fallback search / website action inside `⌘K` when no open tabs match the
+/// typed query, turning the tab switcher seamlessly into a quick launcher &
+/// web search bar.
+struct SwitcherAction: Identifiable, Equatable {
+    enum Kind: Equatable {
+        case url
+        case bookmark
+        case history
+        case search
+    }
+    let id: String
+    let kind: Kind
+    let title: String
+    let subtitle: String
+    let url: URL
+}
+
 /// Isolated observable state for the tab switcher / overview so search typing
 /// and highlight changes never invalidate the main browser window.
 @MainActor
 final class TabSwitcherState: ObservableObject {
     @Published var query = ""
     @Published var selectedID: Tab.ID?
+    @Published var selectedActionID: String?
     @Published var focusTick = 0
 }
 
@@ -2749,6 +2767,100 @@ final class Browser: NSObject, ObservableObject {
         cycling = false
         tabSwitcherState.query = ""
         tabSwitcherState.selectedID = nil
+        tabSwitcherState.selectedActionID = nil
+    }
+
+    /// Fallback website, bookmark, history, and web-search actions when no open
+    /// tab matches the `⌘K` query.
+    func switcherFallbackActions(for query: String) -> [SwitcherAction] {
+        let q = query.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !q.isEmpty else { return [] }
+
+        var actions: [SwitcherAction] = []
+        var seenURLs = Set<String>()
+        func add(_ action: SwitcherAction) {
+            let key = action.url.absoluteString.lowercased()
+            guard seenURLs.insert(key).inserted else { return }
+            actions.append(action)
+        }
+
+        let directURL = Address.url(from: q)
+        if let directURL {
+            add(SwitcherAction(
+                id: "url:\(directURL.absoluteString)",
+                kind: .url,
+                title: Address.pretty(directURL),
+                subtitle: "Open website",
+                url: directURL
+            ))
+        }
+
+        // Gather bookmark & visited history matches (using our fast indexed caches).
+        let bookMatches = bookmarks.suggestions(for: q, limit: 4)
+        let histMatches = history.suggestions(for: q, limit: 5)
+        let mergedSites = bookMatches + histMatches
+
+        // If the user typed a single token (like "apple" or "x") that matches a
+        // visited/bookmarked host label exactly (e.g. apple.com, x.com), surface
+        // that site first ahead of web search.
+        let lower = q.lowercased()
+        let singleToken = !lower.contains(where: \.isWhitespace)
+        var exactHostSites: [Suggestion] = []
+        var otherSites: [Suggestion] = []
+        for s in mergedSites {
+            let host = (s.url.host()?.lowercased() ?? "")
+            let bare = host.hasPrefix("www.") ? String(host.dropFirst(4)) : host
+            let firstLabel = bare.split(separator: ".").first.map(String.init) ?? ""
+            if singleToken && directURL == nil && firstLabel == lower && exactHostSites.count < 2 {
+                exactHostSites.append(s)
+            } else {
+                otherSites.append(s)
+            }
+        }
+
+        func siteAction(_ s: Suggestion) -> SwitcherAction {
+            let kind: SwitcherAction.Kind = s.kind == .bookmark ? .bookmark : .history
+            let label = s.title.isEmpty ? Address.pretty(s.url) : s.title
+            return SwitcherAction(
+                id: "\(kind):\(s.url.absoluteString)",
+                kind: kind,
+                title: label,
+                subtitle: Address.pretty(s.url),
+                url: s.url
+            )
+        }
+
+        for s in exactHostSites { add(siteAction(s)) }
+
+        if let search = searchURL(for: q) {
+            let engineName = prefs.engine.name(custom: prefs.customEngine)
+            add(SwitcherAction(
+                id: "search:\(q)",
+                kind: .search,
+                title: "Search \(engineName) for “\(q)”",
+                subtitle: search.host() ?? engineName,
+                url: search
+            ))
+        }
+
+        for s in otherSites where actions.count < 7 {
+            add(siteAction(s))
+        }
+
+        return actions
+    }
+
+    func openActionFromSwitcher(_ action: SwitcherAction, split: Bool = false) {
+        closeTabSwitcher()
+        if split, let current = active, !current.isBlank {
+            let created = open(action.url, foreground: false)
+            open(created, on: .right)
+        } else if let current = active, current.isBlank {
+            current.go(to: action.url)
+            select(current)
+        } else {
+            _ = open(action.url, foreground: true)
+        }
     }
 
     /// Filtered and ranked open tabs across the current Space (and other Spaces
@@ -2837,8 +2949,21 @@ final class Browser: NSObject, ObservableObject {
         let list = switcherItems(matching: tabSwitcherState.query, mode: mode)
         guard !list.isEmpty else {
             tabSwitcherState.selectedID = nil
+            let actions = switcherFallbackActions(for: tabSwitcherState.query)
+            guard !actions.isEmpty else {
+                tabSwitcherState.selectedActionID = nil
+                return
+            }
+            if let current = tabSwitcherState.selectedActionID,
+               let i = actions.firstIndex(where: { $0.id == current }) {
+                let next = (i + delta % actions.count + actions.count) % actions.count
+                tabSwitcherState.selectedActionID = actions[next].id
+            } else {
+                tabSwitcherState.selectedActionID = delta >= 0 ? actions.first?.id : actions.last?.id
+            }
             return
         }
+        tabSwitcherState.selectedActionID = nil
         if let current = tabSwitcherState.selectedID,
            let i = list.firstIndex(where: { $0.id == current }) {
             let next = (i + delta % list.count + list.count) % list.count
@@ -2859,26 +2984,37 @@ final class Browser: NSObject, ObservableObject {
     func confirmTabSwitcher() {
         guard let mode = tabSwitcher else { return }
         let list = switcherItems(matching: tabSwitcherState.query, mode: mode)
-        guard let target = list.first(where: { $0.id == tabSwitcherState.selectedID }) ?? list.first else {
-            closeTabSwitcher()
+        if let target = list.first(where: { $0.id == tabSwitcherState.selectedID }) ?? list.first {
+            selectFromSwitcher(target)
             return
         }
-        selectFromSwitcher(target)
+        let actions = switcherFallbackActions(for: tabSwitcherState.query)
+        if let action = actions.first(where: { $0.id == tabSwitcherState.selectedActionID }) ?? actions.first {
+            openActionFromSwitcher(action)
+            return
+        }
+        closeTabSwitcher()
     }
 
     func splitSelectedTabFromSwitcher() {
         guard let mode = tabSwitcher else { return }
         let list = switcherItems(matching: tabSwitcherState.query, mode: mode)
-        guard let target = list.first(where: { $0.id == tabSwitcherState.selectedID }) ?? list.first else { return }
-        if target.space != nil {
-            selectFromSwitcher(target)
+        if let target = list.first(where: { $0.id == tabSwitcherState.selectedID }) ?? list.first {
+            if target.space != nil {
+                selectFromSwitcher(target)
+                return
+            }
+            closeTabSwitcher()
+            if target.tab.id == activeID {
+                select(target.tab)
+            } else {
+                open(target.tab, on: .right)
+            }
             return
         }
-        closeTabSwitcher()
-        if target.tab.id == activeID {
-            select(target.tab)
-        } else {
-            open(target.tab, on: .right)
+        let actions = switcherFallbackActions(for: tabSwitcherState.query)
+        if let action = actions.first(where: { $0.id == tabSwitcherState.selectedActionID }) ?? actions.first {
+            openActionFromSwitcher(action, split: true)
         }
     }
 
