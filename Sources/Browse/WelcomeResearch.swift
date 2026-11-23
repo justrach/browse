@@ -193,17 +193,19 @@ struct WelcomeResearchPreview: View {
 struct WelcomeAgentSetup: View {
     @ObservedObject var browser: Browser
     @ObservedObject var prefs: Preferences
+    @Binding var installedBinding: Bool
     let leaveSetup: () -> Void
     @State private var looked = false
     @State private var installed = false
     @State private var explaining = false
+    @State private var checkTick = 0
 
     var body: some View {
         VStack(alignment: .leading, spacing: 14) {
             Card {
                 Line(
                     "graff beside your pages",
-                    "Open or close with ⌘; · press . while reading · mention other tabs with @"
+                    "Open or close with ⌘; · press . while reading · mention tabs or @history"
                 ) {
                     Switch(on: $prefs.usesAgent)
                 }
@@ -232,14 +234,23 @@ struct WelcomeAgentSetup: View {
                                  ? "Looking for the local graff binary."
                                  : installed
                                  ? "browse uses your local graff installation and connects its browser tools automatically. Any provider accounts you signed into appear in the model picker."
-                                 : "browse runs the local graff CLI. Install it now, or point browse to it later in Settings › Agent.")
+                                 : "browse runs the local graff CLI. Install it now and click Check again, or point browse to it later in Settings › Agent.")
                                 .font(.system(size: 11.5))
                                 .foregroundStyle(Palette.muted)
                                 .fixedSize(horizontal: false, vertical: true)
                             if looked, !installed {
-                                Pill("Get graff", filled: true) {
-                                    leaveSetup()
-                                    browser.open(Agent.download, foreground: true)
+                                HStack(spacing: 8) {
+                                    Pill("Get graff", filled: true) {
+                                        if Links.isDefault {
+                                            leaveSetup()
+                                            browser.open(Agent.download, foreground: true)
+                                        } else {
+                                            NSWorkspace.shared.open(Agent.download)
+                                        }
+                                    }
+                                    Pill("Check again") {
+                                        checkTick += 1
+                                    }
                                 }
                                 .padding(.top, 4)
                             }
@@ -257,9 +268,9 @@ struct WelcomeAgentSetup: View {
                 Card {
                     DisclosureGroup("Tips for working with graff", isExpanded: $explaining) {
                         VStack(alignment: .leading, spacing: 10) {
-                            tip("at", "Mention any open tab", "Type @ in the composer to pull another open tab into context alongside the page you're on.")
-                            tip("slash.circle", "Slash commands", "Type / for /new, /model, /write (⌘⇧E full-page editor), /expand, or /stop.")
-                            tip("text.cursor", "Queue while it works", "Draft follow-ups while graff streams, or press ⌘↩ to interrupt immediately.")
+                            tip("at", "Mention tabs or @history", "Type @ in the composer to pull any open tab or your recent browsing history into context.")
+                            tip("slash.circle", "Inline skills & commands", "Type / for /summarize, /explain, /compare, /factcheck, /write (⌘⇧E), /model, or /new.")
+                            tip("sparkles.rectangle.stack", "Dedicated Agent tab group", "Tabs graff opens stay in their own collapsible Agent group so your personal tabs stay clean.")
                         }
                         .padding(.top, 10)
                     }
@@ -271,12 +282,17 @@ struct WelcomeAgentSetup: View {
                 }
             }
         }
-        .task(id: "\(prefs.usesAgent)-\(prefs.agentPath)") {
+        .task(id: "\(prefs.usesAgent)-\(prefs.agentPath)-\(checkTick)") {
             looked = false
-            guard prefs.usesAgent else { return }
+            guard prefs.usesAgent else {
+                installed = false
+                installedBinding = false
+                return
+            }
             let found = await Agent.locate(custom: prefs.agentPath)
             guard !Task.isCancelled else { return }
             installed = found != nil
+            installedBinding = installed
             looked = true
         }
     }

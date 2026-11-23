@@ -10,11 +10,15 @@ struct WelcomePanel: View {
     /// pictures of it.
     @State private var page = Store.testing ? min(4, max(0, Store.settings.integer(forKey: "welcome.start"))) : 0
     @State private var forward = true
+    @State private var graffInstalled = false
 
-    // Bringing things over. Nil until one is picked, which means the first:
-    // finding them looks through each browser's folders, and as an initial
-    // value that ran every time the panel was made, the first window's
-    // included, for a page that isn't showing yet.
+    // Bringing things over — scanned asynchronously off the main thread when
+    // Step 3 opens so WelcomePanel.body never blocks on filesystem I/O.
+    @State private var scannedSources = false
+    @State private var scanningSources = false
+    @State private var sources: [ImportSource] = []
+    @State private var lockedSources: Set<String> = []
+    @State private var unreadableNotes: [String] = []
     @State private var source: ImportSource?
     @State private var wantsPasswords = true
     @State private var wantsHistory = true
@@ -22,23 +26,32 @@ struct WelcomePanel: View {
     @State private var wantsSignIns = true
     @State private var bringing = false
     @State private var brought: String?
-    /// Brought in, not merely tried: a folder macOS kept shut is tried again.
+    /// True only when an import finished without failures; partial/keychain
+    /// failures leave `done = false` so the user can retry immediately.
     @State private var done = false
+    @State private var hadFailure = false
     /// What came in from an export file: Safari's zip, or bookmarks.
     @State private var fromFile: String?
 
-    // The default browser.
+    // The default browser & starter draft.
     @State private var isDefault = Links.isDefault
     @State private var asked = false
     @State private var remindShortcuts = false
+    @State private var chosenStarter = 0
     @Environment(\.colorScheme) private var scheme
 
     private static let steps = ["Welcome", "graff", "Import", "Style", "Ready"]
     private let pages = Self.steps.count
 
+    private static let starterPrompts: [(label: String, prompt: String)] = [
+        ("Research a topic", "Help me research a topic. Ask me what I want to learn, then help me compare reliable sources."),
+        ("Summarize tabs", "Summarize my open tabs and highlight the key takeaways and contradictions."),
+        ("Plan a project", "Help me break down a project into milestones, open questions, and next steps."),
+    ]
+
     var body: some View {
         let dark = scheme == .dark
-        ZStack {
+        ZStack(alignment: .top) {
             Palette.ground.ignoresSafeArea()
             RadialGradient(
                 colors: [
@@ -51,6 +64,12 @@ struct WelcomePanel: View {
             )
             .ignoresSafeArea()
             .allowsHitTesting(false)
+
+            // Window drag band under the traffic lights (window.isMovable is
+            // false across the app so DragStrip moves the window everywhere).
+            DragStrip()
+                .frame(maxWidth: .infinity)
+                .frame(height: Metrics.strip)
 
             VStack(spacing: 20) {
                 progress
@@ -77,7 +96,7 @@ struct WelcomePanel: View {
                     .scrollIndicators(.automatic)
                     .id(page)
                     .transition(.asymmetric(
-                        insertion: .offset(x: forward ? 20 : -20).combined(with: .opacity),
+                        insertion: .offset(x: Motion.reduced ? 0 : (forward ? 20 : -20)).combined(with: .opacity),
                         removal: .opacity
                     ))
                 }
@@ -90,6 +109,22 @@ struct WelcomePanel: View {
         }
         .animation(Motion.glide, value: page)
         .transition(.opacity)
+        .onAppear {
+            isDefault = Links.isDefault
+            if page == 2 && !scannedSources { scanSources() }
+        }
+        .onChange(of: page) { _, now in
+            if now == 2 && !scannedSources { scanSources() }
+            if now == pages - 1 { isDefault = Links.isDefault }
+        }
+        .onReceive(NotificationCenter.default.publisher(for: NSApplication.didBecomeActiveNotification)) { _ in
+            isDefault = Links.isDefault
+        }
+        .task {
+            if prefs.usesAgent {
+                graffInstalled = (await Agent.locate(custom: prefs.agentPath)) != nil
+            }
+        }
     }
 
     private var progress: some View {
@@ -111,6 +146,7 @@ struct WelcomePanel: View {
             HStack(spacing: 8) {
                 ForEach(Self.steps.indices, id: \.self) { index in
                     Button {
+                        guard !bringing else { return }
                         forward = index > page
                         page = index
                     } label: {
@@ -184,73 +220,126 @@ struct WelcomePanel: View {
 
     private var account: some View {
         VStack(alignment: .leading, spacing: 18) {
-            heading("Meet graff, built right in.", "Ask about the active page, @-mention any open tab, compare sources, or hand off tasks — with the model and effort level you choose.")
-            WelcomeAgentSetup(browser: browser, prefs: prefs, leaveSetup: { finish() })
+            heading("Meet graff, built right in.", "Ask about the active page, @-mention any open tab or history, use /summarize or /write, and keep agent tabs neatly grouped.")
+            WelcomeAgentSetup(
+                browser: browser,
+                prefs: prefs,
+                installedBinding: $graffInstalled,
+                leaveSetup: { finish() }
+            )
         }
+    }
+
+    /// True when the currently selected browser has at least one applicable
+    /// data kind toggled on (ignores `wantsSignIns` on non-Chromium browsers).
+    private func hasApplicableSelection(for selected: ImportSource) -> Bool {
+        wantsPasswords || wantsBookmarks || wantsHistory || (wantsSignIns && selected.chromium != nil)
     }
 
     private var bring: some View {
         VStack(alignment: .leading, spacing: 18) {
             heading("Bring your web over.", "Passwords go straight into your macOS Keychain, bookmarks into the menu, and history into the address bar. Nothing in your old browser changes.")
 
-            let sources = ImportSource.present()
-            if !sources.isEmpty {
-                DataFlow(from: (source ?? sources[0]).name)
-            }
-            if sources.isEmpty {
-                let unreadable = Chromium.unreadable()
+            if scanningSources && !scannedSources {
                 Card {
-                    Nothing(unreadable.isEmpty
+                    HStack(spacing: 10) {
+                        Ring(size: 12)
+                        Text("Looking for browsers on this Mac…")
+                            .font(.system(size: 12.5))
+                            .foregroundStyle(Palette.muted)
+                        Spacer(minLength: 0)
+                    }
+                    .padding(.horizontal, 14)
+                    .padding(.vertical, 14)
+                }
+            } else if sources.isEmpty {
+                Card {
+                    Nothing(unreadableNotes.isEmpty
                         ? "No Chrome, Arc, Brave, Firefox or other browser found on this Mac."
-                        : unreadable.map { "\($0.source.name) is on this Mac, but nothing of it was found in \($0.looked)." }.joined(separator: "\n"))
+                        : unreadableNotes.joined(separator: "\n"))
                 }
             } else {
+                let selected = source ?? sources[0]
+                let isLocked = lockedSources.contains(selected.id)
+
+                DataFlow(from: selected.name)
+
                 Card {
                     VStack(alignment: .leading, spacing: 0) {
                         if sources.count > 1 {
                             Line("Browser") {
                                 Segmented(
                                     options: sources.map { ($0, $0.name) },
-                                    selection: Binding(get: { source ?? sources[0] }, set: { source = $0; done = false; brought = nil })
+                                    selection: Binding(
+                                        get: { selected },
+                                        set: { next in
+                                            source = next
+                                            done = false
+                                            hadFailure = false
+                                            brought = nil
+                                        }
+                                    )
                                 )
                             }
                             Rule()
                         } else {
-                            Line("From \(sources[0].name)", "Detected on this Mac") { EmptyView() }
+                            Line("From \(selected.name)", "Detected on this Mac") { EmptyView() }
                             Rule()
                         }
-                        Line("Passwords", "macOS asks once for that browser's keychain key") { Switch(on: $wantsPasswords) }
-                        Rule()
-                        Line("Bookmarks", "Folders and all, behind the bookmark button") { Switch(on: $wantsBookmarks) }
-                        Rule()
-                        Line("History", "Up to ten thousand most-visited places") { Switch(on: $wantsHistory) }
-                        if (source ?? sources[0]).chromium != nil {
+                        if isLocked {
+                            Line(
+                                "Full Disk Access needed",
+                                "macOS protects \(selected.name)'s data folder. Grant browse Full Disk Access in System Settings and this step refreshes automatically."
+                            ) {
+                                Pill("Full Disk Access…", filled: true) {
+                                    _ = browser.unlock(selected) { scanSources() }
+                                }
+                            }
+                        } else {
+                            Line("Passwords", "macOS asks once for that browser's keychain key") { Switch(on: $wantsPasswords) }
                             Rule()
-                            Line("Sign-ins", "Stay signed in where you were; each profile becomes a space") { Switch(on: $wantsSignIns) }
+                            Line("Bookmarks", "Folders and all, behind the bookmark button") { Switch(on: $wantsBookmarks) }
+                            Rule()
+                            Line("History", "Up to ten thousand most-visited places") { Switch(on: $wantsHistory) }
+                            if selected.chromium != nil {
+                                Rule()
+                                Line("Sign-ins", "Stay signed in where you were; each profile becomes a space") { Switch(on: $wantsSignIns) }
+                            }
                         }
                     }
                 }
 
-                if ProcessInfo.processInfo.operatingSystemVersion.majorVersion >= 27 {
-                    Text("macOS 27 tip: Chrome, Brave, Edge & Firefox require Full Disk Access. When System Settings opens, click + at the bottom-left and pick browse from Applications (or drag browse.app in).")
-                        .font(.system(size: 11.5))
-                        .foregroundStyle(Palette.muted)
-                        .fixedSize(horizontal: false, vertical: true)
-                }
-
-                HStack(spacing: 12) {
-                    Big(bringing ? "Bringing…" : "Bring them in", filled: true) { bringAll() }
-                        .disabled(bringing || done || !(wantsPasswords || wantsHistory || wantsBookmarks || wantsSignIns))
-                    if bringing { Ring(size: 10) }
-                    if let brought {
-                        Text(brought)
-                            .font(.system(size: 12.5))
-                            .foregroundStyle(Palette.muted)
-                            .fixedSize(horizontal: false, vertical: true)
-                            .transition(.opacity)
+                if !isLocked {
+                    HStack(spacing: 12) {
+                        if done {
+                            HStack(spacing: 6) {
+                                Image(systemName: "checkmark.circle.fill")
+                                    .font(.system(size: 14))
+                                    .foregroundStyle(Palette.safe)
+                                Text("Imported")
+                                    .font(.system(size: 13, weight: .medium))
+                                    .foregroundStyle(Palette.ink)
+                            }
+                            .padding(.horizontal, 12)
+                            .padding(.vertical, 7)
+                            .background(Palette.wash, in: Capsule())
+                        } else {
+                            let label = bringing ? "Bringing…" : (hadFailure ? "Try again" : "Bring them in")
+                            Big(label, filled: true) { bringAll(from: selected) }
+                                .disabled(bringing || !hasApplicableSelection(for: selected))
+                            if bringing { Ring(size: 10) }
+                        }
+                        if let brought {
+                            Text(brought)
+                                .font(.system(size: 12.5))
+                                .foregroundStyle(Palette.muted)
+                                .fixedSize(horizontal: false, vertical: true)
+                                .transition(.opacity)
+                        }
                     }
+                    .animation(Motion.settle, value: brought)
+                    .animation(Motion.settle, value: done)
                 }
-                .animation(Motion.settle, value: brought)
             }
 
             Card {
@@ -274,12 +363,12 @@ struct WelcomePanel: View {
 
     private var hold: some View {
         VStack(alignment: .leading, spacing: 18) {
-            heading("Make it feel like yours.", "Pick your look and where tabs live. Switch layouts any time with ⇧⌘S, or search every option in Settings with ⌘F.")
+            heading("Make it feel like yours.", "Pick your look, search engine, and where tabs live. Switch layouts any time with ⇧⌘S, or search every option in Settings with ⌘F.")
             HStack(spacing: 12) {
-                Way(title: "Sidebar (Arc / Dia)", sidebar: true, chosen: prefs.sidebar, glyph: prefs.glyph) {
+                Way(title: "Sidebar (Arc / Dia)", sidebar: true, chosen: prefs.sidebar, glyph: prefs.glyph, tinted: prefs.sideTint) {
                     withAnimation(Motion.glide) { prefs.sidebar = true }
                 }
-                Way(title: "Top tab strip", sidebar: false, chosen: !prefs.sidebar, glyph: prefs.glyph) {
+                Way(title: "Top tab strip", sidebar: false, chosen: !prefs.sidebar, glyph: prefs.glyph, tinted: false) {
                     withAnimation(Motion.glide) { prefs.sidebar = false }
                 }
             }
@@ -298,38 +387,69 @@ struct WelcomePanel: View {
                     }
                 }
                 Rule()
-                Line(
-                    "Google search suggestions",
-                    prefs.engine == .google
-                        ? "Optional · autocomplete as you type (never sent in private tabs)"
-                        : "Applies when Google is your search engine (currently \(prefs.engine.name(custom: prefs.customEngine)))"
-                ) {
-                    Switch(on: $prefs.googleSuggestions)
+                Line("Search engine", "Where words typed in the address bar go") {
+                    Picker("", selection: $prefs.engine) {
+                        ForEach(Engine.allCases.filter { $0 != .custom }) { engine in
+                            Text(engine.title).tag(engine)
+                        }
+                    }
+                    .labelsHidden()
+                    .pickerStyle(.menu)
+                    .fixedSize()
+                }
+                if prefs.engine == .google {
+                    Rule()
+                    Line("Google search suggestions", "Optional · autocomplete as you type (never sent in private tabs)") {
+                        Switch(on: $prefs.googleSuggestions)
+                    }
                 }
             }
         }
     }
 
     private var links: some View {
-        VStack(alignment: .leading, spacing: 18) {
-            heading("You're all set.", prefs.usesAgent
+        let activeStarter = Self.starterPrompts[min(Self.starterPrompts.count - 1, max(0, chosenStarter))]
+        return VStack(alignment: .leading, spacing: 18) {
+            heading("You're all set.", prefs.usesAgent && graffInstalled
                     ? "Open any site with ⌘L, jump between tabs with ⌘K or ⇧⌘\\, and press ⌘; whenever you want graff beside a page."
-                    : "Open any site with ⌘L, jump between tabs with ⌘K or ⇧⌘\\. You can enable graff any time in Settings › Agent.")
-            if prefs.usesAgent {
-                VStack(alignment: .leading, spacing: 10) {
+                    : "Open any site with ⌘L, jump between tabs with ⌘K or ⇧⌘\\. You can set up graff any time in Settings › Agent.")
+
+            if prefs.usesAgent && graffInstalled {
+                VStack(alignment: .leading, spacing: 11) {
                     HStack(spacing: 7) {
                         GraffMark(size: 16, color: Palette.ink)
                         Text("Try your first prompt in graff")
                             .font(.system(size: 13.5, weight: .semibold))
                             .foregroundStyle(Palette.ink)
                     }
-                    Text("“Help me research a topic. Ask me what I want to learn, then help me compare reliable sources.”")
+                    HStack(spacing: 6) {
+                        ForEach(Self.starterPrompts.indices, id: \.self) { i in
+                            let selected = chosenStarter == i
+                            Button {
+                                chosenStarter = i
+                            } label: {
+                                Text(Self.starterPrompts[i].label)
+                                    .font(.system(size: 11.5, weight: selected ? .semibold : .regular))
+                                    .lineLimit(1)
+                                    .fixedSize()
+                                    .foregroundStyle(selected ? Palette.ink : Palette.muted)
+                                    .padding(.horizontal, 10)
+                                    .padding(.vertical, 5)
+                                    .background(selected ? Palette.ground : Color.clear, in: Capsule())
+                                    .overlay(
+                                        Capsule().strokeBorder(selected ? Palette.hairline : Color.clear, lineWidth: 0.75)
+                                    )
+                            }
+                            .buttonStyle(.plain)
+                        }
+                    }
+                    Text("“\(activeStarter.prompt)”")
                         .font(.system(size: 12.5))
                         .foregroundStyle(Palette.muted)
                         .fixedSize(horizontal: false, vertical: true)
                     HStack(spacing: 10) {
-                        Big("Open draft in graff", filled: true) { finish(openAgent: true) }
-                        Text("Editable before sending")
+                        Big("Open draft in graff", filled: true) { finish(openAgent: true, prompt: activeStarter.prompt) }
+                        Text("Editable before sending — never sent automatically")
                             .font(.system(size: 11.5))
                             .foregroundStyle(Palette.muted)
                     }
@@ -353,7 +473,7 @@ struct WelcomePanel: View {
                     if isDefault {
                         Image(systemName: "checkmark.circle.fill")
                             .font(.system(size: 16))
-                            .foregroundStyle(Palette.accent)
+                            .foregroundStyle(Palette.safe)
                     } else {
                         Pill("Make default", filled: true) {
                             asked = true
@@ -368,9 +488,9 @@ struct WelcomePanel: View {
             }
 
             HStack(spacing: 10) {
-                welcomeKey("⌘T", "New tab bar")
-                welcomeKey("⌘K", "Tab switcher")
-                welcomeKey("⇧⌘\\", "Tab overview")
+                welcomeKey("⌘T", "New tab")
+                welcomeKey("⌃Tab", "Recent tabs")
+                welcomeKey("⌘S", "Toggle sidebar")
                 welcomeKey("⌘,", "Settings + ⌘F")
             }
         }
@@ -384,18 +504,12 @@ struct WelcomePanel: View {
                 .buttonStyle(.plain)
                 .font(.system(size: 12.5))
                 .foregroundStyle(Palette.muted)
-                .help("Finish setup now; reopen it from Browse › Welcome")
+                .help("Finish setup now; reopen it from browse › Welcome")
             Spacer(minLength: 8)
             if page > 0 {
                 Button("Back") { forward = false; page -= 1 }
                     .buttonStyle(.plain)
                     .font(.system(size: 13))
-                    .foregroundStyle(Palette.muted)
-            }
-            if page > 0, page < pages - 1 {
-                Button("Skip this step") { forward = true; page += 1 }
-                    .buttonStyle(.plain)
-                    .font(.system(size: 12.5))
                     .foregroundStyle(Palette.muted)
             }
             Big(page < pages - 1 ? "Continue" : "Start browsing", filled: true) {
@@ -408,16 +522,45 @@ struct WelcomePanel: View {
 
     // MARK: - doing
 
-    private func bringAll() {
-        guard let source = source ?? ImportSource.present().first else { return }
-        if !browser.unlock(source, then: { bring(from: source) }) {
-            brought = "\(source.name)'s folder needs Full Disk Access for browse. Turned on from here, bringing starts by itself; if not, reopen browse and try again."
+    /// Scan installed browsers off the main thread so Step 3 opens at 120 FPS
+    /// and surfaces macOS 27 Full Disk Access locks immediately.
+    private func scanSources() {
+        scanningSources = true
+        DispatchQueue.global(qos: .userInitiated).async {
+            let present = ImportSource.present()
+            let shut = Set(present.filter(\.locked).map(\.id))
+            if !shut.isEmpty { Browser.registerForFullDiskAccessList() }
+            let missing = Chromium.unreadable().map {
+                "\($0.source.name) is on this Mac, but nothing of it was found in \($0.looked)."
+            }
+            DispatchQueue.main.async {
+                sources = present
+                lockedSources = shut
+                unreadableNotes = missing
+                if let current = source, !present.contains(current) {
+                    source = nil
+                }
+                if source == nil {
+                    source = present.first { !shut.contains($0.id) } ?? present.first
+                }
+                scanningSources = false
+                scannedSources = true
+            }
+        }
+    }
+
+    private func bringAll(from selected: ImportSource) {
+        if !browser.unlock(selected, then: { bring(from: selected) }) {
+            lockedSources.insert(selected.id)
+            brought = "\(selected.name)'s folder needs Full Disk Access for browse. Turned on from here, bringing starts by itself."
         }
     }
 
     private func bring(from source: ImportSource) {
         bringing = true
+        hadFailure = false
         var lines: [String] = []
+        var anyFailure = false
         let group = DispatchGroup()
         if wantsPasswords {
             group.enter()
@@ -428,10 +571,13 @@ struct WelcomePanel: View {
                     case .success(let found):
                         lines.append("\(browser.keep(found)) passwords")
                     case .failure(Chromium.Trouble.noPassphrase):
+                        anyFailure = true
                         lines.append("passwords: macOS didn't hand over the key — allow it and try again")
                     case .failure(Mozilla.Trouble.primaryPassword):
+                        anyFailure = true
                         lines.append("passwords: \(source.name) has a primary password — export them from it and bring in the CSV")
                     case .failure:
+                        anyFailure = true
                         lines.append("passwords: nothing readable")
                     }
                     group.leave()
@@ -457,19 +603,20 @@ struct WelcomePanel: View {
         }
         group.notify(queue: .main) {
             bringing = false
-            done = true
+            hadFailure = anyFailure
+            done = !anyFailure
             brought = lines.joined(separator: " · ")
             browser.relist()
         }
     }
 
-    private func finish(openAgent: Bool = false) {
+    private func finish(openAgent: Bool = false, prompt: String? = nil) {
         if remindShortcuts { browser.requestShortcutReminder() }
         prefs.welcomed = true
         withAnimation(Motion.settle) { browser.welcoming = false }
         if openAgent {
             if browser.agent.draft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
-                browser.agent.draft = "Help me research a topic. Ask me what I want to learn, then help me compare reliable sources."
+                browser.agent.draft = prompt ?? Self.starterPrompts[0].prompt
             }
             if browser.talkOnStage { browser.focusAgent() } else { browser.takeStage() }
         }
@@ -526,6 +673,7 @@ struct WelcomePanel: View {
         let sidebar: Bool
         let chosen: Bool
         let glyph: Glyph
+        let tinted: Bool
         let pick: () -> Void
         @State private var hovering = false
 
@@ -547,9 +695,10 @@ struct WelcomePanel: View {
             Button(action: pick) {
                 VStack(alignment: .leading, spacing: 10) {
                     ZStack(alignment: .topLeading) {
-                        RoundedRectangle(cornerRadius: 8, style: .continuous).fill(Palette.ground)
+                        RoundedRectangle(cornerRadius: 8, style: .continuous)
+                            .fill(sidebar ? (tinted ? Palette.accent.opacity(0.10) : Palette.wash.opacity(0.8)) : Palette.ground)
                         if sidebar {
-                            HStack(spacing: 0) {
+                            HStack(spacing: 4) {
                                 VStack(alignment: .leading, spacing: 5) {
                                     HStack(spacing: 3) { ForEach(0..<3, id: \.self) { _ in Circle().fill(Palette.faint).frame(width: 5, height: 5) } }
                                         .padding(.bottom, 2)
@@ -562,13 +711,22 @@ struct WelcomePanel: View {
                                         }
                                         .padding(.horizontal, 3)
                                         .frame(height: 20)
-                                        .background(i == 0 ? Palette.wash : .clear, in: RoundedRectangle(cornerRadius: 4))
+                                        .background(i == 0 ? Palette.ground.opacity(0.92) : .clear, in: RoundedRectangle(cornerRadius: 4))
                                     }
                                 }
-                                .padding(8)
+                                .padding(.leading, 8)
+                                .padding(.vertical, 8)
                                 .frame(width: 72)
-                                Rectangle().fill(Palette.hairline).frame(width: 1)
-                                Spacer()
+
+                                // Floating rounded webpage card inside the frosted frame.
+                                RoundedRectangle(cornerRadius: 6, style: .continuous)
+                                    .fill(Palette.ground)
+                                    .overlay(
+                                        RoundedRectangle(cornerRadius: 6, style: .continuous)
+                                            .strokeBorder(Palette.hairline, lineWidth: 0.75)
+                                    )
+                                    .padding(.vertical, 5)
+                                    .padding(.trailing, 5)
                             }
                         } else {
                             HStack(spacing: 3) {
@@ -605,6 +763,7 @@ struct WelcomePanel: View {
             .animation(Motion.quick, value: hovering)
             .animation(Motion.settle, value: chosen)
             .animation(Motion.quick, value: glyph)
+            .animation(Motion.quick, value: tinted)
         }
     }
 

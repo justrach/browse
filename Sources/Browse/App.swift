@@ -1365,6 +1365,7 @@ struct ContentView: View {
                 return true
             }
             if browser.welcoming {
+                browser.prefs.welcomed = true
                 browser.welcoming = false
                 return true
             }

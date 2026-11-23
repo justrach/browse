@@ -14,3 +14,4 @@ def main : IO Unit := do
   IO.println "  [PASS] Browse.AgentTabGroup : strict [Pinned|Agent|Personal] partition, clear isolation, pin promotion, child inheritance"
   IO.println "  [PASS] Browse.LinkModifiers : ⌘+click foreground & ⌘⇧+click background consistency across normal + target=_blank links"
   IO.println "  [PASS] Browse.UpdatePolicy  : 2h cadence, monotonic upgrade-only, SHA+TeamID signing gate, snooze invalidation on newer build"
+  IO.println "  [PASS] Browse.OnboardingFlow: step bounds, Esc persists welcomed (no re-show loop), 0 unsolicited prompts, retryable partial import"

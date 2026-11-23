@@ -6,6 +6,13 @@ All notable changes to **browse** are documented here, newest first.
 
 ## Unreleased
 
+### Improved
+
+- **Onboarding UX & Lean 4 formal verification (`Welcome.swift`, `WelcomeResearch.swift`, `App.swift`, `lean-proofs/Browse/OnboardingFlow.lean`)**:
+  - Persisted `prefs.welcomed = true` on `Esc` dismissal so first-time users who press `Esc` are never trapped in a repeat onboarding loop on next launch, and added a top `DragStrip` band so the window stays draggable throughout setup.
+  - Moved Step 3 browser detection off the main thread (`scanSources()`), surfaced macOS 27 Full Disk Access locks up front, fixed non-Chromium `wantsSignIns` button enablement, and kept failed/denied Keychain imports retryable (`"Try again"`) instead of locking the button out.
+  - Added an inline **Search engine** picker & live tinted floating-card Sidebar preview on Step 4, a **"Check again"** re-scan button on Step 2, clickable starter-prompt presets gated on `graff` actually being installed + live `didBecomeActive` default-browser status refresh on Step 5, removed the redundant `"Skip this step"` footer button, and proved all onboarding invariants in Lean 4 (`Browse.OnboardingFlow`).
+
 ### Fixed
 
 - **Zero-delay lockstep Agent & Sidebar slide and edge-drag (`App.swift`, `AgentColumn.swift`, `lean-proofs/Browse/ScrollFastPath.lean`)**:
