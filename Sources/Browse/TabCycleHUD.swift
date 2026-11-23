@@ -14,11 +14,24 @@ struct TabCycleHUD: View {
     var body: some View {
         let dark = scheme == .dark
         let _ = previews.revision
-        let shown = Array(tabs.prefix(7))
-        let chosen = shown.first { $0.id == selectedID } ?? shown.first
+        let maxVisible = 7
+        let selectedIndex = tabs.firstIndex { $0.id == selectedID } ?? 0
+        let start = max(0, min(selectedIndex - maxVisible / 2, tabs.count - maxVisible))
+        let end = min(tabs.count, start + maxVisible)
+        let shown = Array(tabs[start..<end])
+        let hiddenBefore = start
+        let hiddenAfter = tabs.count - end
+        let chosen = tabs.indices.contains(selectedIndex) ? tabs[selectedIndex] : tabs.first
 
         VStack(spacing: 12) {
             HStack(spacing: 10) {
+                if hiddenBefore > 0 {
+                    Text("‹ \(hiddenBefore)")
+                        .font(.system(size: 11, weight: .semibold, design: .rounded))
+                        .monospacedDigit()
+                        .foregroundStyle(Palette.muted)
+                        .padding(.horizontal, 4)
+                }
                 ForEach(shown) { tab in
                     let active = tab.id == chosen?.id
                     let preview = previews.image(for: tab)
@@ -46,6 +59,18 @@ struct TabCycleHUD: View {
                             }
                             .frame(width: 132, height: 84)
                             .clipShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
+                            .overlay(alignment: .topTrailing) {
+                                if tab.asleep {
+                                    Image(systemName: "moon.zzz")
+                                        .font(.system(size: 9, weight: .semibold))
+                                        .foregroundStyle(dark ? Color.white.opacity(0.85) : Palette.ink.opacity(0.75))
+                                        .padding(4)
+                                        .background(
+                                            Circle().fill(dark ? Color.black.opacity(0.55) : Color.white.opacity(0.85))
+                                        )
+                                        .padding(5)
+                                }
+                            }
                             .overlay(
                                 RoundedRectangle(cornerRadius: 8, style: .continuous)
                                     .strokeBorder(
@@ -55,7 +80,7 @@ struct TabCycleHUD: View {
                             )
 
                             HStack(spacing: 5) {
-                                Mark(icon: tab.icon, letter: tab.monogram, size: 12)
+                                Mark(icon: tab.icon, letter: tab.monogram, size: 12, dim: tab.asleep)
                                 Text(tab.label)
                                     .font(.system(size: 11, weight: active ? .semibold : .medium))
                                     .foregroundStyle(active ? Palette.ink : Palette.muted)
@@ -72,11 +97,18 @@ struct TabCycleHUD: View {
                     }
                     .buttonStyle(.plain)
                 }
+                if hiddenAfter > 0 {
+                    Text("\(hiddenAfter) ›")
+                        .font(.system(size: 11, weight: .semibold, design: .rounded))
+                        .monospacedDigit()
+                        .foregroundStyle(Palette.muted)
+                        .padding(.horizontal, 4)
+                }
             }
 
             if let chosen {
                 HStack(spacing: 6) {
-                    Mark(icon: chosen.icon, letter: chosen.monogram, size: 13)
+                    Mark(icon: chosen.icon, letter: chosen.monogram, size: 13, dim: chosen.asleep)
                     Text(chosen.label)
                         .font(.system(size: 12, weight: .semibold))
                         .foregroundStyle(Palette.ink)
@@ -86,6 +118,11 @@ struct TabCycleHUD: View {
                             .font(.system(size: 11.5))
                             .foregroundStyle(Palette.muted)
                             .lineLimit(1)
+                    }
+                    if chosen.asleep {
+                        Text("· Asleep")
+                            .font(.system(size: 11, weight: .medium))
+                            .foregroundStyle(Palette.muted.opacity(0.8))
                     }
                 }
                 .padding(.top, 2)

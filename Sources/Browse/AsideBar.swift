@@ -89,6 +89,13 @@ struct AsideBar: View {
 
                 // Right-side utility doors + top-right graff pill (always visible, never clipped).
                 HStack(spacing: 4) {
+                    if !sidebarOpen {
+                        UpdateChip(browser: browser)
+                        if browser.activeDownloadCount > 0 || !browser.loot.active.isEmpty {
+                            AsideDownloadsButton(browser: browser, loot: browser.loot)
+                        }
+                        AsideBackgroundAudioButton(browser: browser)
+                    }
                     let overviewKey = shortcuts.key(for: .tabOverview)?.display
                     Door(
                         icon: "square.grid.2x2",
@@ -209,6 +216,8 @@ private struct AddressSummaryButton: View {
     @State private var siteCardOpen = false
     @State private var zoomHover = false
     @State private var readerHover = false
+    @State private var readerMenuOpen = false
+    @State private var audioHover = false
 
     var body: some View {
         let host: String = {
@@ -222,7 +231,7 @@ private struct AddressSummaryButton: View {
         let shieldPaused = !tab.isBlank && !host.isEmpty && browser.prefs.shielded && shield.isPaused(on: host)
         let zoomed = !tab.isBlank && abs(tab.zoom - browser.prefs.pageZoom) > 0.005
         let showCopy = !tab.isBlank && (hovering || copied)
-        let hasTrailingChip = showCopy || zoomed || tab.reader
+        let hasTrailingChip = !tab.isBlank
 
         HStack(spacing: 2) {
             if !tab.isBlank {
@@ -297,21 +306,45 @@ private struct AddressSummaryButton: View {
             .buttonStyle(.plain)
             .help("Open or edit address   ⌘L")
 
+            if !tab.isBlank && (tab.noisy || tab.muted) {
+                Button { tab.toggleMute() } label: {
+                    Image(systemName: tab.muted ? "speaker.slash.fill" : "speaker.wave.2.fill")
+                        .font(.system(size: 10, weight: .medium))
+                        .foregroundStyle(tab.muted ? Palette.muted : Palette.ink.opacity(0.86))
+                        .frame(width: 22, height: 22)
+                        .background(
+                            RoundedRectangle(cornerRadius: 6, style: .continuous)
+                                .fill(Palette.ink.opacity(audioHover ? 0.08 : 0))
+                        )
+                        .contentShape(RoundedRectangle(cornerRadius: 6, style: .continuous))
+                }
+                .buttonStyle(.plain)
+                .onHover { audioHover = $0 }
+                .padding(.trailing, 1)
+                .help(tab.muted ? "Unmute Tab" : "Mute Tab")
+                .transition(.opacity.combined(with: .scale(scale: 0.9)))
+            }
+
             if tab.reader {
-                Button { browser.toggleReader() } label: {
+                Button { readerMenuOpen.toggle() } label: {
                     Image(systemName: "doc.plaintext.fill")
                         .font(.system(size: 10, weight: .medium))
                         .foregroundStyle(Palette.accent)
                         .frame(width: 22, height: 22)
                         .background(
                             RoundedRectangle(cornerRadius: 6, style: .continuous)
-                                .fill(Palette.accent.opacity(readerHover ? 0.18 : 0.12))
+                                .fill(Palette.accent.opacity(readerHover || readerMenuOpen ? 0.18 : 0.12))
                         )
                 }
                 .buttonStyle(.plain)
                 .onHover { readerHover = $0 }
-                .padding(.trailing, (zoomed || showCopy) ? 1 : 3)
-                .help("Exit Reading Mode   ⇧⌘R")
+                .padding(.trailing, 1)
+                .help("Reading Mode appearance   ⇧⌘R to exit")
+                .popover(isPresented: $readerMenuOpen, arrowEdge: .bottom) {
+                    ReaderPopover(browser: browser, prefs: browser.prefs) {
+                        readerMenuOpen = false
+                    }
+                }
                 .transition(.opacity.combined(with: .scale(scale: 0.9)))
             }
 
@@ -329,12 +362,12 @@ private struct AddressSummaryButton: View {
                 }
                 .buttonStyle(.plain)
                 .onHover { zoomHover = $0 }
-                .padding(.trailing, showCopy ? 1 : 4)
+                .padding(.trailing, 1)
                 .help("Reset zoom to default   ⌘0")
                 .transition(.opacity.combined(with: .scale(scale: 0.9)))
             }
 
-            if showCopy {
+            if !tab.isBlank {
                 Button {
                     browser.copyAddress()
                     copied = true
@@ -354,7 +387,8 @@ private struct AddressSummaryButton: View {
                 .onHover { copyHover = $0 }
                 .padding(.trailing, 3)
                 .help("Copy Address   ⇧⌘C")
-                .transition(.opacity.combined(with: .scale(scale: 0.88)))
+                .opacity(showCopy ? 1 : 0)
+                .allowsHitTesting(showCopy)
             }
         }
         .frame(height: 28)
@@ -378,13 +412,266 @@ private struct AddressSummaryButton: View {
         .animation(Motion.quick, value: hovering)
         .animation(Motion.quick, value: copied)
         .animation(Motion.quick, value: zoomed)
+        .animation(Motion.quick, value: zoomHover)
         .animation(Motion.quick, value: tab.reader)
+        .animation(Motion.quick, value: tab.noisy)
+        .animation(Motion.quick, value: tab.muted)
         .contextMenu {
             Button("Site Information…") { siteCardOpen = true }
                 .disabled(tab.isBlank)
+            Button("Reload") { browser.reload() }
+                .disabled(tab.isBlank)
             Divider()
             Button("Copy Address") { browser.copyAddress() }
+                .disabled(tab.isBlank)
             Button("Copy as Markdown Link") { browser.copyMarkdownLink() }
+                .disabled(tab.isBlank)
+            Button("Paste and Go") { browser.pasteAndGo() }
+        }
+    }
+}
+
+/// Compact Reading Mode typography & surface popover anchored to the reader badge.
+private struct ReaderPopover: View {
+    @ObservedObject var browser: Browser
+    @ObservedObject var prefs: Preferences
+    let close: () -> Void
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            VStack(alignment: .leading, spacing: 6) {
+                Text("Theme")
+                    .font(.system(size: 11, weight: .medium))
+                    .foregroundStyle(Palette.muted)
+                HStack(spacing: 8) {
+                    ForEach(Preferences.ReaderTheme.allCases) { theme in
+                        let selected = prefs.readerTheme == theme
+                        Button {
+                            prefs.readerTheme = theme
+                            browser.applyReaderStyle()
+                        } label: {
+                            VStack(spacing: 4) {
+                                swatch(for: theme, selected: selected)
+                                Text(theme.title)
+                                    .font(.system(size: 10.5, weight: selected ? .semibold : .regular))
+                                    .foregroundStyle(selected ? Palette.ink : Palette.muted)
+                            }
+                            .frame(maxWidth: .infinity)
+                        }
+                        .buttonStyle(.plain)
+                    }
+                }
+            }
+
+            VStack(alignment: .leading, spacing: 6) {
+                Text("Font")
+                    .font(.system(size: 11, weight: .medium))
+                    .foregroundStyle(Palette.muted)
+                HStack(spacing: 4) {
+                    ForEach(Preferences.ReaderFont.allCases) { font in
+                        let selected = prefs.readerFont == font
+                        Button {
+                            prefs.readerFont = font
+                            browser.applyReaderStyle()
+                        } label: {
+                            Text(font.title)
+                                .font(.system(size: 11.5, weight: selected ? .semibold : .regular))
+                                .foregroundStyle(selected ? Palette.ink : Palette.muted)
+                                .frame(maxWidth: .infinity)
+                                .padding(.vertical, 5)
+                                .background(
+                                    RoundedRectangle(cornerRadius: 7, style: .continuous)
+                                        .fill(selected ? Palette.wash : Color.clear)
+                                )
+                                .overlay(
+                                    RoundedRectangle(cornerRadius: 7, style: .continuous)
+                                        .strokeBorder(selected ? Palette.hairline : Color.clear, lineWidth: 0.75)
+                                )
+                        }
+                        .buttonStyle(.plain)
+                    }
+                }
+                .padding(2)
+                .background(Palette.ink.opacity(0.04), in: RoundedRectangle(cornerRadius: 9, style: .continuous))
+            }
+
+            HStack(spacing: 8) {
+                Text("Text size")
+                    .font(.system(size: 11.5, weight: .medium))
+                    .foregroundStyle(Palette.muted)
+                Spacer()
+                HStack(spacing: 4) {
+                    Button {
+                        prefs.readerSize = max(14, prefs.readerSize - 1)
+                        browser.applyReaderStyle()
+                    } label: {
+                        Text("A−")
+                            .font(.system(size: 11, weight: .medium))
+                            .frame(width: 28, height: 24)
+                            .background(Palette.wash, in: RoundedRectangle(cornerRadius: 6, style: .continuous))
+                    }
+                    .buttonStyle(.plain)
+                    .disabled(prefs.readerSize <= 14)
+
+                    Text("\(prefs.readerSize)")
+                        .font(.system(size: 11.5, weight: .medium))
+                        .monospacedDigit()
+                        .foregroundStyle(Palette.ink)
+                        .frame(width: 24)
+
+                    Button {
+                        prefs.readerSize = min(26, prefs.readerSize + 1)
+                        browser.applyReaderStyle()
+                    } label: {
+                        Text("A+")
+                            .font(.system(size: 12, weight: .medium))
+                            .frame(width: 28, height: 24)
+                            .background(Palette.wash, in: RoundedRectangle(cornerRadius: 6, style: .continuous))
+                    }
+                    .buttonStyle(.plain)
+                    .disabled(prefs.readerSize >= 26)
+                }
+            }
+
+            Divider().overlay(Palette.hairline)
+
+            Button {
+                close()
+                browser.toggleReader()
+            } label: {
+                HStack {
+                    Text("Exit Reading Mode")
+                        .font(.system(size: 12, weight: .medium))
+                    Spacer()
+                    Text("⇧⌘R")
+                        .font(.system(size: 10.5))
+                        .foregroundStyle(Palette.muted)
+                }
+                .foregroundStyle(Palette.ink)
+                .padding(.horizontal, 8)
+                .padding(.vertical, 5)
+                .background(Palette.wash, in: RoundedRectangle(cornerRadius: 7, style: .continuous))
+            }
+            .buttonStyle(.plain)
+        }
+        .padding(12)
+        .frame(width: 232)
+        .background(Palette.ground)
+    }
+
+    @ViewBuilder
+    private func swatch(for theme: Preferences.ReaderTheme, selected: Bool) -> some View {
+        let size: CGFloat = 24
+        Group {
+            switch theme {
+            case .auto:
+                ZStack {
+                    Circle().fill(Color.white)
+                    Circle().fill(Color(white: 0.12)).mask(
+                        Rectangle().frame(width: size / 2, height: size).offset(x: size / 4)
+                    )
+                }
+            case .light:
+                Circle().fill(Color.white)
+            case .sepia:
+                Circle().fill(Color(red: 0.97, green: 0.94, blue: 0.88))
+            case .dark:
+                Circle().fill(Color(white: 0.11))
+            }
+        }
+        .frame(width: size, height: size)
+        .overlay(
+            Circle().strokeBorder(selected ? Palette.accent : Palette.hairline, lineWidth: selected ? 2 : 0.75)
+        )
+    }
+}
+
+/// Active download progress button shown in AsideBar only while a download runs and the sidebar is folded.
+private struct AsideDownloadsButton: View {
+    @ObservedObject var browser: Browser
+    @ObservedObject var loot: Loot
+    @State private var hovering = false
+
+    var body: some View {
+        let fraction = loot.overallProgress
+        Button { browser.hoarding = true } label: {
+            ZStack {
+                if let fraction {
+                    Circle()
+                        .stroke(Palette.ink.opacity(0.14), lineWidth: 2)
+                        .frame(width: 20, height: 20)
+                    Circle()
+                        .trim(from: 0, to: CGFloat(max(0.05, fraction)))
+                        .stroke(Palette.accent, style: StrokeStyle(lineWidth: 2, lineCap: .round))
+                        .rotationEffect(.degrees(-90))
+                        .frame(width: 20, height: 20)
+                        .animation(.easeOut(duration: 0.2), value: fraction)
+                }
+                Image(systemName: "arrow.down")
+                    .font(.system(size: fraction == nil ? 11.5 : 9.5, weight: .semibold))
+                    .foregroundStyle(Palette.ink.opacity(0.88))
+            }
+            .frame(width: 28, height: 28)
+            .background(
+                RoundedRectangle(cornerRadius: 7.5, style: .continuous)
+                    .fill(hovering ? Palette.hover : .clear)
+            )
+            .overlay(alignment: .topTrailing) {
+                if fraction == nil && !loot.active.isEmpty {
+                    PulseDot(color: Palette.accent, size: 4.5, active: true)
+                        .offset(x: -1, y: 1)
+                        .allowsHitTesting(false)
+                }
+            }
+            .contentShape(RoundedRectangle(cornerRadius: 7.5, style: .continuous))
+        }
+        .buttonStyle(.plain)
+        .onHover { hovering = $0 }
+        .help("Downloading (\(max(browser.activeDownloadCount, loot.active.count)))   ⇧⌘J")
+        .animation(Motion.quick, value: hovering)
+    }
+}
+
+/// Folded-sidebar indicator for background tabs actively playing audio.
+private struct AsideBackgroundAudioButton: View {
+    @ObservedObject var browser: Browser
+    @State private var hovering = false
+
+    var body: some View {
+        let noisy = browser.tabs.filter { $0.id != browser.activeID && $0.noisy && !$0.muted }
+        if !noisy.isEmpty {
+            Button { browser.select(noisy[0]) } label: {
+                HStack(spacing: 3) {
+                    Image(systemName: "speaker.wave.2.fill")
+                        .font(.system(size: 10.5, weight: .medium))
+                    if noisy.count > 1 {
+                        Text("\(noisy.count)")
+                            .font(.system(size: 10, weight: .semibold, design: .rounded))
+                    }
+                }
+                .foregroundStyle(Palette.accent)
+                .padding(.horizontal, noisy.count > 1 ? 6 : 0)
+                .frame(minWidth: 28, minHeight: 28, maxHeight: 28)
+                .background(
+                    RoundedRectangle(cornerRadius: 7.5, style: .continuous)
+                        .fill(Palette.accent.opacity(hovering ? 0.16 : 0.10))
+                )
+                .contentShape(RoundedRectangle(cornerRadius: 7.5, style: .continuous))
+            }
+            .buttonStyle(.plain)
+            .onHover { hovering = $0 }
+            .help("Jump to audio tab: \(noisy[0].label) (right-click for options)")
+            .contextMenu {
+                ForEach(noisy) { tab in
+                    Button("Go to “\(tab.label)”") { browser.select(tab) }
+                    Button("Mute “\(tab.label)”") { tab.toggleMute() }
+                    Divider()
+                }
+                Button("Mute All Background Audio") {
+                    for tab in noisy { tab.toggleMute() }
+                }
+            }
+            .animation(Motion.quick, value: hovering)
         }
     }
 }

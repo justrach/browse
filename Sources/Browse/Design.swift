@@ -147,6 +147,8 @@ enum Metrics {
     static let pinWidth: CGFloat = 30
     /// The square at the end of the row that opens a new page.
     static let plusWidth: CGFloat = 30
+    /// Minimum draggable window-handle stretch left after the `+` in a full top tab row.
+    static let tabRowHold: CGFloat = 40
     /// The address field, in both the places it shows up.
     static let fieldWidth: CGFloat = 560
     /// The column of titles down the left, in the way that has one.

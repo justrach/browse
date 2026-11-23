@@ -104,11 +104,13 @@ final class Preferences: ObservableObject {
         didSet { store.set(googleSuggestions, forKey: "search.google.suggestions") }
     }
     enum MemoryMode: String, CaseIterable, Identifiable {
+        case relaxed
         case balanced
         case low
         var id: String { rawValue }
         var title: String {
             switch self {
+            case .relaxed: return "Relaxed"
             case .balanced: return "Balanced"
             case .low: return "Low RAM"
             }
@@ -387,6 +389,48 @@ final class Preferences: ObservableObject {
         didSet { store.set(autoArchiveHours, forKey: "tabs.archiveHours") }
     }
 
+    enum ReaderTheme: String, CaseIterable, Identifiable {
+        case auto, light, sepia, dark
+        var id: String { rawValue }
+        var title: String {
+            switch self {
+            case .auto: return "Auto"
+            case .light: return "Light"
+            case .sepia: return "Sepia"
+            case .dark: return "Dark"
+            }
+        }
+    }
+
+    enum ReaderFont: String, CaseIterable, Identifiable {
+        case serif, sans, mono
+        var id: String { rawValue }
+        var title: String {
+            switch self {
+            case .serif: return "Serif"
+            case .sans: return "Sans"
+            case .mono: return "Mono"
+            }
+        }
+    }
+
+    @Published var readerTheme: ReaderTheme {
+        didSet { store.set(readerTheme.rawValue, forKey: "reader.theme") }
+    }
+    @Published var readerFont: ReaderFont {
+        didSet { store.set(readerFont.rawValue, forKey: "reader.font") }
+    }
+    @Published var readerSize: Int {
+        didSet {
+            let clamped = min(26, max(14, readerSize))
+            if clamped != readerSize {
+                readerSize = clamped
+                return
+            }
+            store.set(clamped, forKey: "reader.size")
+        }
+    }
+
     init() {
         // Carried over from when there were four ways of holding the browser
         // and this was one of them.
@@ -486,6 +530,10 @@ final class Preferences: ObservableObject {
         selectionToolbar = selBar
         SelectionRelay.on = selBar
         autoArchiveHours = store.object(forKey: "tabs.archiveHours") as? Int ?? 0
+        readerTheme = store.string(forKey: "reader.theme").flatMap(ReaderTheme.init) ?? .auto
+        readerFont = store.string(forKey: "reader.font").flatMap(ReaderFont.init) ?? .serif
+        let storedReaderSize = store.object(forKey: "reader.size") as? Int ?? 18
+        readerSize = min(26, max(14, storedReaderSize))
         let flicks = store.bool(forKey: "float.flicks")
         floatFlicks = flicks
         Float.flicks = flicks

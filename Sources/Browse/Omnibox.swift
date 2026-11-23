@@ -380,19 +380,34 @@ struct AddressField: NSViewRepresentable {
         field.cell?.wraps = false
         // SwiftUI picks its own colour for a placeholder, and on a pale ground
         // that colour was near-white.
-        field.placeholderAttributedString = NSAttributedString(
-            string: "Enter a web address, or ask graff",
+        let placeholderText = browser.openingNewTab
+            ? "Open in a new tab, or ask graff"
+            : "Enter a web address, or ask graff"
+        context.coordinator.lastOpeningNewTab = browser.openingNewTab
+        field.placeholderAttributedString = Self.placeholder(placeholderText)
+        return field
+    }
+
+    private static func placeholder(_ text: String) -> NSAttributedString {
+        NSAttributedString(
+            string: text,
             attributes: [
                 .font: NSFont.systemFont(ofSize: 15.5),
                 .foregroundColor: NSColor(Palette.ink.opacity(0.3)),
             ]
         )
-        return field
     }
 
     func updateNSView(_ field: NSTextField, context: Context) {
         let coordinator = context.coordinator
         coordinator.browser = browser
+
+        if coordinator.lastOpeningNewTab != browser.openingNewTab {
+            coordinator.lastOpeningNewTab = browser.openingNewTab
+            field.placeholderAttributedString = Self.placeholder(
+                browser.openingNewTab ? "Open in a new tab, or ask graff" : "Enter a web address, or ask graff"
+            )
+        }
 
         let needsFocus = coordinator.answered != browser.focusRequest
         if needsFocus {
@@ -428,6 +443,7 @@ struct AddressField: NSViewRepresentable {
         /// The last value pushed in from the browser side, so an update can
         /// tell a change worth applying from one it made itself.
         var synced = ""
+        var lastOpeningNewTab: Bool?
 
         /// A backspace has to be allowed to actually take a letter off. Without
         /// this the field puts the same letter straight back as a completion
@@ -524,7 +540,8 @@ struct AddressField: NSViewRepresentable {
         ) -> Bool {
             switch command {
             case #selector(NSResponder.insertNewline(_:)):
-                browser.submit()
+                let optionHeld = NSApp.currentEvent?.modifierFlags.contains(.option) == true
+                browser.submit(inNewTab: optionHeld)
                 return true
             case #selector(NSResponder.moveDown(_:)):
                 browser.walk(1)
