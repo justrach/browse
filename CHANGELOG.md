@@ -10,6 +10,10 @@ All notable changes to **browse** are documented here, newest first.
 
 - **Dedicated Agent Tab Group (`Tab.swift`, `Session.swift`, `Browser.swift`, `Side.swift`, `TabBar.swift`, `AgentTools.swift`, `AgentColumn.swift`, `TabOverview.swift`)**: tabs opened by the agentic browser (MCP `open_tab` / `show`, Follow, agent citations, and links clicked from Agent replies) now automatically land in their own collapsible, accent-tinted **Agent** tab group — cleanly separated from your personal `Today` tabs in both the Sidebar and Top Tab Bar, with a one-click **Clear** button, right-click **Move to My Tabs** / **Move to Agent Group**, session persistence across restarts, and an `Agent` badge in `⌘K` and `⇧⌘\`.
 
+### Changed
+
+- **⌘+click opens links in a new foreground tab (`Browser.swift`)**: `⌘+click` on any link now opens it in a new tab and switches straight to it (`⌘⇧+click` opens in the background).
+
 ## 1.9.0 — 23 November 2026
 
 ### Added
