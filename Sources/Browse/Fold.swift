@@ -580,24 +580,20 @@ private struct FullscreenEdgeHints: View {
     let revealSidebar: () -> Void
     let openAgent: () -> Void
 
-    @Environment(\.colorScheme) private var scheme
     @State private var hoverLeft = false
     @State private var hoverCenter = false
     @State private var hoverRight = false
 
-    private var isDark: Bool {
-        let tint = browser.prefs.sideTint ? PageTint(browser.activeHue, over: scheme) : nil
-        return tint?.dark ?? (scheme == .dark)
-    }
-
     var body: some View {
-        let base = isDark ? Color.white : Color.black
+        // The fullscreen bezel canvas is pure #000000 black so edge handles
+        // always render in crisp translucent white.
+        let base = Color.white
         ZStack {
             HStack(spacing: 0) {
                 if sidebarFolded {
                     Button(action: revealSidebar) {
                         Capsule()
-                            .fill(base.opacity(hoverLeft ? 0.44 : 0.18))
+                            .fill(base.opacity(hoverLeft ? 0.52 : 0.22))
                             .frame(width: hoverLeft ? 28 : 22, height: 3)
                             .frame(width: 44, height: Fold.fullScreenGutter, alignment: .leading)
                             .contentShape(Rectangle())
@@ -613,7 +609,7 @@ private struct FullscreenEdgeHints: View {
                 if agentClosed {
                     Button(action: openAgent) {
                         Capsule()
-                            .fill(Palette.accent.opacity(hoverRight ? 0.72 : 0.34))
+                            .fill(Palette.accent.opacity(hoverRight ? 0.80 : 0.42))
                             .frame(width: hoverRight ? 28 : 22, height: 3)
                             .frame(width: 44, height: Fold.fullScreenGutter, alignment: .trailing)
                             .contentShape(Rectangle())
@@ -627,7 +623,7 @@ private struct FullscreenEdgeHints: View {
 
             Button(action: revealTop) {
                 Capsule()
-                    .fill(base.opacity(hoverCenter ? 0.46 : 0.22))
+                    .fill(base.opacity(hoverCenter ? 0.54 : 0.26))
                     .frame(width: hoverCenter ? 64 : 50, height: 3.5)
                     .frame(width: 96, height: Fold.fullScreenGutter)
                     .contentShape(Rectangle())

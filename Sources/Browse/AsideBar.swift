@@ -40,7 +40,7 @@ struct AsideBar: View {
     var body: some View {
         let agentOpen = browser.consulting && browser.prefs.usesAgent
         let splitOpen = browser.shownSplit != nil
-        let isDark = tint?.dark ?? (scheme == .dark)
+        let isDark = fullScreen || (tint?.dark ?? (scheme == .dark))
         let toggleKey = shortcuts.key(for: .toggleAgent)?.display
         let foldKey = shortcuts.key(for: .toggleFold)?.display
         let splitKey = shortcuts.key(for: .toggleSplit)?.display
@@ -162,12 +162,16 @@ struct AsideBar: View {
         .clipped()
         .background {
             if floating {
-                ZStack {
-                    SideGlass(dark: tint?.dark)
-                    if let tint {
-                        tint.wash
-                    } else {
-                        Palette.ground.opacity(scheme == .dark ? 0.86 : 0.90)
+                if fullScreen {
+                    Color.black.opacity(0.95)
+                } else {
+                    ZStack {
+                        SideGlass(dark: tint?.dark)
+                        if let tint {
+                            tint.wash
+                        } else {
+                            Palette.ground.opacity(scheme == .dark ? 0.86 : 0.90)
+                        }
                     }
                 }
             } else if !framed {
@@ -180,15 +184,15 @@ struct AsideBar: View {
         }
         .overlay(alignment: .bottom) {
             if floating || !framed {
-                Rectangle().fill(seam).frame(height: 1)
+                Rectangle().fill(fullScreen ? Color.white.opacity(0.10) : seam).frame(height: 1)
             }
         }
         .shadow(
-            color: floating ? .black.opacity(isDark ? 0.34 : 0.14) : .clear,
+            color: floating ? .black.opacity(isDark ? 0.42 : 0.14) : .clear,
             radius: floating ? 18 : 0,
             y: floating ? 4 : 0
         )
-        .environment(\.colorScheme, tint.map { $0.dark ? .dark : .light } ?? scheme)
+        .environment(\.colorScheme, fullScreen ? .dark : (tint.map { $0.dark ? .dark : .light } ?? scheme))
         .animation(Motion.glide, value: tint)
     }
 }
