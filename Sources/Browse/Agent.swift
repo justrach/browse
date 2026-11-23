@@ -303,10 +303,65 @@ final class Agent: ObservableObject {
         }
     }
 
-    /// A model graff can reach from here, as `graff/models` lists it.
+    /// Supported ACP agent backends that `browse` can auto-discover and drive
+    /// natively over stdin/stdout JSON-RPC (matching NanoHarness).
+    enum Backend: String, CaseIterable, Identifiable, Codable {
+        case graff
+        case antigravity
+        case opencode
+        case gemini
+        case pi
+
+        var id: String { rawValue }
+
+        var title: String {
+            switch self {
+            case .graff: return "Codegraff"
+            case .antigravity: return "Antigravity"
+            case .opencode: return "OpenCode"
+            case .gemini: return "Gemini CLI"
+            case .pi: return "Pi"
+            }
+        }
+
+        var shortName: String {
+            switch self {
+            case .graff: return "graff"
+            case .antigravity: return "Antigravity"
+            case .opencode: return "OpenCode"
+            case .gemini: return "Gemini"
+            case .pi: return "Pi"
+            }
+        }
+
+        var providerKey: String {
+            switch self {
+            case .graff: return "codegraff"
+            case .antigravity: return "antigravity"
+            case .opencode: return "opencode"
+            case .gemini: return "google"
+            case .pi: return "pi"
+            }
+        }
+
+        var acpArguments: [String] {
+            switch self {
+            case .graff: return ["acp", "--yolo"]
+            case .antigravity: return ["acp", "--dangerously-skip-permissions"]
+            case .opencode: return ["acp"]
+            case .gemini: return ["--acp"]
+            case .pi: return []
+            }
+        }
+    }
+
+    /// A model an ACP backend can reach from here (`graff/models`, ACP
+    /// `configOptions[category=model]`, or `models.availableModels`).
     struct Model: Identifiable, Equatable {
         let provider: String
         let name: String
+        var displayName: String? = nil
+        var acpValue: String? = nil
         var context = 0
         var rawMaker: String? = nil
         var billing: String? = nil
@@ -447,6 +502,7 @@ final class Agent: ObservableObject {
         /// "gpt-6-sol" as people say it: "GPT-6 Sol"; "claude-opus-4-8" is
         /// "Claude Opus 4.8", and a date on the end is left off.
         var label: String {
+            if let displayName, !displayName.isEmpty { return displayName }
             var words: [String] = []
             var dated = false
             for part in bare.split(whereSeparator: { $0 == "-" || $0 == "_" }).map(String.init) {
@@ -524,6 +580,9 @@ final class Agent: ObservableObject {
         static func said(_ key: String) -> String {
             let known = [
                 "codegraff": "Codegraff",
+                "antigravity": "Antigravity",
+                "opencode": "OpenCode",
+                "pi": "Pi",
                 "claude-agent": "Claude Agent",
                 "codex": "Codex / ChatGPT",
                 "chatgpt-new": "ChatGPT plan",
@@ -636,6 +695,9 @@ final class Agent: ObservableObject {
     private static let longestLine = 60_000
 
     private let prefs: Preferences
+    @Published private(set) var backend: Backend = .graff
+    @Published private(set) var availableBackends: [Backend] = [.graff]
+    private var modelConfigID: String?
     private var pipe: AcpPipe?
     private var program: URL?
     private var session: String?
@@ -790,6 +852,7 @@ final class Agent: ObservableObject {
 
     init(prefs: Preferences) {
         self.prefs = prefs
+        self.backend = Backend(rawValue: prefs.agentBackend) ?? .graff
         // graff saves its session when its input ends, and ends with it.
         NotificationCenter.default.addObserver(
             forName: NSApplication.willTerminateNotification, object: nil, queue: .main
@@ -802,6 +865,39 @@ final class Agent: ObservableObject {
                 AgentTools.withdraw()
             }
         }
+        refreshBackends()
+    }
+
+    func refreshBackends() {
+        let custom = prefs.agentPath
+        Task {
+            let found = await Agent.discoverBackends(customGraff: custom)
+            if !found.isEmpty {
+                self.availableBackends = found
+            }
+        }
+    }
+
+    /// Switch the active ACP agent backend (e.g. Codegraff → Antigravity →
+    /// OpenCode → Gemini CLI), carrying over any visible conversation context.
+    func choose(backend next: Backend) {
+        guard next != backend else { return }
+        prefs.agentBackend = next.rawValue
+        backend = next
+        keep()
+        shutDown()
+        model = nil
+        models = []
+        effort = nil
+        modelConfigID = nil
+        serviceTier = .standard
+        pendingServiceTier = nil
+        resuming = nil
+        lost = entries.contains(where: { $0.kind == .you }) ? Agent.transcript(entries) : nil
+        if !entries.isEmpty {
+            entries.append(Entry(kind: .note, text: "Switched to \(next.title)"))
+        }
+        start()
     }
 
     struct Failure: Error {
@@ -1044,7 +1140,37 @@ final class Agent: ObservableObject {
         recent.removeAll { $0 == model.id }
         recent.insert(model.id, at: 0)
         Store.settings.set(Array(recent.prefix(6)), forKey: "agent.recent")
-        prefs.agentModel = model.id
+        prefs.setAgentModel(model.id, for: backend.rawValue)
+
+        // Standard ACP backends (Antigravity, OpenCode, Gemini CLI, Pi) switch
+        // models live in-session without restarting the subprocess.
+        if backend != .graff, let session {
+            let previous = self.model
+            self.model = model
+            var reordered = self.models
+            reordered.removeAll { $0 == model }
+            reordered.insert(model, at: 0)
+            self.models = reordered
+            let wire = model.acpValue ?? model.name
+            let finish: (Result<Any, Failure>) -> Void = { [weak self] result in
+                guard let self else { return }
+                switch result {
+                case .success(let reply):
+                    self.adopt(reply)
+                    if let wantedEffort { self.choose(effort: wantedEffort) }
+                case .failure(let failure):
+                    self.model = previous
+                    self.entries.append(Entry(kind: .note, text: failure.message))
+                }
+            }
+            if let configId = modelConfigID {
+                call("session/set_config_option", ["sessionId": session, "configId": configId, "value": wire], then: finish)
+            } else {
+                call("session/set_model", ["sessionId": session, "modelId": wire], then: finish)
+            }
+            return
+        }
+
         let carried = session
         shutDown()
         resuming = carried
@@ -1075,30 +1201,34 @@ final class Agent: ObservableObject {
         phase = .starting
         let generation = self.generation
         let custom = prefs.agentPath
+        let activeBackend = self.backend
         Task {
-            // The browser's own tools first, so the file that tells graff
-            // where they are is there before graff looks (see AgentTools.swift).
-            // Without them graff still has its own; a file left from an
-            // earlier launch would only send it knocking on a closed port.
+            // The browser's own tools first, so the file that tells the agent
+            // where they are is there before it looks (see AgentTools.swift).
             if !(await AgentTools.shared.start()) {
                 AgentTools.withdraw()
             }
             guard self.generation == generation, prefs.usesAgent else { return }
-            Agent.leaveKuriOut()
-            let found = await Agent.locate(custom: custom)
-            guard self.generation == generation, prefs.usesAgent, phase == .starting, pipe == nil else { return }
+            if activeBackend == .graff { Agent.leaveKuriOut() }
+            let found = await Agent.locate(backend: activeBackend, customGraff: custom)
+            let discovered = await Agent.discoverBackends(customGraff: custom)
+            guard self.generation == generation, prefs.usesAgent else { return }
+            if !discovered.isEmpty { self.availableBackends = discovered }
+            guard phase == .starting, pipe == nil else { return }
             guard let found else {
                 phase = .missing
                 return
             }
-            launch(found.program, path: found.path)
+            launch(found.program, path: found.path, backend: activeBackend)
         }
     }
 
-    private func launch(_ program: URL, path: String?) {
+    private func launch(_ program: URL, path: String?, backend activeBackend: Backend) {
         self.program = program
-        var arguments = ["acp", "--yolo"]
-        if !prefs.agentModel.isEmpty { arguments += ["--model", prefs.agentModel] }
+        var arguments = activeBackend.acpArguments
+        if activeBackend == .graff, !prefs.agentModel.isEmpty {
+            arguments += ["--model", prefs.agentModel]
+        }
         let pipe = AcpPipe(program: program, arguments: arguments, environment: Agent.environment(for: program, path: path, lean: !prefs.agentAllTools), folder: Agent.folder)
         pipe.onMessage = { [weak self, weak pipe] message in
             guard let self, let pipe, self.pipe === pipe else { return }
@@ -1115,8 +1245,6 @@ final class Agent: ObservableObject {
             return
         }
         self.pipe = pipe
-        // The same introduction the Codegraff app gives. graff works with
-        // files and runs commands through its own tools, not the client's.
         call("initialize", [
             "protocolVersion": 1,
             "clientCapabilities": ["fs": [String: Any]()],
@@ -1184,7 +1312,16 @@ final class Agent: ObservableObject {
         if let effort, !wanted.isEmpty, wanted != effort.current, effort.levels.contains(where: { $0.value == wanted }) {
             choose(effort: wanted)
         }
-        listModels()
+        if backend == .graff {
+            listModels()
+        } else {
+            let savedModel = prefs.agentModel(for: backend.rawValue)
+            if !savedModel.isEmpty,
+               let match = models.first(where: { $0.id == savedModel || $0.acpValue == savedModel }),
+               match != self.model {
+                choose(match)
+            }
+        }
         if let blocks = held {
             held = nil
             prompt(blocks)
@@ -1258,6 +1395,7 @@ final class Agent: ObservableObject {
     /// Switches Codex / ChatGPT service tier (`Standard` / `Fast` / `Ultra Fast`)
     /// via graff's persistent `/fast` slash command without polluting the chat transcript.
     func choose(serviceTier tier: ServiceTier) {
+        guard backend == .graff else { return }
         if let model, !model.supportedServiceTiers.isEmpty, !model.supportedServiceTiers.contains(tier) {
             return
         }
@@ -1306,22 +1444,102 @@ final class Agent: ObservableObject {
         }
     }
 
-    /// graff's session options, from opening a session or changing one: the
-    /// `thought_level` select, the only one it has.
+    /// Session options from opening a session or changing one: `thought_level`
+    /// for all ACP backends, plus standard ACP `model` configOptions /
+    /// `models.availableModels` for non-graff backends (Antigravity, OpenCode,
+    /// Gemini CLI, Pi).
     private func adopt(_ reply: Any) {
-        guard let options = (reply as? [String: Any])?["configOptions"] as? [[String: Any]] else { return }
-        guard let option = options.first(where: {
+        guard let dict = reply as? [String: Any] else { return }
+        let options = dict["configOptions"] as? [[String: Any]] ?? []
+
+        if let option = options.first(where: {
             ($0["category"] as? String == "thought_level" || $0["id"] as? String == "thought_level")
                 && ($0["type"] as? String ?? "select") == "select"
-        }), let id = option["id"] as? String else {
+        }), let id = option["id"] as? String {
+            let levels = (option["options"] as? [[String: Any]] ?? []).compactMap { choice -> (value: String, name: String)? in
+                guard let value = choice["value"] as? String else { return nil }
+                return (value, choice["name"] as? String ?? value.capitalized)
+            }
+            effort = levels.isEmpty ? nil : Effort(id: id, current: option["currentValue"] as? String ?? "", levels: levels)
+        } else if dict["configOptions"] != nil {
             effort = nil
-            return
         }
-        let levels = (option["options"] as? [[String: Any]] ?? []).compactMap { choice -> (value: String, name: String)? in
-            guard let value = choice["value"] as? String else { return nil }
-            return (value, choice["name"] as? String ?? value.capitalized)
+
+        guard backend != .graff else { return }
+        let effortValues = effort?.levels.map(\.value) ?? []
+        let fallbackProvider = backend.providerKey
+
+        func makeACPModel(rawID: String, rawName: String?) -> Model {
+            let trimmedName = rawName?.trimmingCharacters(in: .whitespacesAndNewlines)
+            if backend == .opencode, let slash = rawID.firstIndex(of: "/") {
+                let vendor = String(rawID[..<slash])
+                let rest = String(rawID[rawID.index(after: slash)...])
+                let cleanDisplay = trimmedName.flatMap { name -> String? in
+                    if let s = name.firstIndex(of: "/") {
+                        let tail = String(name[name.index(after: s)...])
+                        return tail.isEmpty ? name : tail
+                    }
+                    return name.isEmpty ? nil : name
+                }
+                return Model(
+                    provider: vendor,
+                    name: rest,
+                    displayName: cleanDisplay,
+                    acpValue: rawID,
+                    billing: "plan",
+                    effortLevels: effortValues
+                )
+            }
+            return Model(
+                provider: fallbackProvider,
+                name: rawID,
+                displayName: (trimmedName?.isEmpty == false) ? trimmedName : nil,
+                acpValue: rawID,
+                billing: "plan",
+                effortLevels: effortValues
+            )
         }
-        effort = levels.isEmpty ? nil : Effort(id: id, current: option["currentValue"] as? String ?? "", levels: levels)
+
+        if let modelOpt = options.first(where: {
+            ($0["category"] as? String == "model" || $0["id"] as? String == "model")
+                && ($0["type"] as? String ?? "select") == "select"
+        }), let configID = modelOpt["id"] as? String {
+            modelConfigID = configID
+            let choices = modelOpt["options"] as? [[String: Any]] ?? []
+            var seen = Set<String>()
+            var parsed: [Model] = choices.compactMap { choice in
+                guard let value = choice["value"] as? String, !value.isEmpty else { return nil }
+                let m = makeACPModel(rawID: value, rawName: choice["name"] as? String)
+                return seen.insert(m.id).inserted ? m : nil
+            }
+            if let currentValue = modelOpt["currentValue"] as? String, !currentValue.isEmpty {
+                let now = parsed.first { $0.acpValue == currentValue } ?? makeACPModel(rawID: currentValue, rawName: nil)
+                self.model = now
+                parsed.removeAll { $0 == now }
+                parsed.insert(now, at: 0)
+            } else if self.model == nil {
+                self.model = parsed.first
+            }
+            if !parsed.isEmpty { self.models = parsed }
+        } else if let modelsObj = dict["models"] as? [String: Any],
+                  let available = modelsObj["availableModels"] as? [[String: Any]] {
+            modelConfigID = nil
+            var seen = Set<String>()
+            var parsed: [Model] = available.compactMap { row in
+                guard let modelId = row["modelId"] as? String, !modelId.isEmpty else { return nil }
+                let m = makeACPModel(rawID: modelId, rawName: row["name"] as? String)
+                return seen.insert(m.id).inserted ? m : nil
+            }
+            if let currentID = modelsObj["currentModelId"] as? String, !currentID.isEmpty {
+                let now = parsed.first { $0.acpValue == currentID } ?? makeACPModel(rawID: currentID, rawName: nil)
+                self.model = now
+                parsed.removeAll { $0 == now }
+                parsed.insert(now, at: 0)
+            } else if self.model == nil {
+                self.model = parsed.first
+            }
+            if !parsed.isEmpty { self.models = parsed }
+        }
     }
 
     /// A page graff read through the browser's tools, named in the column.
@@ -2237,6 +2455,103 @@ final class Agent: ObservableObject {
     /// Harness's and the Codegraff app's, and any on the login shell's PATH —
     /// as Harness chooses. That shell's PATH comes back too, for graff's own
     /// commands.
+    /// Locate an ACP agent binary on this Mac (`graff`, `agy`, `opencode`,
+    /// `gemini`, or `pi-acp`), plus the user's login shell PATH.
+    nonisolated static func locate(backend: Backend = .graff, customGraff: String = "") async -> (program: URL, path: String?)? {
+        if backend == .graff {
+            return await locate(custom: customGraff)
+        }
+        return await Task.detached {
+            let shell = Agent.loginPath()
+            guard let url = Agent.findExecutable(for: backend, shellPath: shell) else { return nil }
+            return (url, shell)
+        }.value
+    }
+
+    /// Discover all supported ACP agent backends currently installed on this Mac.
+    nonisolated static func discoverBackends(customGraff: String = "") async -> [Backend] {
+        await Task.detached {
+            let files = FileManager.default
+            let home = files.homeDirectoryForCurrentUser.path
+            let shell = Agent.loginPath()
+            var found: [Backend] = []
+            for candidate in Backend.allCases {
+                if candidate == .graff {
+                    let named = (customGraff as NSString).expandingTildeInPath
+                    if !named.isEmpty && files.isExecutableFile(atPath: named) {
+                        found.append(.graff)
+                        continue
+                    }
+                    let graffPlaces = (shell ?? "").split(separator: ":").map { "\($0)/graff" } + [
+                        "\(home)/.local/bin/graff", "\(home)/bin/graff",
+                        "/opt/homebrew/bin/graff", "/usr/local/bin/graff",
+                        "\(home)/.harness/bin/graff",
+                        "/Applications/Harness.app/Contents/Resources/bin/graff",
+                        "/Applications/Codegraff.app/Contents/Resources/graff",
+                    ]
+                    if graffPlaces.contains(where: { files.isExecutableFile(atPath: $0) }) {
+                        found.append(.graff)
+                    }
+                } else if Agent.findExecutable(for: candidate, shellPath: shell) != nil {
+                    found.append(candidate)
+                }
+            }
+            return found
+        }.value
+    }
+
+    nonisolated private static func findExecutable(for backend: Backend, shellPath: String?) -> URL? {
+        let files = FileManager.default
+        let home = files.homeDirectoryForCurrentUser.path
+        let pathDirs = (shellPath ?? "").split(separator: ":").map(String.init)
+        var places: [String] = []
+        switch backend {
+        case .graff:
+            return nil
+        case .antigravity:
+            places = pathDirs.map { "\($0)/agy" } + [
+                "\(home)/.local/bin/agy",
+                "\(home)/bin/agy",
+                "/opt/homebrew/bin/agy",
+                "/usr/local/bin/agy",
+                "\(home)/.harness/bin/agy",
+            ]
+        case .opencode:
+            places = pathDirs.map { "\($0)/opencode" } + [
+                "\(home)/.opencode/bin/opencode",
+                "\(home)/.local/bin/opencode",
+                "/opt/homebrew/bin/opencode",
+                "/usr/local/bin/opencode",
+            ]
+        case .gemini:
+            places = pathDirs.map { "\($0)/gemini" } + [
+                "\(home)/.local/bin/gemini",
+                "/opt/homebrew/bin/gemini",
+                "/usr/local/bin/gemini",
+            ]
+            if let versions = try? files.contentsOfDirectory(atPath: "\(home)/.nvm/versions/node") {
+                for v in versions.sorted().reversed() {
+                    places.append("\(home)/.nvm/versions/node/\(v)/bin/gemini")
+                }
+            }
+        case .pi:
+            places = pathDirs.map { "\($0)/pi-acp" } + [
+                "\(home)/.local/bin/pi-acp",
+                "/opt/homebrew/bin/pi-acp",
+            ]
+            let adaptersDir = "\(home)/.harness/adapters/pi-acp"
+            if let versions = try? files.contentsOfDirectory(atPath: adaptersDir) {
+                for v in versions.sorted().reversed() {
+                    places.append("\(adaptersDir)/\(v)/node_modules/.bin/pi-acp")
+                }
+            }
+        }
+        for place in places where files.isExecutableFile(atPath: place) {
+            return URL(fileURLWithPath: place)
+        }
+        return nil
+    }
+
     nonisolated static func locate(custom: String) async -> (program: URL, path: String?)? {
         await Task.detached {
             let files = FileManager.default

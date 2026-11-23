@@ -229,12 +229,15 @@ struct AgentComposer: View {
         HStack(spacing: 6) {
             if let current = agent.model {
                 ModelPicker(agent: agent, current: current, openRequest: modelOpenRequest)
-                    .help("Switch model or adjust reasoning effort   /model")
-            } else if agent.phase == .starting {
-                Text("Loading models…")
-                    .font(.system(size: 11.5))
-                    .foregroundStyle(Palette.muted)
-                    .padding(.horizontal, 6)
+                    .help("Switch agent, model, or reasoning effort   /model")
+            } else if agent.availableBackends.count > 1 || agent.phase == .starting {
+                let placeholder = Agent.Model(
+                    provider: agent.backend.providerKey,
+                    name: agent.backend.rawValue,
+                    displayName: agent.phase == .starting ? "Starting \(agent.backend.shortName)…" : agent.backend.title
+                )
+                ModelPicker(agent: agent, current: placeholder, openRequest: modelOpenRequest)
+                    .help("Switch agent or model   /model")
             }
         }
         .disabled(agent.phase == .working)
