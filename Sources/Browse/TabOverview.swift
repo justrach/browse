@@ -109,8 +109,16 @@ private struct TabPaletteView: View {
         browser.switcherItems(matching: state.query, mode: .palette)
     }
 
+    private var fallbackActions: [SwitcherAction] {
+        items.isEmpty ? browser.switcherFallbackActions(for: state.query) : []
+    }
+
     private var selectedItem: SwitcherItem? {
         items.first { $0.id == state.selectedID } ?? items.first
+    }
+
+    private var selectedAction: SwitcherAction? {
+        fallbackActions.first { $0.id == state.selectedActionID } ?? fallbackActions.first
     }
 
     private var selectedTab: Tab? { selectedItem?.tab }
@@ -130,7 +138,11 @@ private struct TabPaletteView: View {
                 Divider().overlay(Palette.hairline)
 
                 if items.isEmpty {
-                    emptyState
+                    if !fallbackActions.isEmpty {
+                        webFallback(dark: dark)
+                    } else {
+                        emptyState
+                    }
                 } else {
                     HStack(spacing: 0) {
                         tabList(dark: dark)
@@ -182,10 +194,20 @@ private struct TabPaletteView: View {
 
     private func syncSelection() {
         let list = items
-        if let current = state.selectedID, list.contains(where: { $0.id == current }) {
+        if !list.isEmpty {
+            state.selectedActionID = nil
+            if let current = state.selectedID, list.contains(where: { $0.id == current }) {
+                return
+            }
+            state.selectedID = list.first?.id
             return
         }
-        state.selectedID = list.first?.id
+        state.selectedID = nil
+        let actions = fallbackActions
+        if let current = state.selectedActionID, actions.contains(where: { $0.id == current }) {
+            return
+        }
+        state.selectedActionID = actions.first?.id
     }
 
     private func searchHeader(dark: Bool) -> some View {
@@ -194,7 +216,7 @@ private struct TabPaletteView: View {
                 .font(.system(size: 14, weight: .medium))
                 .foregroundStyle(Palette.muted)
 
-            TextField("Search open tabs…", text: $state.query)
+            TextField("Search tabs, sites, or the web…", text: $state.query)
                 .textFieldStyle(.plain)
                 .font(.system(size: 15, weight: .regular))
                 .foregroundStyle(Palette.ink)
@@ -422,15 +444,62 @@ private struct TabPaletteView: View {
         }
     }
 
+    private func webFallback(dark: Bool) -> some View {
+        let actions = fallbackActions
+        return ScrollViewReader { proxy in
+            ScrollView {
+                LazyVStack(spacing: 4) {
+                    HStack {
+                        Text("Open or Search")
+                            .font(.system(size: 11, weight: .semibold))
+                            .foregroundStyle(Palette.muted)
+                        Spacer()
+                        Text("No open tabs match")
+                            .font(.system(size: 11))
+                            .foregroundStyle(Palette.muted.opacity(0.75))
+                    }
+                    .padding(.horizontal, 10)
+                    .padding(.top, 4)
+                    .padding(.bottom, 6)
+
+                    ForEach(actions) { action in
+                        let isSelected = action.id == selectedAction?.id
+                        SwitcherActionRow(
+                            action: action,
+                            selected: isSelected,
+                            dark: dark,
+                            onHover: { over in
+                                if over { state.selectedActionID = action.id }
+                            },
+                            onSelect: {
+                                browser.openActionFromSwitcher(action)
+                            }
+                        )
+                        .id(action.id)
+                    }
+                }
+                .padding(12)
+            }
+            .scrollIndicators(.automatic)
+            .onChange(of: state.selectedActionID) { _, id in
+                guard let id else { return }
+                withAnimation(Motion.quick) {
+                    proxy.scrollTo(id, anchor: .center)
+                }
+            }
+        }
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
+    }
+
     private var emptyState: some View {
         VStack(spacing: 8) {
             Image(systemName: "magnifyingglass")
                 .font(.system(size: 22, weight: .light))
                 .foregroundStyle(Palette.muted.opacity(0.7))
-            Text("No open tabs match “\(state.query)”")
+            Text("No open tabs yet")
                 .font(.system(size: 13.5, weight: .medium))
                 .foregroundStyle(Palette.ink.opacity(0.85))
-            Text("Press Esc to dismiss or clear the search to see all tabs.")
+            Text("Type any website or search term above and press Return.")
                 .font(.system(size: 12))
                 .foregroundStyle(Palette.muted)
         }
@@ -438,11 +507,14 @@ private struct TabPaletteView: View {
     }
 
     private func footerBar(dark: Bool) -> some View {
-        HStack(spacing: 14) {
-            KeyHint(keys: "↑↓", label: "Preview")
-            KeyHint(keys: "↩", label: "Switch")
+        let inSearch = items.isEmpty && !fallbackActions.isEmpty
+        return HStack(spacing: 14) {
+            KeyHint(keys: "↑↓", label: inSearch ? "Select" : "Preview")
+            KeyHint(keys: "↩", label: inSearch ? "Open" : "Switch")
             KeyHint(keys: "⌘D", label: "Split")
-            KeyHint(keys: "⌘⌫", label: "Close")
+            if !inSearch {
+                KeyHint(keys: "⌘⌫", label: "Close")
+            }
             Spacer(minLength: 0)
             KeyHint(keys: "⇧⌘\\", label: "Overview Grid")
             KeyHint(keys: "⎋", label: "Dismiss")
@@ -450,6 +522,90 @@ private struct TabPaletteView: View {
         .padding(.horizontal, 16)
         .frame(height: 32)
         .background(Palette.ink.opacity(dark ? 0.035 : 0.025))
+    }
+}
+
+private struct SwitcherActionRow: View {
+    let action: SwitcherAction
+    let selected: Bool
+    let dark: Bool
+    let onHover: (Bool) -> Void
+    let onSelect: () -> Void
+
+    private var iconName: String {
+        switch action.kind {
+        case .url: return "globe"
+        case .bookmark: return "star.fill"
+        case .history: return "clock"
+        case .search: return "magnifyingglass"
+        }
+    }
+
+    private var badgeText: String {
+        switch action.kind {
+        case .url: return "Website"
+        case .bookmark: return "Bookmark"
+        case .history: return "Visited"
+        case .search: return "Search"
+        }
+    }
+
+    var body: some View {
+        HStack(spacing: 11) {
+            Image(systemName: iconName)
+                .font(.system(size: 13, weight: .medium))
+                .foregroundStyle(action.kind == .bookmark ? Palette.accent : (selected ? Palette.ink : Palette.muted))
+                .frame(width: 28, height: 28)
+                .background(
+                    RoundedRectangle(cornerRadius: 7, style: .continuous)
+                        .fill(Palette.ink.opacity(selected ? (dark ? 0.14 : 0.08) : (dark ? 0.07 : 0.045)))
+                )
+
+            VStack(alignment: .leading, spacing: 2) {
+                Text(action.title)
+                    .font(.system(size: 13.5, weight: selected ? .semibold : .medium))
+                    .foregroundStyle(Palette.ink)
+                    .lineLimit(1)
+                    .truncationMode(.tail)
+                Text(action.subtitle)
+                    .font(.system(size: 11.5))
+                    .foregroundStyle(Palette.muted)
+                    .lineLimit(1)
+                    .truncationMode(.middle)
+            }
+
+            Spacer(minLength: 8)
+
+            if selected {
+                HStack(spacing: 4) {
+                    Text(action.kind == .search ? "Search" : "Open")
+                        .font(.system(size: 11, weight: .medium))
+                    Text("↩")
+                        .font(.system(size: 10.5, weight: .medium))
+                        .opacity(0.75)
+                }
+                .foregroundStyle(dark ? Color.black : Color.white)
+                .padding(.horizontal, 9)
+                .padding(.vertical, 4)
+                .background(Capsule().fill(Palette.ink))
+            } else {
+                Text(badgeText)
+                    .font(.system(size: 10.5, weight: .medium))
+                    .foregroundStyle(Palette.muted)
+                    .padding(.horizontal, 7)
+                    .padding(.vertical, 3)
+                    .background(Capsule().fill(Palette.ink.opacity(dark ? 0.07 : 0.045)))
+            }
+        }
+        .padding(.horizontal, 10)
+        .padding(.vertical, 8)
+        .background(
+            RoundedRectangle(cornerRadius: 10, style: .continuous)
+                .fill(selected ? Palette.ink.opacity(dark ? 0.11 : 0.065) : Color.clear)
+        )
+        .contentShape(Rectangle())
+        .onHover(perform: onHover)
+        .onTapGesture(perform: onSelect)
     }
 }
 
