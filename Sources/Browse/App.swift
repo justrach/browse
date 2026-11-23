@@ -356,7 +356,7 @@ struct ContentView: View {
     /// True when the Arc/Dia-style unified frosted frame wraps the floating
     /// rounded page card (sidebar or compact top bar active, not fullscreen video).
     private var arcFrame: Bool {
-        (sidebar || asideBarShown) && browser.active?.immersed != true
+        (sidebar || asideBarWanted) && browser.active?.immersed != true
     }
 
     private var windowTint: PageTint? {
@@ -412,13 +412,13 @@ struct ContentView: View {
                     .transition(.move(edge: .leading))
             }
 
-            if !browser.prefs.sidebar, !browser.folded, browser.active?.immersed != true {
+            if topTabBarShown {
                 TabBar(browser: browser)
                     .transition(.move(edge: .top).combined(with: .opacity))
             }
 
             if asideBarShown {
-                AsideBar(browser: browser, sidebarOpen: sidebar, framed: arcFrame)
+                AsideBar(browser: browser, sidebarOpen: sidebar, framed: arcFrame, fullScreen: browser.fullScreen)
                     .padding(.leading, chrome.width)
                     .transition(.opacity)
             }
@@ -438,7 +438,7 @@ struct ContentView: View {
                 HStack(spacing: 0) {
                     Spacer(minLength: 0)
                     AgentColumn(browser: browser, agent: browser.agent, prefs: browser.prefs, fullHeight: true)
-                        .padding(.top, asideBarShown ? Metrics.strip : 0)
+                        .padding(.top, asideBarShown ? Metrics.strip : (fullScreenTopHidden ? Fold.fullScreenGutter : 0))
                         .frame(maxHeight: .infinity, alignment: .top)
                 }
                 .transition(.move(edge: .trailing))
@@ -447,6 +447,7 @@ struct ContentView: View {
         .ignoresSafeArea()
         .animation(Motion.glide, value: browser.prefs.sidebar)
         .animation(Motion.glide, value: browser.folded)
+        .animation(Motion.glide, value: browser.fullScreen)
         .animation(Motion.glide, value: consulting)
         .animation(Motion.glide, value: browser.agentFull)
         .animation(.easeOut(duration: 0.12), value: browser.active?.immersed)
@@ -513,7 +514,7 @@ struct ContentView: View {
                 }
                 .padding(.leading, sidebar ? 0 : Split.gap)
                 .padding(.trailing, roomedAgent > 0 ? 0 : Split.gap)
-                .padding(.top, asideBarShown ? 0 : Split.gap)
+                .padding(.top, (asideBarShown || fullScreenTopHidden) ? 0 : Split.gap)
                 .padding(.bottom, Split.gap)
             } else {
                 pane(tab)
@@ -827,6 +828,33 @@ struct ContentView: View {
             .onReceive(NotificationCenter.default.publisher(for: NSWindow.didBecomeKeyNotification)) { note in
                 if let window, (note.object as? NSWindow) === window { Browser.front = browser }
             }
+            .onReceive(NotificationCenter.default.publisher(for: NSWindow.willEnterFullScreenNotification)) { note in
+                if let window, (note.object as? NSWindow) === window {
+                    withAnimation(Motion.glide) {
+                        browser.fullScreen = true
+                        browser.topPeeking = false
+                    }
+                }
+            }
+            .onReceive(NotificationCenter.default.publisher(for: NSWindow.didEnterFullScreenNotification)) { note in
+                if let window, (note.object as? NSWindow) === window {
+                    browser.fullScreen = true
+                }
+            }
+            .onReceive(NotificationCenter.default.publisher(for: NSWindow.willExitFullScreenNotification)) { note in
+                if let window, (note.object as? NSWindow) === window {
+                    withAnimation(Motion.glide) {
+                        browser.fullScreen = false
+                        browser.topPeeking = false
+                    }
+                }
+            }
+            .onReceive(NotificationCenter.default.publisher(for: NSWindow.didExitFullScreenNotification)) { note in
+                if let window, (note.object as? NSWindow) === window {
+                    browser.fullScreen = false
+                    browser.topPeeking = false
+                }
+            }
             .onReceive(NotificationCenter.default.publisher(for: NSApplication.didBecomeActiveNotification)) { _ in
                 resting?.isHidden = true
                 browser.appBack()
@@ -1016,7 +1044,7 @@ struct ContentView: View {
 
     /// True when the Agent sidebar sits beside AsideBar at full window height.
     private var fullHeightAgent: Bool {
-        consulting && !browser.agentFull && asideBarShown
+        consulting && !browser.agentFull && (asideBarShown || (browser.fullScreen && asideBarWanted))
     }
 
     /// Trailing inset reserved for the full-height Agent sidebar.
@@ -1029,21 +1057,41 @@ struct ContentView: View {
         browser.prefs.sidebar && !browser.folded && browser.active?.immersed != true
     }
 
-    /// True when the compact Aside-style top bar is showing (tabs in sidebar
-    /// or folded away, and not in full-screen video).
-    private var asideBarShown: Bool {
+    /// True when the compact Aside-style top bar is enabled for the current layout.
+    private var asideBarWanted: Bool {
         browser.prefs.compactTopBar
             && (browser.prefs.sidebar || browser.folded)
             && browser.active?.immersed != true
     }
 
+    /// True when the compact Aside-style top bar is docked in the layout.
+    /// In macOS Full Screen mode it tucks away to free up the top band and
+    /// slides down on top-edge hover (see Fold.swift).
+    private var asideBarShown: Bool {
+        asideBarWanted && !browser.fullScreen
+    }
+
+    /// True when the classic top tab bar is docked in the layout.
+    private var topTabBarShown: Bool {
+        !browser.prefs.sidebar && !browser.folded && !browser.fullScreen
+            && browser.active?.immersed != true
+    }
+
+    /// True in macOS Full Screen when the top bar (`AsideBar` or `TabBar`) has
+    /// been freed up and replaced by the slim top-edge hint gutter.
+    private var fullScreenTopHidden: Bool {
+        browser.fullScreen && browser.active?.immersed != true
+            && (asideBarWanted || (!browser.prefs.sidebar && !browser.folded))
+    }
+
     /// The column has its own corner for the lights; the top strip or Aside
-    /// address bar takes a band across the top of the page.
+    /// address bar takes a band across the top of the page. In Full Screen,
+    /// the top bar tucks away into a slim gutter that hosts subtle edge hints.
     private var band: CGFloat {
         guard browser.active?.immersed != true else { return 0 }
         if asideBarShown { return Metrics.strip }
-        // Folded without the compact top bar: the page takes the full height.
-        return browser.prefs.sidebar || browser.folded ? 0 : Metrics.strip
+        if fullScreenTopHidden { return Fold.fullScreenGutter }
+        return topTabBarShown ? Metrics.strip : 0
     }
 
     /// Put the resting circles in the title bar, exactly over the buttons.
@@ -1068,6 +1116,7 @@ struct ContentView: View {
 
     private func dress(_ window: NSWindow) {
         Links.window = window
+        browser.fullScreen = window.styleMask.contains(.fullScreen)
         // Light or dark is the app's to say (Settings › Appearance); the
         // window only has to be the ground colour that goes with it.
         window.titlebarAppearsTransparent = true
