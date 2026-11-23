@@ -315,7 +315,8 @@ final class Browser: NSObject, ObservableObject {
     /// typed is a page wanted, not the talk squeezed down the side of it.
     func leaveStage() {
         guard agentFull else { return }
-        withAnimation(Motion.glide) {
+        prepareActivePagesForLiveResize()
+        withAnimation(Motion.panelSlide) {
             agentFull = false
             consulting = false
         }

@@ -8,8 +8,8 @@ All notable changes to **browse** are documented here, newest first.
 
 ### Improved
 
-- **Smoother 0.36s zero-overshoot `⌘;` / `⌘S` panel slide curve (`Design.swift`, `App.swift`, `Browser.swift`, `Fold.swift`, `Stage.swift`)**:
-  - Replaced the fast underdamped 0.24s bounce spring (`dampingFraction: 0.88`) on `⌘;` and `⌘S` panel slides with a gentler, zero-overshoot 0.36s `cubic-bezier(0.22, 1.0, 0.36, 1.0)` curve (`Motion.panelSlide`) matched identically to `animateWindowFrame`, giving WebKit ~43 frames at 120 Hz for its single reflow and skipping redundant per-frame `backPage()` timer churn in `StageView.layout()`.
+- **Smoother 0.42s ease-in-out `⌘;` / `⌘S` panel slide curve (`Design.swift`, `App.swift`, `Browser.swift`, `Fold.swift`, `Stage.swift`)**:
+  - Replaced the fast initial-jump curve on `⌘;` and `⌘S` panel slides with a calm, zero-overshoot 0.42s ease-in-out `cubic-bezier(0.36, 0.0, 0.22, 1.0)` curve (`Motion.panelSlide`, ~50 frames at 120 Hz) matched identically to `animateWindowFrame`, so both opening and closing glide smoothly without snapping away in the first 80ms, and skipped redundant per-frame `backPage()` timer churn in `StageView.layout()`.
 
 ## 1.9.6 — 23 November 2026
 

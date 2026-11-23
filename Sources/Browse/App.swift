@@ -1164,7 +1164,7 @@ struct ContentView: View {
         animatingWindowForAgent = true
         NSAnimationContext.runAnimationGroup({ ctx in
             ctx.duration = Motion.panelSlideDuration
-            ctx.timingFunction = CAMediaTimingFunction(controlPoints: 0.22, 1.0, 0.36, 1.0)
+            ctx.timingFunction = CAMediaTimingFunction(controlPoints: 0.36, 0.0, 0.22, 1.0)
             window.animator().setFrame(target, display: true)
         }, completionHandler: {
             DispatchQueue.main.async {
