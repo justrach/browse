@@ -11,6 +11,8 @@ enum Session {
         var pin: String?
         /// The name you gave the tab, when you gave it one.
         var name: String?
+        /// Non-nil when the tab belongs to the dedicated Agent tab group.
+        var agentGroup: String? = nil
     }
 
     struct Shape: Codable {

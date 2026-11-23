@@ -123,7 +123,7 @@ struct AgentColumn: View {
                 return .handled
             }
             guard url.scheme?.hasPrefix("http") == true else { return .systemAction }
-            browser.open(url, foreground: true)
+            browser.open(url, foreground: true, agentGroup: "Agent")
             return .handled
         })
         .onAppear {
@@ -373,7 +373,7 @@ struct AgentColumn: View {
                                             lastUpdate: agent.lastStreamAt,
                                             chatSeed: seed,
                                             waiting: agent.asking.map { $0.isQuestion ? "Waiting for your answer…" : "Waiting for your approval…" },
-                                            visit: { url in browser.open(url, foreground: true) },
+                                            visit: { url in browser.open(url, foreground: true, agentGroup: "Agent") },
                                             feedback: { browser.reportAgentProblem(kind: .answer) }
                                         )
                                     }
