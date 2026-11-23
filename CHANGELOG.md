@@ -6,6 +6,8 @@ All notable changes to **browse** are documented here, newest first.
 
 ## Unreleased
 
+## 1.9.3 — 23 November 2026
+
 ### Fixed
 
 - **Universal 120 FPS scrolling across GitHub and every website (`StatusLine.swift`, `Swipe.swift`, `AutoScroll.swift`, `SelectionBar.swift`, `Forms.swift`, `Tab.swift`, `Stage.swift`, `lean-proofs/Browse/ScrollFastPath.lean`)**:
