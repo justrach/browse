@@ -85,7 +85,7 @@ struct TabSwitcherLayer: View {
             switch mode {
             case .palette:
                 TabPaletteView(browser: browser, state: state)
-                    .transition(.opacity.combined(with: .scale(scale: 0.985)))
+                    .transition(.opacity)
             case .grid:
                 TabOverviewGridView(browser: browser, state: state)
                     .transition(.opacity)
@@ -358,16 +358,11 @@ private struct TabPaletteView: View {
                 .padding(8)
             }
             .scrollIndicators(.automatic)
-            .onChange(of: state.selectedID) { _, id in
-                guard let id else { return }
-                withAnimation(Motion.quick) {
-                    proxy.scrollTo(id, anchor: .center)
-                }
-            }
-            .onChange(of: state.selectedActionID) { _, id in
-                guard let id else { return }
-                withAnimation(Motion.quick) {
-                    proxy.scrollTo(id, anchor: .center)
+            .onChange(of: state.keyboardScrollTick) { _, _ in
+                if let id = state.selectedID {
+                    proxy.scrollTo(id)
+                } else if let id = state.selectedActionID {
+                    proxy.scrollTo(id)
                 }
             }
         }
@@ -414,7 +409,6 @@ private struct TabPaletteView: View {
                     browser.selectFromSwitcher(item)
                 }
                 .onAppear { previews.request(tab, width: 640) }
-                .id(tab.id)
 
                 // Metadata & quick actions.
                 VStack(alignment: .leading, spacing: 4) {
@@ -652,10 +646,9 @@ private struct TabPaletteView: View {
                 .padding(12)
             }
             .scrollIndicators(.automatic)
-            .onChange(of: state.selectedActionID) { _, id in
-                guard let id else { return }
-                withAnimation(Motion.quick) {
-                    proxy.scrollTo(id, anchor: .center)
+            .onChange(of: state.keyboardScrollTick) { _, _ in
+                if let id = state.selectedActionID {
+                    proxy.scrollTo(id)
                 }
             }
         }
@@ -864,17 +857,17 @@ private struct TabPaletteRow: View {
                         .font(.system(size: 9.5))
                         .foregroundStyle(Palette.muted.opacity(0.75))
                 }
-                if hovering || selected {
-                    Button(action: onClose) {
-                        Image(systemName: "xmark")
-                            .font(.system(size: 8.5, weight: .semibold))
-                            .foregroundStyle(Palette.muted)
-                            .frame(width: 18, height: 18)
-                            .background(Palette.ink.opacity(dark ? 0.11 : 0.08), in: Circle())
-                    }
-                    .buttonStyle(.plain)
-                    .help("Close tab")
+                Button(action: onClose) {
+                    Image(systemName: "xmark")
+                        .font(.system(size: 8.5, weight: .semibold))
+                        .foregroundStyle(Palette.muted)
+                        .frame(width: 18, height: 18)
+                        .background(Palette.ink.opacity(dark ? 0.11 : 0.08), in: Circle())
                 }
+                .buttonStyle(.plain)
+                .help("Close tab")
+                .opacity(hovering || selected ? 1 : 0)
+                .allowsHitTesting(hovering || selected)
             }
         }
         .padding(.horizontal, 10)

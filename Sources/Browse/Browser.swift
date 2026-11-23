@@ -63,6 +63,9 @@ final class TabSwitcherState: ObservableObject {
     @Published var selectedID: Tab.ID?
     @Published var selectedActionID: String?
     @Published var focusTick = 0
+    /// Incremented ONLY by keyboard navigation (↑/↓/Tab/⌘K cycling) so
+    /// ScrollViewReader never fights mouse hover with a scrollTo feedback loop.
+    @Published var keyboardScrollTick = 0
 }
 
 @MainActor
@@ -3270,6 +3273,7 @@ final class Browser: NSObject, ObservableObject {
             tabSwitcherState.selectedID = nil
             tabSwitcherState.selectedActionID = actions[nextIndex - list.count].id
         }
+        tabSwitcherState.keyboardScrollTick += 1
     }
 
     func selectFromSwitcher(_ item: SwitcherItem) {
