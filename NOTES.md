@@ -1,3 +1,5 @@
+Fix Apple Developer and Apple Account passkey sign-in via WebAuthn largeBlob support, and eliminate bright corner bleed artifacts on rounded page cards.
+
 Image pasting and Fast/Ultra Fast speed modes in graff, Dark Mode chrome fix on dark SPAs, major X/Twitter and main-thread performance optimizations (48× faster History, 59× faster Bookmarks), and Lean 4 formal verification proofs.
 
 Fixed ⌘L to always supersede web pages, focus the address bar immediately on mount, dismiss blocking overlays, and select the entire URL.
