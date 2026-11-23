@@ -6,6 +6,8 @@ All notable changes to **browse** are documented here, newest first.
 
 ## Unreleased
 
+## 1.9.6 — 23 November 2026
+
 ### Improved
 
 - **Onboarding UX & Lean 4 formal verification (`Welcome.swift`, `WelcomeResearch.swift`, `App.swift`, `lean-proofs/Browse/OnboardingFlow.lean`)**:

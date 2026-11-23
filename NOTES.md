@@ -1,3 +1,5 @@
+Zero-delay single-reflow 120 FPS ⌘; Agent & Sidebar slides on heavy pages like X/Twitter, polished 5-step onboarding UX, and 13 kernel-verified Lean 4 proofs.
+
 Silky 120 FPS Agent & Sidebar edge-drag resizing and open/close sliding: wired real WebKit async live-resize (viewWillStartLiveResize + backPage), deferred UserDefaults writes until drag end, disabled spring/timer churn and mid-drag drawer flips during drags, replaced blocking window.setFrame with non-blocking CoreAnimation window.animator().setFrame, and proved balanced single-write live-resize in Lean 4.
 
 Engine-level 120 FPS scrolling across every website: enabled WebKit GPU fixed-position compositing for sticky headers/navbars (GitHub, X, Notion, Linear, Reddit, docs), added opaque CALayer blur occlusion behind WKWebView so WindowServer skips live backdrop blur on ~98% of viewport pixels, and converted ScrollRelay to trailing-edge debounce + native scrollend so active scrolling triggers zero layout reads, zero IPC, and zero SwiftUI redraws (proved in Browse.ScrollFastPath).
