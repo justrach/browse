@@ -3824,8 +3824,8 @@ extension Browser: WKNavigationDelegate, WKUIDelegate {
             return
         }
 
-        // ⌘-click opens beside this tab and leaves you where you are; ⌘⇧-click
-        // takes you with it.
+        // ⌘-click opens beside this tab and jumps straight to it; ⌘⇧-click
+        // opens in the background and leaves you where you are.
         //
         // The middle button is not judged here. WebKit hands the browser a
         // navigation action for a ⌘-click and none at all for a middle one,
@@ -3855,7 +3855,7 @@ extension Browser: WKNavigationDelegate, WKUIDelegate {
         if action.navigationType == .linkActivated,
            ["http", "https"].contains(scheme),
            action.modifierFlags.contains(.command) {
-            open(url, foreground: action.modifierFlags.contains(.shift), from: tab(for: webView))
+            open(url, foreground: !action.modifierFlags.contains(.shift), from: tab(for: webView))
             decisionHandler(.cancel)
             return
         }
@@ -3992,13 +3992,19 @@ extension Browser: WKNavigationDelegate, WKUIDelegate {
         // right-click on a picture on X, after following a link out of it,
         // did nothing at all. Each tab gets a controller of its own.
         configuration.userContentController = WKUserContentController()
-        let tab = Tab(shy: tab(for: webView)?.shy ?? false, configuration: configuration)
+        let sourceTab = tab(for: webView)
+        let tab = Tab(shy: sourceTab?.shy ?? false, configuration: configuration)
         tab.popup = windowFeatures.width != nil || windowFeatures.height != nil
             || windowFeatures.toolbarsVisibility?.boolValue == false
+        tab.agentGroup = sourceTab?.agentGroup
         adopt(tab)
         tab.opener = from
-        activeID = tab.id
-        editing = false
+        let background = action.modifierFlags.contains(.command) && action.modifierFlags.contains(.shift)
+        if !background {
+            if tab.isAgentTab { agentGroupCollapsed = false }
+            activeID = tab.id
+            editing = false
+        }
         // Returning the view is what makes it the target. WebKit loads the
         // request into it itself when the action carries one.
         if let url = action.request.url { tab.setAddressOptimistically(url) }
