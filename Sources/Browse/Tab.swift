@@ -1439,6 +1439,24 @@ final class PageView: WKWebView {
         }
     }
 
+    /// Single-reflow GPU slide: resizes the inner WKWebView once to its exact
+    /// post-slide width at `t = 0` while `StageView` smoothly masks its bounds.
+    func beginSlide(deltaWidth: CGFloat) {
+        if let stage = superview as? StageView {
+            stage.beginSlide(deltaWidth: deltaWidth)
+        } else {
+            beginLiveResize()
+        }
+    }
+
+    func endSlide() {
+        if let stage = superview as? StageView {
+            stage.endSlide()
+        } else {
+            endLiveResize()
+        }
+    }
+
     func endLiveResize() {
         if let stage = superview as? StageView {
             stage.endLiveResize()

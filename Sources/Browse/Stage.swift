@@ -65,11 +65,12 @@ struct FramedPageBackdrop: View {
     }
 }
 
-private struct BackdropShadowView: NSViewRepresentable {
+struct BackdropShadowView: NSViewRepresentable {
     let corner: CGFloat
     let fill: NSColor
     let shadowOpacity: Swift.Float
     let shadowRadius: CGFloat
+    var shadowOffset: CGSize = CGSize(width: 0, height: -1.5)
 
     final class LayerView: NSView {
         var corner: CGFloat = 0
@@ -107,7 +108,6 @@ private struct BackdropShadowView: NSViewRepresentable {
         view.layer?.cornerCurve = .continuous
         view.layer?.masksToBounds = false
         view.layer?.shadowColor = NSColor.black.cgColor
-        view.layer?.shadowOffset = CGSize(width: 0, height: -1.5)
         view.opaqueOcclusion.isOpaque = true
         view.layer?.addSublayer(view.opaqueOcclusion)
         updateNSView(view, context: context)
@@ -122,6 +122,7 @@ private struct BackdropShadowView: NSViewRepresentable {
         view.opaqueOcclusion.backgroundColor = cg
         view.layer?.shadowOpacity = shadowOpacity
         view.layer?.shadowRadius = shadowRadius
+        view.layer?.shadowOffset = shadowOffset
         view.updateShadowPath()
     }
 }
@@ -271,6 +272,11 @@ final class StageView: NSView {
     private weak var wanted: NSView?
     private weak var backedWeb: WKWebView?
     private weak var liveResizingWeb: WKWebView?
+    /// While a 240 ms sidebar / Agent spring slide is in flight, pin the inner
+    /// WKWebView width to its exact final target width once at `t = 0` so heavy
+    /// pages (X/Twitter, GitHub, videos) reflow at most ONCE instead of 30×
+    /// while `StageView.bounds` glides at pure 120 FPS GPU lockstep.
+    private var pinnedSlideWidth: CGFloat?
     private var unback: DispatchWorkItem?
     private var lastSize: CGSize = .zero
 
@@ -318,12 +324,38 @@ final class StageView: NSView {
     /// area to async live-resize instead of blocking the main thread on
     /// synchronous WebContent presentation updates at every 120 Hz step.
     func startLiveResize() {
+        pinnedSlideWidth = nil
         backPage()
         guard let web = wanted as? WKWebView, liveResizingWeb !== web else { return }
         endLiveResize()
         (web as? PageView)?.splitLiveResizing = true
         web.viewWillStartLiveResize()
         liveResizingWeb = web
+    }
+
+    /// Pin the inner `WKWebView` ONCE to its final post-slide width at `t = 0`
+    /// while `StageView` smoothly animates its GPU clip bounds across the
+    /// 240 ms spring — turning 30 consecutive DOM/ResizeObserver reflows on
+    /// heavy feeds like X/Twitter into a single reflow with zero post-slide jump.
+    func beginSlide(deltaWidth: CGFloat) {
+        let baseWidth = pinnedSlideWidth ?? bounds.width
+        startLiveResize()
+        guard let wanted, baseWidth > 0, bounds.height > 0 else { return }
+        let targetWidth = max(200, baseWidth + deltaWidth)
+        pinnedSlideWidth = targetWidth
+        let targetFrame = CGRect(x: 0, y: 0, width: targetWidth, height: bounds.height)
+        if wanted.frame != targetFrame {
+            wanted.frame = targetFrame
+        }
+    }
+
+    func endSlide() {
+        pinnedSlideWidth = nil
+        if let wanted, window != nil, wanted.superview === self, subviews.count == 1,
+           wanted.frame != bounds {
+            wanted.frame = bounds
+        }
+        endLiveResize()
     }
 
     func endLiveResize() {
@@ -376,10 +408,14 @@ final class StageView: NSView {
         // still playing. WebKit puts it back itself on the way out.
         if let web = wanted as? WKWebView, web.fullscreenState != .notInFullscreen { return }
 
-        // Fast path during live 120 Hz resize: the wanted page is already the
-        // sole subview, so skip inspector reflection and subview scans.
+        // Fast path during live 120 Hz resize or GPU-clipped slide: the wanted
+        // page is already the sole subview, so skip inspector reflection and
+        // subview scans (and keep width pinned during a single-reflow slide).
         if let wanted, window != nil, wanted.superview === self, subviews.count == 1 {
-            if wanted.frame != bounds { wanted.frame = bounds }
+            let target = pinnedSlideWidth.map {
+                CGRect(x: 0, y: 0, width: $0, height: bounds.height)
+            } ?? bounds
+            if wanted.frame != target { wanted.frame = target }
             return
         }
 

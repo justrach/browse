@@ -273,6 +273,12 @@ check(
 prefs_src = read("Sources/Browse/Prefs.swift")
 check(
     "func beginLiveResize()" in tab_scroll_src
+    and "func beginSlide(deltaWidth:" in tab_scroll_src
+    and "pinnedSlideWidth" in stage_src
+    and "BackdropShadowView(" in agent_col
+    and "agentWarm" in app_src
+    and "narrowForAgent" in app_src
+    and "animatingWindowForAgent" in app_src
     and "commitAgentWidth()" in agent_col
     and "isDraggingAgentWidth" in prefs_src
     and "window.animator().setFrame(" in app_src
@@ -281,7 +287,7 @@ check(
     and "roomedAgent" not in app_src
     and "agentRoom" not in app_src
     and "ZStack(alignment: .topTrailing)" in app_src,
-    "120 FPS lockstep sidebar & Agent slide/resize: direct chrome/agentTrailing binding (zero 240ms snap, zero 1-frame lag), width-matched trailing transition, async WebKit live-resize, deferred UserDefaults commits",
+    "120 FPS lockstep single-reflow sidebar & Agent slide/resize: pinnedSlideWidth (1 reflow), warm AgentColumn + O(1) BackdropShadowView, threshold-only narrowForAgent, direct chrome/agentTrailing binding",
 )
 
 # 18. Onboarding flow invariants (matches Browse.OnboardingFlow).

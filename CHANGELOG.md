@@ -15,6 +15,10 @@ All notable changes to **browse** are documented here, newest first.
 
 ### Fixed
 
+- **Single-reflow 120 FPS `⌘;` Agent & Sidebar slide on heavy pages like X/Twitter (`Stage.swift`, `Tab.swift`, `AgentColumn.swift`, `Browser.swift`, `App.swift`, `lean-proofs/Browse/ScrollFastPath.lean`)**:
+  - Added single-reflow GPU slide lockstep (`StageView.beginSlide(deltaWidth:)` / `pinnedSlideWidth`): pins the inner `WKWebView` ONCE to its exact post-slide width at `t = 0` while `StageView`'s rounded GPU mask glides at 120 FPS — eliminating 30× per-frame DOM/ResizeObserver reflow storms on X/Twitter and heavy feeds while preserving zero post-slide jump.
+  - Replaced `@State var windowWidth` (which triggered 30× full `ContentView` + `SideBar` re-renders during window widening) with a threshold-only `narrowForAgent` boolean suppressed during `animatingWindowForAgent`.
+  - Replaced `AgentColumn`'s offscreen SwiftUI `.shadow(...)` blur with O(1) GPU `BackdropShadowView` (`CALayer.shadowPath` + opaque occlusion) and kept `AgentColumn` warm after first open so repeated `⌘;` toggles glide via a pure GPU offset transform without recreating `NanoTextView` or chat turns — formally verified in `Browse.ScrollFastPath`.
 - **Zero-delay lockstep Agent & Sidebar slide and edge-drag (`App.swift`, `AgentColumn.swift`, `lean-proofs/Browse/ScrollFastPath.lean`)**:
   - Removed the deferred 240ms/260ms `@State` room snap (`room`/`agentRoom`) and bound `stage` and `BookmarksBar` directly to `chrome` and `agentTrailing` so the webpage card and sidebars move together from frame 0 with zero post-slide jump and zero 1-frame drag lag.
   - Moved `AgentColumn`'s `.transition(.move(edge: .trailing))` out of a full-window-width `HStack` into a `.topTrailing` `ZStack` (translating by `prefs.agentWidth` instead of `windowWidth`) and gave docked `AgentColumn` zero redundant leading gap so the 6pt gutter between the page card and `graff` stays rock-solid on every single frame — formally verified in `Browse.ScrollFastPath`.
