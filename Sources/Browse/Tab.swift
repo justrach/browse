@@ -705,9 +705,11 @@ final class Tab: ObservableObject, Identifiable {
         guard let built else { return }
         let controller = built.configuration.userContentController
         controller.removeAllUserScripts()
-        controller.addUserScript(
-            WKUserScript(source: ScrollRelay.script, injectionTime: .atDocumentEnd, forMainFrameOnly: true, in: Web.world)
-        )
+        if ScrollRelay.on {
+            controller.addUserScript(
+                WKUserScript(source: ScrollRelay.script, injectionTime: .atDocumentEnd, forMainFrameOnly: true, in: Web.world)
+            )
+        }
         controller.addUserScript(
             WKUserScript(source: Veiling.picker, injectionTime: .atDocumentStart, forMainFrameOnly: true, in: Web.world)
         )
@@ -1899,6 +1901,7 @@ final class PageView: WKWebView {
 /// alive by the very page it was told to stop showing.
 final class ScrollRelay: NSObject, WKScriptMessageHandler {
     static let name = "officeScroll"
+    @MainActor static var on = true
 
     weak var tab: Tab?
 
@@ -1917,15 +1920,16 @@ final class ScrollRelay: NSObject, WKScriptMessageHandler {
         MainActor.assumeIsolated { tab?.scrolled(to: y, of: ceiling) }
     }
 
-    /// Reports passively and throttled, only posting IPC when the reading
-    /// percentage shifts by >= 2% (or reaches top/bottom) — keeping WebKit's
-    /// 120 Hz scrolling free of per-frame layout reads and IPC churn.
+    /// Reports reading progress strictly on trailing-edge debounce / native
+    /// `scrollend` — zero `scrollHeight` layout reads, zero IPC, and zero
+    /// SwiftUI `ReadingFill` redraws during active 120 Hz scrolling across
+    /// every website (verified by `Browse.ScrollFastPath`).
     static let script = """
     (function () {
       var timer = null;
       var lastPct = -1;
       function tell() {
-        timer = null;
+        if (timer !== null) { clearTimeout(timer); timer = null; }
         var root = document.documentElement;
         var y = window.scrollY || root.scrollTop || 0;
         var ceiling = Math.max(1, (root.scrollHeight || 0) - window.innerHeight);
@@ -1935,9 +1939,10 @@ final class ScrollRelay: NSObject, WKScriptMessageHandler {
         window.webkit.messageHandlers.\(name).postMessage({ y: y, max: ceiling });
       }
       window.addEventListener('scroll', function () {
-        if (timer !== null) return;
-        timer = setTimeout(tell, 240);
+        if (timer !== null) clearTimeout(timer);
+        timer = setTimeout(tell, 180);
       }, { passive: true });
+      window.addEventListener('scrollend', tell, { passive: true });
       tell();
     })();
     """

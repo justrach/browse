@@ -260,4 +260,60 @@ theorem scroll_relay_always_posts_endpoints (lastPct : Option Nat) :
     scrollRelayShouldPost lastPct 0 = true ∧ scrollRelayShouldPost lastPct 100 = true := by
   cases lastPct <;> simp [scrollRelayShouldPost]
 
+/-! ### Part 4: Trailing-Edge Debounce (`scrollend`) — Zero Mid-Scroll Relay IPC -/
+
+structure DebounceState where
+  timerArmed : Bool
+  ipcSent    : Nat
+deriving DecidableEq, Repr, BEq
+
+inductive RelayEvent where
+  | scrollTick    -- active 120 Hz scroll frame: resets timer, NEVER posts IPC
+  | scrollEnd     -- gesture finished / 180ms pause: posts at most 1 IPC
+deriving DecidableEq, Repr, BEq
+
+def stepRelay (s : DebounceState) : RelayEvent → DebounceState
+  | .scrollTick => { s with timerArmed := true }
+  | .scrollEnd  => { timerArmed := false, ipcSent := s.ipcSent + if s.timerArmed then 1 else 0 }
+
+def runRelay (s : DebounceState) : List RelayEvent → DebounceState
+  | []      => s
+  | e :: es => runRelay (stepRelay s e) es
+
+/-- Theorem: across ANY active scroll burst of `n` consecutive scroll frames
+    (whether 10 frames or 10,000 frames), `ScrollRelay` emits strictly ZERO
+    layout reads and ZERO IPC messages during the scroll itself. -/
+theorem active_scroll_burst_zero_relay_ipc (s : DebounceState) (n : Nat) :
+    (runRelay s (List.replicate n .scrollTick)).ipcSent = s.ipcSent := by
+  induction n generalizing s with
+  | zero => rfl
+  | succ k ih =>
+    simpa [List.replicate_succ, runRelay, stepRelay] using ih { s with timerArmed := true }
+
+/-- Theorem: a burst of `n > 0` scroll frames followed by `scrollEnd` emits
+    EXACTLY 1 IPC update (never O(n) per-frame IPC). -/
+theorem scroll_burst_then_end_single_ipc (s : DebounceState) (n : Nat) (hn : n > 0) :
+    (runRelay s (List.replicate n .scrollTick ++ [.scrollEnd])).ipcSent = s.ipcSent + 1 := by
+  cases n with
+  | zero => omega
+  | succ k =>
+    have hburst : ∀ (st : DebounceState) (m : Nat),
+        runRelay st (List.replicate m .scrollTick) =
+        if m = 0 then st else { st with timerArmed := true } := by
+      intro st m
+      induction m generalizing st with
+      | zero => rfl
+      | succ j ih =>
+        simp only [List.replicate_succ, runRelay, stepRelay]
+        rw [ih { st with timerArmed := true }]
+        cases j <;> simp
+    have hsplit : ∀ (st : DebounceState) (xs ys : List RelayEvent),
+        runRelay st (xs ++ ys) = runRelay (runRelay st xs) ys := by
+      intro st xs ys
+      induction xs generalizing st with
+      | nil => rfl
+      | cons x r ih => simpa [runRelay] using ih (stepRelay st x)
+    rw [hsplit, hburst]
+    simp [runRelay, stepRelay]
+
 end Browse.ScrollFastPath

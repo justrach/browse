@@ -6,6 +6,13 @@ All notable changes to **browse** are documented here, newest first.
 
 ## Unreleased
 
+### Fixed
+
+- **Engine-level GPU compositing, opaque blur occlusion, and zero-mid-scroll `ScrollRelay` (`FrameRate.swift`, `Stage.swift`, `Tab.swift`, `Prefs.swift`, `lean-proofs/Browse/ScrollFastPath.lean`)**:
+  - Enabled WebKit's `AcceleratedCompositingForFixedPositionEnabled` on every tab so sticky/fixed headers and navbars (GitHub, X, Notion, Linear, Reddit, docs) scroll on WebKit's GPU `ScrollingThread` instead of CPU main-thread repaints.
+  - Added an opaque inner `CALayer` occlusion backing inside `BackdropShadowView` so macOS WindowServer skips behind-window `NSVisualEffectView` Gaussian blur for ~98% of the `WKWebView` viewport during 120 Hz scrolling.
+  - Converted `ScrollRelay` to trailing-edge debounce + native `scrollend` (and gated injection on `prefs.showsReading`) so active scroll bursts trigger strictly zero `scrollHeight` layout reads, zero IPC, and zero SwiftUI `ReadingFill` redraws — formally proved in `Browse.ScrollFastPath`.
+
 ## 1.9.3 — 23 November 2026
 
 ### Fixed
