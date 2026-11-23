@@ -3,75 +3,201 @@
   (`Swipe.swift`, `AutoScroll.swift`, `StatusLine.swift`, `Forms.swift`,
   `SelectionBar.swift`, `Tab.swift`).
 
-  Models the injected page-script listener registry and `HoveredLink` synthetic
-  mouseover filter, and proves:
-  1. Zero permanent `wheel` listeners exist on any webpage while browsing
-     (keeping WebKit's GPU `ScrollingThread` off the WebContent main thread).
-  2. Zero idle capture `scroll` listeners exist on `window` while no popup or
-     selection pill is visible (dynamic attach/detach only).
-  3. During scrolling with a stationary pointer `(x, y)`, synthetic `mouseover`
-     events emit ZERO IPC messages to Swift (preventing per-frame `LinkBubble`
-     SwiftUI redraws on link-dense sites like GitHub, HN, Reddit, and X).
+  Models the FULL dynamic listener lifecycle state machine across arbitrary
+  browser interaction traces (vertical scroll, horizontal swipe, autoscroll
+  start/stop, selection show/hide, autofill popup show/hide, pagehide) plus
+  `ScrollRelay` hysteresis and `HoveredLink` synthetic-mouseover filtering.
+
+  Proves by induction over arbitrary event traces:
+  1. `listener_lifecycle_invariant`:
+     - `wheelListeners = if autoScrollActive then 1 else 0`
+     - `captureScrollListeners = b2n selectionVisible + b2n formPopupVisible`
+     so whenever the page is idle (`¬autoScrollActive ∧ ¬selectionVisible ∧ ¬formPopupVisible`),
+     ZERO `wheel` and ZERO capture `scroll` listeners exist on `window`.
+  2. `vertical_scroll_zero_swipe_probes`:
+     Pure vertical scrolling NEVER invokes `Swipe.probe` (0 JS evaluations).
+  3. `scroll_stream_stationary_cursor_zero_ipc`:
+     Across ANY stream of links scrolling past a stationary cursor `(x, y)`,
+     `HoveredLink` emits strictly ZERO IPC messages (0 `LinkBubble` redraws).
+  4. `scroll_relay_hysteresis_suppresses_tiny_delta` & endpoints exactness:
+     `ScrollRelay` suppresses `< 2%` interior scroll churn while ALWAYS
+     reporting exact `0%` (top) and `100%` (bottom) endpoints.
 -/
 
 namespace Browse.ScrollFastPath
 
-/-! ### Part 1: Injected User-Script Listener Discipline -/
+def b2n (b : Bool) : Nat := if b then 1 else 0
 
-inductive AttachPolicy where
-  | never            -- no listener at all (e.g. Swipe uses on-demand probe)
-  | dynamicWhileOpen -- attached only while a popup/pill/mode is active, removed on close
-  | permanent        -- antipattern: always attached at document_start/end
+/-! ### Part 1: Dynamic Listener Lifecycle State Machine -/
+
+structure PageListenerState where
+  autoScrollActive       : Bool
+  selectionVisible       : Bool
+  formPopupVisible       : Bool
+  wheelListeners         : Nat   -- active `wheel` listeners on window
+  captureScrollListeners : Nat   -- active capture `scroll` listeners on window
+  swipeProbeCount        : Nat   -- number of on-demand `Swipe.probe` JS calls
 deriving DecidableEq, Repr, BEq
 
-structure ScriptSpec where
-  name                : String
-  wheelPolicy         : AttachPolicy
-  captureScrollPolicy : AttachPolicy
+def initPageState : PageListenerState :=
+  { autoScrollActive       := false
+    selectionVisible       := false
+    formPopupVisible       := false
+    wheelListeners         := 0
+    captureScrollListeners := 0
+    swipeProbeCount        := 0 }
+
+inductive PageEvent where
+  | verticalScroll
+  | horizontalSwipe (canNavigate : Bool)
+  | startAutoScroll
+  | stopAutoScroll
+  | showSelection
+  | hideSelection
+  | showFormPopup
+  | hideFormPopup
+  | pageHide
 deriving DecidableEq, Repr, BEq
 
-def isActiveOnIdleScroll (p : AttachPolicy) : Bool :=
-  match p with
-  | .permanent => true
-  | .dynamicWhileOpen | .never => false
+/-- Exact transition model of `AutoScroll.swift`, `SelectionBar.swift`,
+    `Forms.swift`, and `Swipe.swift` / `Tab.swift`. -/
+def stepPage (s : PageListenerState) : PageEvent → PageListenerState
+  | .verticalScroll =>
+      -- Zero wheel listeners, zero Swipe.probe; if selection pill was shown,
+      -- scroll dismisses it and immediately detaches its capture scroll listener.
+      if s.selectionVisible then
+        { s with
+            selectionVisible := false
+            captureScrollListeners := s.captureScrollListeners - 1 }
+      else
+        s
+  | .horizontalSwipe canNav =>
+      if canNav then
+        { s with swipeProbeCount := s.swipeProbeCount + 1 }
+      else
+        s
+  | .startAutoScroll =>
+      if s.autoScrollActive then s
+      else { s with autoScrollActive := true, wheelListeners := s.wheelListeners + 1 }
+  | .stopAutoScroll =>
+      if s.autoScrollActive then
+        { s with autoScrollActive := false, wheelListeners := s.wheelListeners - 1 }
+      else s
+  | .showSelection =>
+      if s.selectionVisible then s
+      else { s with selectionVisible := true, captureScrollListeners := s.captureScrollListeners + 1 }
+  | .hideSelection =>
+      if s.selectionVisible then
+        { s with selectionVisible := false, captureScrollListeners := s.captureScrollListeners - 1 }
+      else s
+  | .showFormPopup =>
+      if s.formPopupVisible then s
+      else { s with formPopupVisible := true, captureScrollListeners := s.captureScrollListeners + 1 }
+  | .hideFormPopup =>
+      if s.formPopupVisible then
+        { s with formPopupVisible := false, captureScrollListeners := s.captureScrollListeners - 1 }
+      else s
+  | .pageHide =>
+      { s with
+          autoScrollActive := false
+          selectionVisible := false
+          formPopupVisible := false
+          wheelListeners := 0
+          captureScrollListeners := 0 }
 
-/-- The audited registry of Browse's injected webpage scripts. -/
-def browseScripts : List ScriptSpec :=
-  [ { name := "Swipe",        wheelPolicy := .never,            captureScrollPolicy := .never }
-  , { name := "AutoScroll",   wheelPolicy := .dynamicWhileOpen, captureScrollPolicy := .never }
-  , { name := "SelectionBar", wheelPolicy := .never,            captureScrollPolicy := .dynamicWhileOpen }
-  , { name := "Forms",        wheelPolicy := .never,            captureScrollPolicy := .dynamicWhileOpen }
-  , { name := "ScrollRelay",  wheelPolicy := .never,            captureScrollPolicy := .never }
-  , { name := "HoveredLink",  wheelPolicy := .never,            captureScrollPolicy := .never }
-  ]
+def runPageTrace (s : PageListenerState) : List PageEvent → PageListenerState
+  | []      => s
+  | e :: es => runPageTrace (stepPage s e) es
 
-def idleWheelListenerCount (scripts : List ScriptSpec) : Nat :=
-  scripts.foldl (fun acc s => acc + if isActiveOnIdleScroll s.wheelPolicy then 1 else 0) 0
+/-- Exact listener accounting invariant: listeners are attached iff their owning
+    transient UI mode is active (no leaked listeners, no permanent idle listeners). -/
+def ListenerInvariant (s : PageListenerState) : Prop :=
+  s.wheelListeners = b2n s.autoScrollActive ∧
+  s.captureScrollListeners = b2n s.selectionVisible + b2n s.formPopupVisible
 
-def idleCaptureScrollCount (scripts : List ScriptSpec) : Nat :=
-  scripts.foldl (fun acc s => acc + if isActiveOnIdleScroll s.captureScrollPolicy then 1 else 0) 0
+theorem init_satisfies_invariant : ListenerInvariant initPageState := by
+  simp [ListenerInvariant, initPageState, b2n]
 
-/-- Theorem: Browse injects ZERO permanent `wheel` listeners across all page scripts. -/
-theorem zero_idle_wheel_listeners :
-    idleWheelListenerCount browseScripts = 0 := by
-  decide
+theorem stepPage_preserves_invariant (s : PageListenerState) (e : PageEvent)
+    (h : ListenerInvariant s) :
+    ListenerInvariant (stepPage s e) := by
+  rcases h with ⟨hw, hc⟩
+  cases s with
+  | mk a sel frm wl csl sp =>
+    simp only at hw hc
+    cases e with
+    | verticalScroll =>
+      cases sel <;> simp [stepPage, ListenerInvariant, b2n] at hw hc ⊢ <;> omega
+    | horizontalSwipe canNav =>
+      cases canNav <;> simp [stepPage, ListenerInvariant, hw, hc]
+    | startAutoScroll =>
+      cases a <;> simp [stepPage, ListenerInvariant, b2n] at hw hc ⊢ <;> omega
+    | stopAutoScroll =>
+      cases a <;> simp [stepPage, ListenerInvariant, b2n] at hw hc ⊢ <;> omega
+    | showSelection =>
+      cases sel <;> simp [stepPage, ListenerInvariant, b2n] at hw hc ⊢ <;> omega
+    | hideSelection =>
+      cases sel <;> simp [stepPage, ListenerInvariant, b2n] at hw hc ⊢ <;> omega
+    | showFormPopup =>
+      cases frm <;> simp [stepPage, ListenerInvariant, b2n] at hw hc ⊢ <;> omega
+    | hideFormPopup =>
+      cases frm <;> simp [stepPage, ListenerInvariant, b2n] at hw hc ⊢ <;> omega
+    | pageHide =>
+      simp [stepPage, ListenerInvariant, b2n]
 
-/-- Theorem: Browse injects ZERO permanent capture `scroll` listeners while idle. -/
-theorem zero_idle_capture_scroll_listeners :
-    idleCaptureScrollCount browseScripts = 0 := by
-  decide
+/-- Inductive safety theorem: across ANY arbitrary trace of user interactions,
+    listener accounting stays exact with zero leaks. -/
+theorem trace_preserves_invariant_from (s : PageListenerState) (trace : List PageEvent)
+    (h : ListenerInvariant s) :
+    ListenerInvariant (runPageTrace s trace) := by
+  induction trace generalizing s with
+  | nil => exact h
+  | cons e rest ih => exact ih (stepPage s e) (stepPage_preserves_invariant s e h)
+
+theorem trace_preserves_invariant (trace : List PageEvent) :
+    ListenerInvariant (runPageTrace initPageState trace) :=
+  trace_preserves_invariant_from initPageState trace init_satisfies_invariant
+
+/-- Corollary: whenever autoscroll is not active after ANY trace, `wheelListeners = 0`. -/
+theorem idle_zero_wheel_listeners (trace : List PageEvent)
+    (hidle : (runPageTrace initPageState trace).autoScrollActive = false) :
+    (runPageTrace initPageState trace).wheelListeners = 0 := by
+  have h := (trace_preserves_invariant trace).1
+  simpa [hidle, b2n] using h
+
+/-- Corollary: whenever no selection pill or autofill popup is visible after ANY trace,
+    `captureScrollListeners = 0`. -/
+theorem idle_zero_capture_scroll_listeners (trace : List PageEvent)
+    (hsel : (runPageTrace initPageState trace).selectionVisible = false)
+    (hfrm : (runPageTrace initPageState trace).formPopupVisible = false) :
+    (runPageTrace initPageState trace).captureScrollListeners = 0 := by
+  have h := (trace_preserves_invariant trace).2
+  simpa [hsel, hfrm, b2n] using h
+
+/-- Pure vertical scrolling NEVER invokes `Swipe.probe` across ANY number of scroll frames. -/
+theorem vertical_scroll_zero_swipe_probes (s : PageListenerState) (n : Nat) :
+    (runPageTrace s (List.replicate n .verticalScroll)).swipeProbeCount = s.swipeProbeCount := by
+  induction n generalizing s with
+  | zero => rfl
+  | succ k ih =>
+    simp only [List.replicate_succ, runPageTrace]
+    have hstep : (stepPage s .verticalScroll).swipeProbeCount = s.swipeProbeCount := by
+      cases s with
+      | mk a sel frm wl csl sp =>
+        cases sel <;> rfl
+    rw [ih (stepPage s .verticalScroll), hstep]
 
 /-! ### Part 2: Zero Scroll-Induced Synthetic Mouseover IPC (`StatusLine.swift`) -/
 
 structure HoverFilterState where
-  lastX : Int
-  lastY : Int
+  lastX    : Int
+  lastY    : Int
   ipcCount : Nat
 deriving DecidableEq, Repr, BEq
 
 structure MouseoverEvent where
-  clientX : Int
-  clientY : Int
+  clientX  : Int
+  clientY  : Int
   linkHash : Nat
 deriving DecidableEq, Repr, BEq
 
@@ -83,13 +209,8 @@ def handleMouseover (s : HoverFilterState) (ev : MouseoverEvent) : HoverFilterSt
     { lastX := ev.clientX, lastY := ev.clientY, ipcCount := s.ipcCount + 1 }
 
 def runMouseovers (s : HoverFilterState) : List MouseoverEvent → HoverFilterState
-  | []       => s
-  | e :: es  => runMouseovers (handleMouseover s e) es
-
-/-- A single synthetic scroll-induced mouseover at the same `(x, y)` emits 0 IPC. -/
-theorem stationary_mouseover_zero_ipc (s : HoverFilterState) (h : Nat) :
-    (handleMouseover s { clientX := s.lastX, clientY := s.lastY, linkHash := h }).ipcCount = s.ipcCount := by
-  simp [handleMouseover]
+  | []      => s
+  | e :: es => runMouseovers (handleMouseover s e) es
 
 /-- Across ANY number of links scrolling under a stationary cursor `(s.lastX, s.lastY)`,
     `HoveredLink` emits strictly ZERO IPC messages (0 `LinkBubble` redraws). -/
@@ -101,7 +222,7 @@ theorem scroll_stream_stationary_cursor_zero_ipc (s : HoverFilterState) (links :
   | cons h rest ih =>
     simpa [runMouseovers, handleMouseover] using ih
 
-/-- Moving the cursor to a new coordinate DOES immediately emit a link update. -/
+/-- Moving the cursor to a new coordinate immediately emits a link update. -/
 theorem moved_cursor_updates_immediately (s : HoverFilterState) (x y : Int) (h : Nat)
     (hmoved : x ≠ s.lastX ∨ y ≠ s.lastY) :
     (handleMouseover s { clientX := x, clientY := y, linkHash := h }).ipcCount = s.ipcCount + 1 := by
@@ -112,5 +233,31 @@ theorem moved_cursor_updates_immediately (s : HoverFilterState) (x y : Int) (h :
     | inl hnx => exact hnx hx
     | inr hny => exact hny hy
   simp [hnot]
+
+/-! ### Part 3: `ScrollRelay` 2% Hysteresis & Endpoint Exactness (`Tab.swift`) -/
+
+def absDiff (a b : Nat) : Nat := if a ≥ b then a - b else b - a
+
+/-- Returns `true` iff `ScrollRelay.script` posts a reading-progress IPC update. -/
+def scrollRelayShouldPost (lastPct : Option Nat) (pct : Nat) : Bool :=
+  match lastPct with
+  | none      => true
+  | some prev => pct == 0 || pct == 100 || absDiff pct prev ≥ 2
+
+/-- Interior 1% jitter is suppressed (zero unnecessary SwiftUI `ReadingFill` redraws). -/
+theorem scroll_relay_suppresses_1pct_jitter (prev pct : Nat)
+    (hnot0 : pct ≠ 0) (hnot100 : pct ≠ 100) (hsmall : absDiff pct prev < 2) :
+    scrollRelayShouldPost (some prev) pct = false := by
+  unfold scrollRelayShouldPost
+  have h0 : (pct == 0) = false := beq_false_of_ne hnot0
+  have h1 : (pct == 100) = false := beq_false_of_ne hnot100
+  have h2 : decide (absDiff pct prev ≥ 2) = false := decide_eq_false (by omega)
+  simp [h0, h1, h2]
+
+/-- Top (`0%`) and bottom (`100%`) endpoints ALWAYS post so the reading bar
+    never gets stuck at 1% or 99%. -/
+theorem scroll_relay_always_posts_endpoints (lastPct : Option Nat) :
+    scrollRelayShouldPost lastPct 0 = true ∧ scrollRelayShouldPost lastPct 100 = true := by
+  cases lastPct <;> simp [scrollRelayShouldPost]
 
 end Browse.ScrollFastPath

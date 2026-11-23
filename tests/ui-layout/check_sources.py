@@ -244,6 +244,28 @@ check(
     "Escape-key termination: Escape dismisses bookmarksOpen, welcoming, and History search query before closing",
 )
 
+# 17. Agent Tab Group isolation, ⌘+click foreground policy, and 2-hour UpdatePolicy.
+tab_src = read("Sources/Browse/Tab.swift")
+updater_src = read("Sources/Browse/Updater.swift")
+check(
+    "var isAgentTab: Bool { agentGroup != nil && pin == nil }" in tab_src
+    and "func clearAgentTabs()" in browser_src
+    and "!$0.isAgentTab" in browser_src
+    and "tab.agentGroup = nil" in browser_src,
+    "AgentTabGroup: pinned promotion, clearLoose/clearAgentTabs isolation, and child inheritance",
+)
+check(
+    "foreground: !action.modifierFlags.contains(.shift)" in browser_src
+    and "let background = action.modifierFlags.contains(.command) && action.modifierFlags.contains(.shift)" in browser_src,
+    "LinkModifiers: ⌘+click opens foreground tab and ⌘⇧+click opens background tab across normal & target=_blank links",
+)
+check(
+    "static let checkInterval: TimeInterval = 60 * 60 * 2" in updater_src
+    and "found.build > Updater.build" in updater_src
+    and "snoozedBuild != release.build" in updater_src,
+    "UpdatePolicy: 2-hour cadence, strict monotonic build check, and per-build banner snooze",
+)
+
 if failures:
     print(f"\n{len(failures)} source guardrail check(s) failed.", file=sys.stderr)
     sys.exit(1)

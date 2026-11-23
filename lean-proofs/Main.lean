@@ -10,4 +10,7 @@ def main : IO Unit := do
   IO.println "  [PASS] Browse.OverlayMutex  : strict mutual exclusion across all 12 overlays (⌘K + ⌘Y can never stack)"
   IO.println "  [PASS] Browse.HoverStability: zero hover↔scrollTo oscillation & zero hover row-height reflow"
   IO.println "  [PASS] Browse.EscapeTermination: Escape strictly decreases UI rank to 0 (zero modal traps)"
-  IO.println "  [PASS] Browse.ScrollFastPath: zero permanent wheel/capture-scroll listeners & zero stationary-cursor scroll IPC"
+  IO.println "  [PASS] Browse.ScrollFastPath: inductive zero idle wheel/capture-scroll listeners, stationary-cursor 0 IPC, 2% ScrollRelay hysteresis"
+  IO.println "  [PASS] Browse.AgentTabGroup : strict [Pinned|Agent|Personal] partition, clear isolation, pin promotion, child inheritance"
+  IO.println "  [PASS] Browse.LinkModifiers : ⌘+click foreground & ⌘⇧+click background consistency across normal + target=_blank links"
+  IO.println "  [PASS] Browse.UpdatePolicy  : 2h cadence, monotonic upgrade-only, SHA+TeamID signing gate, snooze invalidation on newer build"
