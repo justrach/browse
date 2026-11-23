@@ -853,7 +853,7 @@ struct SettingsPanel: View {
                 Rule()
                 WebKitLine()
                 Rule()
-                Line("Install updates automatically", "Checks daily; when off, installation waits for your choice") {
+                Line("Install updates automatically", "Checks every 2 hours; when off, installation waits for your choice") {
                     Switch(on: $prefs.installsUpdates)
                 }
                 Rule()
@@ -899,8 +899,8 @@ struct SettingsPanel: View {
     private var versionDetail: String {
         switch updater.stage {
         case .none:
-            return updater.lastChecked.map { "Last checked \($0.formatted(.relative(presentation: .named)))" }
-                ?? "Checks for updates daily"
+            return updater.lastChecked.map { "Last checked \($0.formatted(.relative(presentation: .named))) · checks every 2h" }
+                ?? "Checks for updates every 2 hours"
         case .fetching:
             return "Downloading and preparing the update"
         case .ready:
@@ -918,7 +918,7 @@ struct SettingsPanel: View {
         case .none:
             Pill(updater.checking ? "Checking…" : "Check now") {
                 updater.check { found in
-                    if found == nil { browser.announce("Update check complete") }
+                    if found == nil { browser.announce("You're up to date — browse \(Updater.version)") }
                 }
             }
             .disabled(updater.checking)

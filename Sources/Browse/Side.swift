@@ -103,6 +103,7 @@ struct SideBar: View {
 
             VStack {
                 Spacer()
+                UpdateBanner(browser: browser)
                 foot
             }
         }
