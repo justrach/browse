@@ -815,6 +815,14 @@ private struct TabPaletteRow: View {
                             .fill(Palette.accent)
                             .frame(width: 5, height: 5)
                     }
+                    if tab.isAgentTab {
+                        Text("Agent")
+                            .font(.system(size: 9.5, weight: .semibold))
+                            .foregroundStyle(Palette.accent)
+                            .padding(.horizontal, 5)
+                            .padding(.vertical, 1)
+                            .background(Capsule().fill(Palette.accent.opacity(0.14)))
+                    }
                 }
                 HStack(spacing: 5) {
                     if let space {
@@ -1157,6 +1165,14 @@ private struct TabOverviewCard: View {
                         .fill(Palette.accent)
                         .frame(width: 5.5, height: 5.5)
                         .help("Current tab")
+                }
+                if tab.isAgentTab {
+                    Text("Agent")
+                        .font(.system(size: 9.5, weight: .semibold))
+                        .foregroundStyle(Palette.accent)
+                        .padding(.horizontal, 5)
+                        .padding(.vertical, 1)
+                        .background(Capsule().fill(Palette.accent.opacity(0.14)))
                 }
                 Spacer(minLength: 4)
                 if hovering {

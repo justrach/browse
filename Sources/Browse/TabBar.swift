@@ -62,7 +62,13 @@ struct TabBar: View {
                             ScrollViewReader { reader in
                                 ScrollView(.horizontal, showsIndicators: false) {
                                     HStack(spacing: Metrics.tabGap) {
-                                        ForEach(Array(browser.tabs.enumerated()), id: \.element.id) { index, tab in
+                                        let visibleTabs = displayedTabs
+                                        let hasAgent = !browser.agentTabs.isEmpty
+                                        let firstAgentID = browser.agentTabs.first?.id
+                                        ForEach(Array(visibleTabs.enumerated()), id: \.element.id) { index, tab in
+                                            if hasAgent && tab.id == firstAgentID {
+                                                agentGroupChip
+                                            }
                                             // A pinned square moves among pinned squares, a title
                                             // among titles: each has its own stride.
                                             let step = (tab.pin != nil ? Metrics.pinWidth : width(in: geo.size.width)) + Metrics.tabGap
@@ -76,10 +82,20 @@ struct TabBar: View {
                                                 pill: pill,
                                                 close: { browser.close(tab) }
                                             )
+                                            .overlay(alignment: .bottom) {
+                                                if tab.isAgentTab {
+                                                    Capsule()
+                                                        .fill(Palette.accent.opacity(0.55))
+                                                        .frame(height: 2)
+                                                        .padding(.horizontal, 10)
+                                                        .padding(.bottom, 1)
+                                                        .allowsHitTesting(false)
+                                                }
+                                            }
                                             // Pulled down off the strip onto the page, it
                                             // opens there beside what's on it (Split.swift).
                                             .modifier(Carried(
-                                                index: index, count: browser.tabs.count, step: step, vertical: false, space: "strip",
+                                                index: index, count: visibleTabs.count, step: step, vertical: false, space: "strip",
                                                 outside: { point in
                                                     let at = CGPoint(x: point.x + stripOrigin.x, y: point.y + stripOrigin.y)
                                                     let out = at.y > Metrics.strip + 24
@@ -87,10 +103,13 @@ struct TabBar: View {
                                                     return out
                                                 },
                                                 land: { browser.dropOut(tab) }
-                                            ) {
-                                                browser.move(tab, to: $0)
+                                            ) { target in
+                                                moveVisibleTab(tab, to: target, in: visibleTabs)
                                             })
                                             .id(tab.id)
+                                        }
+                                        if hasAgent && browser.agentGroupCollapsed {
+                                            agentGroupChip
                                         }
                                     }
                                     .frame(height: Metrics.strip)
@@ -262,15 +281,73 @@ struct TabBar: View {
         content(in: strip) > room(in: strip) + 0.5
     }
 
+    private var displayedTabs: [Tab] {
+        guard browser.agentGroupCollapsed else { return browser.tabs }
+        return browser.tabs.filter { !$0.isAgentTab }
+    }
+
+    private func moveVisibleTab(_ tab: Tab, to visibleIndex: Int, in visibleTabs: [Tab]) {
+        guard !visibleTabs.isEmpty else { return }
+        let clamped = min(max(0, visibleIndex), visibleTabs.count - 1)
+        let targetID = visibleTabs[clamped].id
+        let realTarget = browser.tabs.firstIndex(where: { $0.id == targetID }) ?? clamped
+        browser.move(tab, to: realTarget)
+    }
+
+    private static let agentChipWidth: CGFloat = 78
+
+    /// Compact collapsible pill for the Agent tab group in Top Tabs mode.
+    private var agentGroupChip: some View {
+        let count = browser.agentTabs.count
+        let collapsed = browser.agentGroupCollapsed
+        return Button {
+            withAnimation(Motion.quick) { browser.agentGroupCollapsed.toggle() }
+        } label: {
+            HStack(spacing: 4) {
+                Image(systemName: "sparkles")
+                    .font(.system(size: 9.5, weight: .semibold))
+                Text("Agent")
+                    .font(.system(size: 11, weight: .semibold))
+                    .lineLimit(1)
+                    .fixedSize()
+                Text("\(count)")
+                    .font(.system(size: 10, weight: .semibold, design: .rounded))
+                    .opacity(0.82)
+            }
+            .foregroundStyle(Palette.accent)
+            .padding(.horizontal, 8)
+            .frame(height: 24)
+            .background(
+                Capsule()
+                    .fill(Palette.accent.opacity(collapsed ? 0.16 : 0.10))
+            )
+            .overlay(
+                Capsule()
+                    .strokeBorder(Palette.accent.opacity(collapsed ? 0.42 : 0.24), lineWidth: 0.75)
+            )
+        }
+        .buttonStyle(.plain)
+        .help(collapsed ? "Expand Agent Tab Group (\(count))" : "Collapse Agent Tab Group (\(count))")
+        .contextMenu {
+            Button(collapsed ? "Expand Agent Group" : "Collapse Agent Group") {
+                withAnimation(Motion.quick) { browser.agentGroupCollapsed.toggle() }
+            }
+            Divider()
+            Button("Close All Agent Tabs") { browser.clearAgentTabs() }
+        }
+    }
+
     /// Everything in the run at the width the tabs get — and the address
     /// field's width for a tab being edited, which grows to take it.
     private func content(in strip: CGFloat) -> CGFloat {
+        let shown = displayedTabs
         let each = width(in: strip)
         let pinned = CGFloat(browser.pinnedCount)
-        let loose = CGFloat(browser.tabs.count) - pinned
-        var total = pinned * Metrics.pinWidth + loose * each
-            + CGFloat(max(0, browser.tabs.count - 1)) * Metrics.tabGap
-        if let id = browser.editingTab, let tab = browser.tabs.first(where: { $0.id == id }) {
+        let loose = CGFloat(shown.count) - pinned
+        let agentChip: CGFloat = browser.agentTabs.isEmpty ? 0 : (TabBar.agentChipWidth + Metrics.tabGap)
+        var total = pinned * Metrics.pinWidth + loose * each + agentChip
+            + CGFloat(max(0, shown.count - 1)) * Metrics.tabGap
+        if let id = browser.editingTab, let tab = shown.first(where: { $0.id == id }) {
             total += min(340, strip - Metrics.lights - 12) - (tab.pin != nil ? Metrics.pinWidth : each)
         }
         return total
@@ -297,7 +374,8 @@ struct TabBar: View {
     /// mark and its air. Past that, the run scrolls. The pinned squares take
     /// their room off the top.
     private func width(in strip: CGFloat) -> CGFloat {
-        width(in: strip, pinned: browser.pinnedCount, count: browser.tabs.count)
+        let extraChip: CGFloat = browser.agentTabs.isEmpty ? 0 : (TabBar.agentChipWidth + Metrics.tabGap)
+        return width(in: strip - extraChip, pinned: browser.pinnedCount, count: displayedTabs.count)
     }
 
     private func width(in strip: CGFloat, pinned pins: Int, count: Int) -> CGFloat {
@@ -909,6 +987,11 @@ struct TabMenu: View {
         if tab.pin == nil {
             Button("Pin") { browser.pin(tab) }
                 .disabled(tab.isBlank)
+            if tab.isAgentTab {
+                Button("Move to My Tabs") { browser.moveOutOfAgentGroup(tab) }
+            } else if !tab.isBlank {
+                Button("Move to Agent Group") { browser.moveToAgentGroup(tab) }
+            }
         } else {
             Button("Change Letter") { browser.editLetter(tab) }
             Button("Unpin") { browser.unpin(tab) }

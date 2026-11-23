@@ -112,7 +112,7 @@ final class AgentTools: ObservableObject {
                 if let existing = browser.tabs.first(where: { $0.address == url }) {
                     browser.select(existing)
                 } else {
-                    _ = browser.open(url, foreground: true, atEnd: true)
+                    _ = browser.open(url, foreground: true, atEnd: true, agentGroup: "Agent")
                 }
                 browser.announce("Passkey available for \(rp) — sign in here")
                 return
@@ -920,6 +920,7 @@ final class AgentTools: ObservableObject {
                     "title": tab.label,
                     "url": tab.address?.absoluteString ?? "",
                     "in front": tab.id == browser.activeID,
+                    "group": tab.isAgentTab ? "agent" : "user",
                 ]
             }
             return AgentTools.said(["your pages": pages.filter { $0.owner == owner }.map(describe), "the user's tabs": theirs])
@@ -928,15 +929,15 @@ final class AgentTools: ObservableObject {
             guard let url = address(arguments["url"], browser) else { return AgentTools.failed("open_tab needs a url") }
             if let refused = await refusedTabs(caller) { return refused }
             let foreground = arguments["foreground"] as? Bool ?? true
-            let tab = browser.open(url, foreground: foreground, atEnd: true)
-            return AgentTools.said(["tab": AgentTools.short(tab), "url": url.absoluteString, "foreground": foreground])
+            let tab = browser.open(url, foreground: foreground, atEnd: true, agentGroup: "Agent")
+            return AgentTools.said(["tab": AgentTools.short(tab), "url": url.absoluteString, "foreground": foreground, "group": "agent"])
 
         case "show":
             let ref = (arguments["page"] as? String ?? "").lowercased()
             if let sheet = pages.first(where: { $0.id == ref && $0.owner == owner }) {
                 guard let url = sheet.web.url else { return AgentTools.failed("\(ref) has no address yet") }
-                let tab = browser.open(url, foreground: true, atEnd: true)
-                return AgentTools.said(["tab": AgentTools.short(tab), "url": url.absoluteString])
+                let tab = browser.open(url, foreground: true, atEnd: true, agentGroup: "Agent")
+                return AgentTools.said(["tab": AgentTools.short(tab), "url": url.absoluteString, "group": "agent"])
             }
             guard let tab = tab(ref, browser) else { return AgentTools.failed("No page or tab “\(ref)” — see `tabs`") }
             if let refused = await refusedTabs(caller) { return refused }
@@ -994,7 +995,7 @@ final class AgentTools: ObservableObject {
         if let existing = browser.tabs.first(where: { $0.address == url }) {
             browser.select(existing)
         } else {
-            _ = browser.open(url, foreground: true, atEnd: true)
+            _ = browser.open(url, foreground: true, atEnd: true, agentGroup: "Agent")
         }
     }
 
@@ -1102,7 +1103,7 @@ final class AgentTools: ObservableObject {
         if let tab = browser.tabs.first(where: { $0.address == page.url }) {
             browser.select(tab)
         } else {
-            browser.open(page.url, foreground: true, atEnd: true)
+            browser.open(page.url, foreground: true, atEnd: true, agentGroup: "Agent")
         }
     }
 
