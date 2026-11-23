@@ -38,121 +38,57 @@ enum Swipe {
         unsafeBitCast(web.method(for: set), to: Setter.self)(web, set, left | right)
     }
 
-    /// Whether a sideways swipe here would scroll something. Said once per
-    /// change of mind, and at most ten times a second, so the page is never
-    /// made to shout.
-    static let watch = """
-    (function () {
-      if (window.__officeSwipe) return;
-      window.__officeSwipe = true;
-
-      var was = null, said = 0;
-      // Track when each horizontally scrollable box last moved sideways, so a
-      // swipe that pushes a box to its edge isn't mistaken for Back (#1219).
-      var moved = new WeakMap(), at = new WeakMap();
-      function mark(el) {
-        if (!el) return;
-        var root = el === document.documentElement, vv = window.visualViewport;
-        var x = root ? (vv ? vv.pageLeft : window.scrollX) : el.scrollLeft;
-        // Fast path for vertical scrolling: never touch scrollWidth/clientWidth
-        // (which forces synchronous layout) unless horizontal offset actually moved.
-        if (!at.has(el)) {
-          if (x === 0) return;
-        } else if (Math.abs(at.get(el) - x) < 1) {
-          return;
-        }
-        var max = root
-          ? document.documentElement.scrollWidth - (vv ? vv.width : window.innerWidth)
-          : el.scrollWidth - el.clientWidth;
-        x = Math.max(0, Math.min(Math.max(0, max), x));
-        if (at.has(el) && Math.abs(at.get(el) - x) < 1) return;
-        at.set(el, x);
-        moved.set(el, Date.now());
-      }
-      window.addEventListener('scroll', function (e) {
-        var t = e.target;
-        mark(t === document || t === document.body ? document.documentElement : t);
-      }, { passive: true, capture: true });
-      if (window.visualViewport) {
-        window.visualViewport.addEventListener('scroll', function () { mark(document.documentElement); }, { passive: true });
-      }
-      var edges = [];
-
-      function rootCanScroll() {
-        var html = getComputedStyle(document.documentElement).overflowX;
-        var body = document.body ? getComputedStyle(document.body).overflowX : 'visible';
-        var effective = html === 'visible' ? body : html;
-        return effective !== 'hidden' && effective !== 'clip';
-      }
-
-      var lastTarget = null, lastDir = 0, lastAt = 0, lastTaken = false;
-
-      function taken(e) {
-        var now = Date.now();
-        var dir = e.deltaX > 0 ? 1 : -1;
-        if (e.target === lastTarget && dir === lastDir && now - lastAt < 60) {
-          return lastTaken;
-        }
-        edges = [];
-        var el = e.target;
-        if (el && el.nodeType !== 1) el = el.parentElement;
-        var hit = false;
-        while (el) {
-          var root = el === document.documentElement || el === document.body;
-          var can, left, max;
-          if (root) {
-            can = rootCanScroll();
-            if (can) {
-              left = window.scrollX || 0;
-              max = document.documentElement.scrollWidth - window.innerWidth;
-            }
-          } else {
-            var ox = getComputedStyle(el).overflowX;
-            can = ox === 'auto' || ox === 'scroll';
-            // Only read scrollWidth/clientWidth when the element can actually
-            // scroll horizontally — avoids forcing synchronous layout on every
-            // non-scrollable React wrapper div.
-            if (can) {
-              left = el.scrollLeft;
-              max = el.scrollWidth - el.clientWidth;
-            }
+    /// On-demand check invoked ONLY when `PageView.scrollWheel` locks onto a
+    /// clearly horizontal gesture (`axis == .across`). Zero permanent `wheel`
+    /// or `scroll` listeners are injected into webpages, keeping WebKit's
+    /// 120 Hz GPU scrolling thread 100% off the WebContent main thread on every
+    /// site (verified by `Browse.ScrollFastPath`).
+    ///
+    /// Returns `true` if a horizontally scrollable ancestor (or embedded canvas/
+    /// iframe) under `(x, y)` can consume scrolling in direction `dx` (`> 0`
+    /// means scrolling right / content moving left; `< 0` means scrolling left).
+    static func probe(x: CGFloat, y: CGFloat, dx: CGFloat) -> String {
+        let px = Int(x.rounded())
+        let py = Int(y.rounded())
+        let dir = dx > 0 ? 1 : -1
+        return """
+        (function () {
+          function rootCanScroll() {
+            var html = getComputedStyle(document.documentElement).overflowX;
+            var body = document.body ? getComputedStyle(document.body).overflowX : 'visible';
+            var effective = html === 'visible' ? body : html;
+            return effective !== 'hidden' && effective !== 'clip';
           }
-          if (can && max > 1) {
-            if (e.deltaX > 0 ? left < max - 1 : left > 1) { hit = true; break; }
-            edges.push(root ? document.documentElement : el);
+          var el = document.elementFromPoint(\(px), \(py));
+          if (el && el.nodeType !== 1) el = el.parentElement;
+          while (el) {
+            var tag = el.tagName ? el.tagName.toLowerCase() : '';
+            if (tag === 'canvas' || tag === 'iframe') return true;
+            var root = el === document.documentElement || el === document.body;
+            var can = false, left = 0, max = 0;
+            if (root) {
+              can = rootCanScroll();
+              if (can) {
+                left = window.scrollX || 0;
+                max = document.documentElement.scrollWidth - window.innerWidth;
+              }
+            } else {
+              var ox = getComputedStyle(el).overflowX;
+              can = ox === 'auto' || ox === 'scroll';
+              if (can) {
+                left = el.scrollLeft;
+                max = el.scrollWidth - el.clientWidth;
+              }
+            }
+            if (can && max > 1) {
+              if (\(dir) > 0 ? left < max - 1 : left > 1) return true;
+            }
+            el = el.parentElement;
           }
-          el = el.parentElement;
-        }
-        lastTarget = e.target;
-        lastDir = dir;
-        lastAt = now;
-        lastTaken = hit;
-        return hit;
-      }
-
-      function resting(list) {
-        var now = Date.now();
-        return list.every(function (el) { return now - (moved.get(el) || 0) > 400; });
-      }
-
-      function say(t) {
-        var now = Date.now();
-        if (t === was && now - said < 100) return;
-        was = t; said = now;
-        window.webkit.messageHandlers.officeScroll.postMessage({ side: t ? 'taken' : 'free' });
-      }
-
-      window.addEventListener('wheel', function (e) {
-        if (Math.abs(e.deltaX) < 3 || Math.abs(e.deltaX) <= Math.abs(e.deltaY)) return;
-        if (taken(e) || !resting(edges)) return say(true);
-        // A whiteboard or a map pans with its own wheel handler and nothing
-        // under it has overflow to scroll. Its preventDefault is its claim,
-        // as Safari and Chrome read it; it can only be seen once every
-        // handler has run, and this one runs first.
-        setTimeout(function () { say(e.defaultPrevented); }, 0);
-      }, { passive: true, capture: true });
-    })();
-    """
+          return false;
+        })()
+        """
+    }
 }
 
 /// Where a sideways swipe has got to, for the disc that shows it.
