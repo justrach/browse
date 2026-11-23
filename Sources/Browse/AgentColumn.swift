@@ -522,23 +522,30 @@ struct AgentColumn: View {
                 .onChanged { value in
                     if grabbed == nil {
                         grabbed = prefs.agentWidth
+                        prefs.isDraggingAgentWidth = true
                         if let pair = browser.shownSplit {
-                            pair.left.built?.splitLiveResizing = true
-                            pair.right.built?.splitLiveResizing = true
+                            pair.left.built?.beginLiveResize()
+                            pair.right.built?.beginLiveResize()
                         } else {
-                            browser.active?.built?.splitLiveResizing = true
+                            browser.active?.built?.beginLiveResize()
                         }
                     }
                     let wanted = (grabbed ?? prefs.agentWidth) - value.translation.width
-                    prefs.agentWidth = min(Metrics.agentMax, max(Metrics.agentMin, wanted))
+                    let clamped = min(Metrics.agentMax, max(Metrics.agentMin, wanted))
+                    var still = Transaction()
+                    still.disablesAnimations = true
+                    withTransaction(still) {
+                        prefs.agentWidth = clamped
+                    }
                 }
                 .onEnded { _ in
                     grabbed = nil
+                    prefs.commitAgentWidth()
                     if let pair = browser.shownSplit {
-                        pair.left.built?.splitLiveResizing = false
-                        pair.right.built?.splitLiveResizing = false
+                        pair.left.built?.endLiveResize()
+                        pair.right.built?.endLiveResize()
                     } else {
-                        browser.active?.built?.splitLiveResizing = false
+                        browser.active?.built?.endLiveResize()
                     }
                 }
         )

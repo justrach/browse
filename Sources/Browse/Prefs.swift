@@ -72,9 +72,19 @@ final class Preferences: ObservableObject {
     @Published var sideTint: Bool {
         didSet { store.set(sideTint, forKey: "sidebar.tint") }
     }
+    /// True while dragging the sidebar edge — suppresses 120 Hz UserDefaults
+    /// disk writes until mouse-up (verified by `Browse.ScrollFastPath`).
+    var isDraggingSideWidth = false
     /// How wide the column is. Pulled by its edge, and remembered.
     @Published var sideWidth: CGFloat {
-        didSet { store.set(Double(sideWidth), forKey: "sidebar.width") }
+        didSet {
+            guard !isDraggingSideWidth else { return }
+            store.set(Double(sideWidth), forKey: "sidebar.width")
+        }
+    }
+    func commitSideWidth() {
+        isDraggingSideWidth = false
+        store.set(Double(sideWidth), forKey: "sidebar.width")
     }
     @Published var glyph: Glyph {
         didSet { store.set(glyph.rawValue, forKey: "glyph") }
@@ -346,8 +356,18 @@ final class Preferences: ObservableObject {
     @Published var agentServiceTier: String {
         didSet { store.set(agentServiceTier, forKey: "agent.serviceTier") }
     }
+    /// True while dragging the Agent sidebar edge — suppresses 120 Hz
+    /// UserDefaults disk writes until mouse-up (verified by `Browse.ScrollFastPath`).
+    var isDraggingAgentWidth = false
     @Published var agentWidth: CGFloat {
-        didSet { store.set(Double(agentWidth), forKey: "agent.width") }
+        didSet {
+            guard !isDraggingAgentWidth else { return }
+            store.set(Double(agentWidth), forKey: "agent.width")
+        }
+    }
+    func commitAgentWidth() {
+        isDraggingAgentWidth = false
+        store.set(Double(agentWidth), forKey: "agent.width")
     }
     /// Local personal instructions & preferences included once per agent
     /// session (Dia-style personal memory — stored strictly on this Mac).

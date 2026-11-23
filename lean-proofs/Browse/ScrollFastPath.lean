@@ -316,4 +316,47 @@ theorem scroll_burst_then_end_single_ipc (s : DebounceState) (n : Nat) (hn : n >
     rw [hsplit, hburst]
     simp [runRelay, stepRelay]
 
+/-! ### Part 5: 120 Hz Sidebar / Agent Live-Resize Discipline (`AgentColumn.swift`, `Side.swift`, `Prefs.swift`) -/
+
+structure ResizeDragState where
+  dragging        : Bool
+  liveResizeActive : Bool
+  diskWrites      : Nat
+deriving DecidableEq, Repr, BEq
+
+inductive DragEvent where
+  | beginDrag
+  | dragMove
+  | endDrag
+deriving DecidableEq, Repr, BEq
+
+def stepDrag (s : ResizeDragState) : DragEvent → ResizeDragState
+  | .beginDrag => { s with dragging := true, liveResizeActive := true }
+  | .dragMove  => s   -- updates width in memory only: 0 UserDefaults disk writes
+  | .endDrag   =>
+      if s.dragging then
+        { dragging := false, liveResizeActive := false, diskWrites := s.diskWrites + 1 }
+      else s
+
+def runDrag (s : ResizeDragState) : List DragEvent → ResizeDragState
+  | []      => s
+  | e :: es => runDrag (stepDrag s e) es
+
+/-- Across ANY live-resize drag of `n` frames, zero UserDefaults disk writes
+    occur mid-drag, exactly 1 commit write occurs on mouse-up, and WebKit's
+    `viewWillStartLiveResize`/`viewDidEndLiveResize` pair exits balanced. -/
+theorem live_resize_drag_balanced_single_write (n : Nat) :
+    let init : ResizeDragState := { dragging := false, liveResizeActive := false, diskWrites := 0 }
+    let mid  := runDrag init (.beginDrag :: List.replicate n .dragMove)
+    let done := stepDrag mid .endDrag
+    mid.liveResizeActive = true ∧ mid.diskWrites = 0 ∧
+    done.liveResizeActive = false ∧ done.diskWrites = 1 := by
+  have hmoves : ∀ (st : ResizeDragState) (m : Nat),
+      runDrag st (List.replicate m .dragMove) = st := by
+    intro st m
+    induction m with
+    | zero => rfl
+    | succ k ih => simpa [List.replicate_succ, runDrag, stepDrag] using ih
+  simp [runDrag, stepDrag, hmoves]
+
 end Browse.ScrollFastPath

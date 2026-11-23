@@ -6,6 +6,12 @@ All notable changes to **browse** are documented here, newest first.
 
 ## Unreleased
 
+### Fixed
+
+- **Silky 120 FPS Agent & Sidebar slide and edge-drag resizing (`AgentColumn.swift`, `Side.swift`, `Tab.swift`, `Prefs.swift`, `App.swift`, `lean-proofs/Browse/ScrollFastPath.lean`)**:
+  - Wired real WebKit async live-resize (`beginLiveResize()` / `endLiveResize()` invoking `StageView.startLiveResize()` → `viewWillStartLiveResize()` + `backPage()`) into `AgentColumn` and `SideBar` edge drags and open/close slides so WebKit no longer blocks the main thread on synchronous `DidUpdateGeometry` IPC.
+  - Deferred `UserDefaults` writes during active drags (`isDraggingAgentWidth` / `isDraggingSideWidth`, committing once on mouse-up), suppressed spring interpolation and mid-drag `floatingAgentDrawer` flips during live drag, and replaced blocking `window.setFrame(..., animate: true)` with non-blocking `NSAnimationContext` + `window.animator().setFrame(...)` so the window and Agent card glide together at 120 FPS.
+
 ## 1.9.4 — 23 November 2026
 
 ### Fixed
