@@ -764,6 +764,14 @@ final class Tab: ObservableObject, Identifiable {
         controller.addUserScript(
             WKUserScript(source: MiddleRelay.watch, injectionTime: .atDocumentStart, forMainFrameOnly: true, in: Web.world)
         )
+        if WindowFullScreen.on {
+            controller.addUserScript(
+                WKUserScript(source: WindowFullScreen.page, injectionTime: .atDocumentStart, forMainFrameOnly: false, in: .page)
+            )
+            controller.addUserScript(
+                WKUserScript(source: WindowFullScreen.bridge, injectionTime: .atDocumentStart, forMainFrameOnly: true, in: Web.world)
+            )
+        }
         controller.addUserScript(
             WKUserScript(source: SelectionRelay.script, injectionTime: .atDocumentEnd, forMainFrameOnly: true, in: Web.world)
         )

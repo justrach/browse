@@ -1535,6 +1535,15 @@ final class Browser: NSObject, ObservableObject {
         var id: String { host + wants }
     }
 
+    struct SavedPermission: Identifiable, Equatable {
+        let key: String
+        let origin: String
+        let kind: String
+        let allowed: Bool
+        var id: String { key }
+    }
+
+    @Published private(set) var permissionsRevision = 0
     @Published private(set) var asking: CaptureAsk?
     private var decide: ((WKPermissionDecision) -> Void)?
     private var askedAbout = ""
@@ -1545,7 +1554,10 @@ final class Browser: NSObject, ObservableObject {
     private func answerCapture(_ decision: WKPermissionDecision) {
         guard let decide else { return }
         // Remembered per site, so a call you take every week asks once.
-        if !askedAbout.isEmpty { Store.settings.set(decision == .grant, forKey: "capture." + askedAbout) }
+        if !askedAbout.isEmpty {
+            Store.settings.set(decision == .grant, forKey: "capture." + askedAbout)
+            permissionsRevision += 1
+        }
         decide(decision)
         self.decide = nil
         askedAbout = ""
@@ -1559,7 +1571,36 @@ final class Browser: NSObject, ObservableObject {
         where key.hasPrefix("capture.") {
             Store.settings.removeObject(forKey: key)
         }
+        permissionsRevision += 1
         announce("Camera and microphone choices forgotten")
+    }
+
+    func savedCaptureChoices() -> [SavedPermission] {
+        var out: [SavedPermission] = []
+        for (key, value) in Store.settings.dictionaryRepresentation() where key.hasPrefix("capture.") {
+            guard let allowed = value as? Bool else { continue }
+            let rest = String(key.dropFirst("capture.".count))
+            guard let split = rest.lastIndex(of: "|") else { continue }
+            let origin = String(rest[..<split])
+            guard !origin.isEmpty else { continue }
+            let suffix = String(rest[rest.index(after: split)...])
+            let kind: String = switch suffix {
+            case "0": "Camera"
+            case "1": "Microphone"
+            case "2": "Camera & Microphone"
+            case "location": "Location"
+            case "notifications": "Notifications"
+            default: "Permission"
+            }
+            out.append(SavedPermission(key: key, origin: origin, kind: kind, allowed: allowed))
+        }
+        return out.sorted { ($0.origin, $0.kind) < ($1.origin, $1.kind) }
+    }
+
+    func resetCaptureChoice(key: String) {
+        Store.settings.removeObject(forKey: key)
+        permissionsRevision += 1
+        announce("Permission reset — site will ask next time")
     }
 
     // MARK: - pinning
@@ -1637,6 +1678,7 @@ final class Browser: NSObject, ObservableObject {
     /// Set while that field is being used to name the tab rather than to go
     /// somewhere: the same field, the same keys, a different thing at the end.
     @Published private(set) var renamingTab = false
+    private var tabOriginal = ""
 
     func beginTabEdit(_ tab: Tab) {
         guard let url = tab.address else {
@@ -1653,6 +1695,7 @@ final class Browser: NSObject, ObservableObject {
     func beginTabRename(_ tab: Tab) {
         renamingTab = true
         tabDraft = tab.label
+        tabOriginal = tab.label
         editingTab = tab.id
     }
 
@@ -1660,6 +1703,10 @@ final class Browser: NSObject, ObservableObject {
         guard let id = editingTab, let tab = tabs.first(where: { $0.id == id }) else { return }
         if renamingTab {
             let typed = tabDraft.trimmingCharacters(in: .whitespacesAndNewlines)
+            if tab.name == nil, typed == tabOriginal.trimmingCharacters(in: .whitespacesAndNewlines) {
+                cancelTabEdit()
+                return
+            }
             tab.name = typed.isEmpty ? nil : typed
             cancelTabEdit()
             writeSession(now: true)
@@ -1866,8 +1913,14 @@ final class Browser: NSObject, ObservableObject {
             // meant to dismiss it.
             let came = self.floating
             self.land()
-            if let came, let tab = self.tabs.first(where: { $0.id == came }) {
-                self.select(tab)
+            if let came {
+                if !self.tabs.contains(where: { $0.id == came }),
+                   let space = self.parked.first(where: { $0.value.tabs.contains { $0.id == came } })?.key {
+                    self.switchSpace(to: space)
+                }
+                if let tab = self.tabs.first(where: { $0.id == came }) {
+                    self.select(tab)
+                }
             }
             NSApp.activate(ignoringOtherApps: true)
             NSApp.windows.first { $0.contentView != nil }?.makeKeyAndOrderFront(nil)
@@ -2063,6 +2116,21 @@ final class Browser: NSObject, ObservableObject {
                 guard let self else { return }
                 if on { Bench.shared.start(for: self) } else { Bench.shared.stop() }
                 announce(on ? "Scripts can drive Search — see ./bench" : "The bench is closed")
+            }
+            .store(in: &bag)
+
+        prefs.$fullScreenInWindow
+            .dropFirst()
+            .removeDuplicates()
+            .sink { [weak self] on in
+                DispatchQueue.main.async { [weak self] in
+                    guard let self else { return }
+                    let all = self.tabs + self.parkedTabs
+                    for tab in all {
+                        tab.arm(hiding: self.curtain.css(on: self.curtain.host(of: tab.address)))
+                    }
+                    WindowFullScreen.shared.setting(on, for: all)
+                }
             }
             .store(in: &bag)
 
@@ -4441,6 +4509,20 @@ extension Browser: WKNavigationDelegate, WKUIDelegate {
     /// still goes into History with its icon.
     func anyTab(for webView: WKWebView) -> Tab? {
         tab(for: webView) ?? parkedTabs.first { $0.built === webView }
+    }
+
+    @objc(_webViewFullscreenMayReturnToInline:)
+    func webViewFullscreenMayReturnToInline(_ webView: WKWebView) {
+        guard let tab = anyTab(for: webView) else { return }
+        if !tabs.contains(where: { $0 === tab }),
+           let space = parked.first(where: { $0.value.tabs.contains { $0 === tab } })?.key {
+            switchSpace(to: space)
+        }
+        guard tabs.contains(where: { $0 === tab }) else { return }
+        select(tab)
+        guard !Store.testing else { return }
+        NSApp.activate(ignoringOtherApps: true)
+        NSApp.windows.first { $0.contentView != nil }?.makeKeyAndOrderFront(nil)
     }
 }
 

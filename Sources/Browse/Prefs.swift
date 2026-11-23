@@ -279,10 +279,21 @@ final class Preferences: ObservableObject {
             if installsUpdates { Updater.shared.install() }
         }
     }
+    /// Video full screen fills this browser window instead of creating a new macOS Space.
+    @Published var fullScreenInWindow: Bool {
+        didSet {
+            store.set(fullScreenInWindow, forKey: "fullscreen.inWindow")
+            WindowFullScreen.on = fullScreenInWindow
+        }
+    }
     /// Separate sets of tabs, each with its own sign-ins (see Spaces.swift).
     /// Off unless asked for.
     @Published var usesSpaces: Bool {
         didSet { store.set(usesSpaces, forKey: "spaces") }
+    }
+    /// Spaces that share sign-ins carry the same live pinned tabs across switches.
+    @Published var sharedPins: Bool {
+        didSet { store.set(sharedPins, forKey: "spaces.sharedPins") }
     }
     /// Codegraff, over the Agent Client Protocol (see Agent.swift): the Ask
     /// tab at the head of the row, and the conversation ⌘; opens.
@@ -502,7 +513,11 @@ final class Preferences: ObservableObject {
         // Anyone who already has a session was here before the welcome
         // existed; they are not asked to sit through it.
         welcomed = store.bool(forKey: "welcomed") || store.object(forKey: "glyph") != nil
+        let inWinFS = store.bool(forKey: "fullscreen.inWindow")
+        fullScreenInWindow = inWinFS
+        WindowFullScreen.on = inWinFS
         usesSpaces = store.bool(forKey: "spaces")
+        sharedPins = store.bool(forKey: "spaces.sharedPins")
         // On until turned off: all it costs unasked is the Ask tab, and graff
         // only starts once something is asked of it.
         usesAgent = store.object(forKey: "agent") as? Bool ?? true

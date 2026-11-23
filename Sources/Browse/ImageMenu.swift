@@ -1,4 +1,5 @@
 import AppKit
+import Photos
 import WebKit
 
 // Right-click on an image, own menu.
@@ -99,6 +100,9 @@ extension Browser {
         menu.addItem(ImageMenuItem("Download Image") { [weak self] in
             self?.downloadImage(at: url, from: webView)
         })
+        menu.addItem(ImageMenuItem("Add Image to Photos") { [weak self] in
+            self?.addImageToPhotos(at: url, in: tab)
+        })
         menu.addItem(.separator())
         menu.addItem(ImageMenuItem("Copy Image Address") {
             NSPasteboard.general.clearContents()
@@ -138,6 +142,58 @@ extension Browser {
     func downloadImage(at url: URL, from webView: WKWebView) {
         webView.startDownload(using: URLRequest(url: url)) { [weak self] download in
             self?.keep(download)
+        }
+    }
+
+    private func imageData(at url: URL, in tab: Tab) async -> Data? {
+        if url.scheme?.lowercased() == "blob", let web = tab.built {
+            let escaped = url.absoluteString
+                .replacingOccurrences(of: "\\", with: "\\\\")
+                .replacingOccurrences(of: "'", with: "\\'")
+            let script = """
+            return await new Promise(function (resolve) {
+              fetch('\(escaped)').then(function (r) { return r.blob(); }).then(function (blob) {
+                var reader = new FileReader();
+                reader.onloadend = function () { resolve(typeof reader.result === 'string' ? reader.result : null); };
+                reader.onerror = function () { resolve(null); };
+                reader.readAsDataURL(blob);
+              }).catch(function () { resolve(null); });
+            });
+            """
+            let raw = (try? await web.callAsyncJavaScript(script, arguments: [:], in: nil, contentWorld: .page)) as? String
+            if let raw, let comma = raw.firstIndex(of: ",") {
+                return Data(base64Encoded: String(raw[raw.index(after: comma)...]))
+            }
+            return nil
+        }
+        guard let (data, _) = try? await Browser.fetcher.data(from: url) else { return nil }
+        return data
+    }
+
+    /// Saves the original fetched image bytes directly to the macOS Photos library
+    /// using add-only authorization so browse never reads existing photos.
+    func addImageToPhotos(at url: URL, in tab: Tab) {
+        Task {
+            guard let data = await imageData(at: url, in: tab),
+                  !data.isEmpty, data.count < 50_000_000,
+                  NSImage(data: data) != nil
+            else {
+                announce("Couldn't add that image to Photos")
+                return
+            }
+            let status = await PHPhotoLibrary.requestAuthorization(for: .addOnly)
+            guard status == .authorized || status == .limited else {
+                announce("browse can't add to Photos: allow it in System Settings › Privacy & Security › Photos")
+                return
+            }
+            do {
+                try await PHPhotoLibrary.shared().performChanges {
+                    PHAssetCreationRequest.forAsset().addResource(with: .photo, data: data, options: nil)
+                }
+                announce("Added to Photos")
+            } catch {
+                announce("Couldn't add that image to Photos")
+            }
         }
     }
 }

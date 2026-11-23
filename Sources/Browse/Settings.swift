@@ -303,6 +303,7 @@ struct SettingsPanel: View {
         SearchEntry(.general, "Flick the floating video to a corner", "Two-finger flick gesture for picture-in-picture video", keywords: "pip picture in picture gesture"),
         SearchEntry(.general, "Float the video when you switch tabs", "Automatic picture-in-picture when leaving a tab", keywords: "pip youtube video float"),
         SearchEntry(.general, "Float the video when you switch apps", "Automatic picture-in-picture when switching applications", keywords: "pip youtube video float background"),
+        SearchEntry(.general, "Full-screen video fills this window", "Use this window instead of a new macOS Space", keywords: "video fullscreen window space youtube"),
         SearchEntry(.general, "Let a script drive browse", "Local bench automation socket", keywords: "bench automation cli testing socket"),
 
         // Themes
@@ -320,6 +321,7 @@ struct SettingsPanel: View {
         SearchEntry(.tabs, "Sleep tabs you aren't using", "Suspend background tabs to save RAM and battery", keywords: "memory saver suspend hibernate ram"),
         SearchEntry(.tabs, "Memory profile", "Relaxed, Balanced, or Low RAM tab sleeping schedule", keywords: "ram memory relaxed low balanced sleep now"),
         SearchEntry(.tabs, "Spaces", "Separate sets of tabs and profiles switched with ⌃1–⌃9", keywords: "workspaces profiles containers arc"),
+        SearchEntry(.tabs, "Use the same pinned tabs across spaces", "Share live pinned tabs between spaces that share sign-ins", keywords: "shared pins spaces arc workspaces"),
 
         // Extensions
         SearchEntry(.extensions, "Chrome extensions", "Install and manage Chrome Web Store or unpacked extensions", keywords: "addons plugins chrome web store"),
@@ -349,7 +351,7 @@ struct SettingsPanel: View {
         // Privacy
         SearchEntry(.privacy, "Block ads and trackers", "Built-in content blocker shield", keywords: "adblock shield trackers ublock content blocker"),
         SearchEntry(.privacy, "Prevent cross-site tracking", "Safari-style tracking prevention and third-party cookie blocking", keywords: "cookies tracking itp privacy"),
-        SearchEntry(.privacy, "Camera and microphone", "Reset per-site camera and mic permissions", keywords: "webcam audio permissions media"),
+        SearchEntry(.privacy, "Camera and microphone", "View and reset per-site camera and mic permissions", keywords: "webcam audio permissions media reset site"),
         SearchEntry(.privacy, "Clear history", "Remove visited pages and browsing history", keywords: "delete history clear data"),
         SearchEntry(.privacy, "Cookies and sign-ins", "Sign out of every site and clear site storage", keywords: "logout cookies localstorage clear"),
         SearchEntry(.privacy, "Clear cache", "Remove cached page assets", keywords: "cache storage clear"),
@@ -620,6 +622,10 @@ struct SettingsPanel: View {
                 Switch(on: $prefs.floatsAway)
             }
             Rule()
+            Line("Full-screen video fills this window", "Video full screen uses this window instead of creating a new macOS Space") {
+                Switch(on: $prefs.fullScreenInWindow)
+            }
+            Rule()
             Line("Let a script drive browse", "A local socket for testing. Its tabs open beside yours with a flask on them and never take over — see ./bench") {
                 Switch(on: $prefs.bench)
             }
@@ -717,6 +723,13 @@ struct SettingsPanel: View {
             Rule()
             Line("Spaces", "Separate sets of tabs, signed in where the others are or starting afresh, switched with ⌃1–⌃9, two fingers sideways over the column, or the space's icon. Mission Control's own ⌃1–⌃9, if you turned them on, take those keys first.") {
                 Switch(on: $prefs.usesSpaces)
+            }
+            if prefs.usesSpaces {
+                Rule(inset: 28)
+                Line("Use the same pinned tabs across spaces", "Spaces that share sign-ins keep the same live pinned tabs as you switch between them") {
+                    Switch(on: $prefs.sharedPins)
+                }
+                .padding(.leading, 14)
             }
         }
     }
@@ -828,6 +841,7 @@ struct SettingsPanel: View {
                 Line("Camera and microphone", "What each site was allowed or refused") {
                     Pill("Forget choices") { browser.forgetCaptureChoices() }
                 }
+                PermissionSites(browser: browser)
             }
             StatsCard(browser: browser, prefs: prefs)
             Card {
@@ -1122,5 +1136,86 @@ struct Pill: View {
         .buttonStyle(.plain)
         .onHover { hovering = $0 }
         .animation(Motion.quick, value: hovering)
+    }
+}
+
+private struct PermissionSites: View {
+    @ObservedObject var browser: Browser
+    @State private var query = ""
+
+    var body: some View {
+        let _ = browser.permissionsRevision
+        let saved = browser.savedCaptureChoices()
+        let needle = query.trimmingCharacters(in: .whitespacesAndNewlines)
+        let filtered = needle.isEmpty ? saved : saved.filter {
+            $0.origin.localizedCaseInsensitiveContains(needle) || $0.kind.localizedCaseInsensitiveContains(needle)
+        }
+        if !saved.isEmpty {
+            Rule(inset: 28)
+            VStack(alignment: .leading, spacing: 8) {
+                Text("Resetting asks again next time. Devices already in use stay active.")
+                    .font(.system(size: 11.5))
+                    .foregroundStyle(Palette.muted)
+                    .fixedSize(horizontal: false, vertical: true)
+                if saved.count > 4 {
+                    HStack(spacing: 6) {
+                        Image(systemName: "magnifyingglass")
+                            .font(.system(size: 10.5))
+                            .foregroundStyle(Palette.muted)
+                        TextField("Filter sites", text: $query)
+                            .textFieldStyle(.plain)
+                            .font(.system(size: 12))
+                            .foregroundStyle(Palette.ink)
+                        if !query.isEmpty {
+                            Button { query = "" } label: {
+                                Image(systemName: "xmark.circle.fill")
+                                    .font(.system(size: 10.5))
+                                    .foregroundStyle(Palette.faint)
+                            }
+                            .buttonStyle(.plain)
+                        }
+                    }
+                    .padding(.horizontal, 10)
+                    .padding(.vertical, 6)
+                    .background(Palette.wash, in: RoundedRectangle(cornerRadius: 8, style: .continuous))
+                }
+                if filtered.isEmpty {
+                    Text("Nothing matches “\(needle)”")
+                        .font(.system(size: 12))
+                        .foregroundStyle(Palette.muted)
+                        .padding(.vertical, 4)
+                } else {
+                    ForEach(filtered) { item in
+                        HStack(spacing: 10) {
+                            VStack(alignment: .leading, spacing: 1.5) {
+                                Text(item.origin)
+                                    .font(.system(size: 12.5))
+                                    .foregroundStyle(Palette.ink)
+                                    .lineLimit(1)
+                                    .truncationMode(.middle)
+                                HStack(spacing: 5) {
+                                    Text(item.kind)
+                                        .font(.system(size: 11))
+                                        .foregroundStyle(Palette.muted)
+                                    Text("·")
+                                        .foregroundStyle(Palette.faint)
+                                    Text(item.allowed ? "Allowed" : "Refused")
+                                        .font(.system(size: 11, weight: .medium))
+                                        .foregroundStyle(item.allowed ? Palette.safe : Palette.unsafe)
+                                }
+                            }
+                            Spacer(minLength: 8)
+                            Quick("Reset", tint: Palette.muted) {
+                                browser.resetCaptureChoice(key: item.key)
+                            }
+                        }
+                        .padding(.vertical, 3)
+                    }
+                }
+            }
+            .padding(.leading, 28)
+            .padding(.trailing, 14)
+            .padding(.vertical, 10)
+        }
     }
 }

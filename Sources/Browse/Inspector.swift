@@ -34,6 +34,17 @@ extension Browser {
         send(inspector, "toggleElementSelection")
     }
 
+    /// Dock the native Web Inspector into the browser tab or detach it into a separate window.
+    func toggleInspectorDock() {
+        guard let inspector = inspector() else { return }
+        if !asks(inspector, "isVisible") { send(inspector, "show") }
+        if asks(inspector, "isAttached") {
+            send(inspector, "detach")
+        } else {
+            send(inspector, "attach")
+        }
+    }
+
     /// The inspector of the tab in front — none for a blank tab, which has
     /// no page to look at.
     private func inspector() -> NSObject? {

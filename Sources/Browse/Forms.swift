@@ -48,7 +48,10 @@ final class FormRelay: NSObject, WKScriptMessageHandler {
                     tab?.fieldFocused(nil)
                 }
             case "fullscreen":
+                if WindowFullScreen.shared.fills(tab?.built) { break }
                 tab?.immersed = body["on"] as? Bool ?? false
+            case "fillsWindow":
+                if let tab { WindowFullScreen.shared.page(tab, fills: body["on"] as? Bool ?? false) }
             default:
                 break
             }

@@ -135,24 +135,31 @@ final class Favicons {
         guard !busy.contains(host), !missing.contains(host) else { return }
         busy.insert(host)
 
-        tab.web.evaluateJavaScript(Favicons.probe) { [weak self, weak tab] answer, _ in
+        let shy = tab.shy
+        tab.web.evaluateJavaScript(Favicons.probe) { [weak self] answer, error in
             MainActor.assumeIsolated {
                 guard let self else { return }
-                let declared = (answer as? [[String: String]]) ?? []
+                let result = answer as? [String: Any]
+                let documentURL = (result?["url"] as? String).flatMap { URL(string: $0) }
+                // Navigation can replace the document before WebKit runs the probe.
+                guard error != nil || documentURL == url else {
+                    self.busy.remove(host)
+                    return
+                }
+                let declared = (result?["icons"] as? [[String: String]]) ?? []
                 let offersDark = declared.contains { Favicons.media($0["media"]) == .dark }
                 let wantDark = dark && offersDark
                 let key = Favicons.key(host, dark: wantDark)
                 // No dark variant here after all, and the ordinary one is
                 // fresh: it is the one to wear.
                 if !wantDark, Favicons.fresh(key), let known = self.known(key) {
-                    if tab?.address?.host()?.lowercased() == host {
-                        tab?.icon = known
+                    if tab.address?.host()?.lowercased() == host {
+                        tab.icon = known
                     }
                     self.busy.remove(host)
                     return
                 }
                 let candidates = Favicons.rank(declared, page: url, dark: wantDark)
-                let shy = tab?.shy ?? false
                 Task { await self.download(candidates, host: host, key: key, shy: shy) }
             }
         }
@@ -288,7 +295,7 @@ final class Favicons {
           media: (l.getAttribute('media') || '').toLowerCase()
         });
       }
-      return out;
+      return { url: document.URL, icons: out };
     })();
     """
 }

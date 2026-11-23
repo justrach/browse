@@ -187,17 +187,52 @@ extension Browser {
         // The row on screen is parked as it is, sound and all: music or a
         // stream keeps playing in the space you left, as it does in a tab
         // you left. ⌘⇧M, or its speaker, stops it.
-        parked[spaceID] = Parked(tabs: tabs, active: activeID)
+        let reusePins = prefs.sharedPins && Spaces.store(for: spaceID) === Spaces.store(for: id)
+        if reusePins {
+            let livePins = tabs.filter { $0.pin != nil }
+            let leavingLoose = tabs.filter { $0.pin == nil }
+            let leavingActive = leavingLoose.contains(where: { $0.id == activeID }) ? activeID : nil
+            let wasOnPinID = livePins.first(where: { $0.id == activeID })?.id
+            parked[spaceID] = Parked(tabs: leavingLoose, active: leavingActive)
 
-        spaceID = id
-        Spaces.current = id
-        Store.settings.set(id.uuidString, forKey: "space.current")
-        if let back = parked.removeValue(forKey: id), !back.tabs.isEmpty {
-            showRow(back.tabs, active: back.active)
-            if let active, !active.wake() { active.revive() }
+            if parked[id] == nil { parked[id] = loadRow(id) }
+            let dest = parked.removeValue(forKey: id) ?? Parked(tabs: [], active: nil)
+            for oldPin in dest.tabs where oldPin.pin != nil && !livePins.contains(where: { $0 === oldPin }) {
+                oldPin.close()
+            }
+            let destLoose = dest.tabs.filter { $0.pin == nil }
+            let combined = livePins + destLoose
+
+            spaceID = id
+            Spaces.current = id
+            Store.settings.set(id.uuidString, forKey: "space.current")
+            if combined.isEmpty {
+                showRow([], active: nil)
+                restoreSession()
+            } else {
+                let targetActive: Tab.ID? = if let da = dest.active, combined.contains(where: { $0.id == da }) {
+                    da
+                } else if let wasOnPinID, combined.contains(where: { $0.id == wasOnPinID }) {
+                    wasOnPinID
+                } else {
+                    (destLoose.first ?? combined.first)?.id
+                }
+                showRow(combined, active: targetActive)
+                if let active, !active.wake() { active.revive() }
+            }
         } else {
-            showRow([], active: nil)
-            restoreSession()
+            parked[spaceID] = Parked(tabs: tabs, active: activeID)
+
+            spaceID = id
+            Spaces.current = id
+            Store.settings.set(id.uuidString, forKey: "space.current")
+            if let back = parked.removeValue(forKey: id), !back.tabs.isEmpty {
+                showRow(back.tabs, active: back.active)
+                if let active, !active.wake() { active.revive() }
+            } else {
+                showRow([], active: nil)
+                restoreSession()
+            }
         }
         editing = active?.isBlank ?? true
         typed = ""
