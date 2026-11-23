@@ -7,3 +7,6 @@ import Browse.OverlayMutex
 import Browse.HoverStability
 import Browse.EscapeTermination
 import Browse.ScrollFastPath
+import Browse.AgentTabGroup
+import Browse.LinkModifiers
+import Browse.UpdatePolicy
