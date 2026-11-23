@@ -28,7 +28,7 @@ enum Web {
     /// included, and registering a name twice is a hard crash.
     @MainActor static func release(_ controller: WKUserContentController) {
         for name in [ScrollRelay.name, VeilRelay.name, FormRelay.name, ImageRelay.name,
-                     StoreRelay.name, PasskeyRelay.name, MiddleRelay.name] {
+                     StoreRelay.name, PasskeyRelay.name, MiddleRelay.name, SelectionRelay.name] {
             controller.removeScriptMessageHandler(forName: name, contentWorld: world)
             controller.removeScriptMessageHandler(forName: name, contentWorld: .page)
         }
@@ -368,6 +368,8 @@ final class Tab: ObservableObject, Identifiable {
     var onFocus: ((Tab) -> Void)?
     /// The resolved address under the pointer, or nil when it leaves a link.
     var onLink: ((Tab, String?) -> Void)?
+    /// Floating Dia-style selection action bar reported from the page.
+    var onSelection: ((Tab, PageSelection?) -> Void)?
 
     /// True while something on the page is making noise, so the row can say
     /// which tab it is coming from.
@@ -428,6 +430,7 @@ final class Tab: ObservableObject, Identifiable {
     private let middles = MiddleRelay()
     private let passkeyRelay = PasskeyRelay()
     private let hovered = HoveredLink()
+    private let selectionRelay = SelectionRelay()
     private let ears = AudioWatch()
 
     /// A tab that keeps nothing: its own cookies, no history, no place in the
@@ -563,6 +566,7 @@ final class Tab: ObservableObject, Identifiable {
         hovered.tab = self
         controller.add(hovered, contentWorld: .defaultClient, name: HoveredLink.name)
         controller.add(middles, contentWorld: Web.world, name: MiddleRelay.name)
+        controller.add(selectionRelay, contentWorld: Web.world, name: SelectionRelay.name)
         Shield.shared.protect(controller)
         built = web
         // A tab muted before it went to sleep wakes muted.
@@ -646,6 +650,7 @@ final class Tab: ObservableObject, Identifiable {
         images.tab = self
         shop.tab = self
         middles.tab = self
+        selectionRelay.tab = self
         ears.watch(web) { [weak self] on in self?.noisy = on }
         return web
     }
@@ -743,6 +748,9 @@ final class Tab: ObservableObject, Identifiable {
         controller.addUserScript(
             WKUserScript(source: MiddleRelay.watch, injectionTime: .atDocumentStart, forMainFrameOnly: true, in: Web.world)
         )
+        controller.addUserScript(
+            WKUserScript(source: SelectionRelay.script, injectionTime: .atDocumentEnd, forMainFrameOnly: true, in: Web.world)
+        )
         // Passkeys stand in the page's own world — they replace the page's
         // functions — and reach Search through a bridge in Search's, off or on:
         // an extension's page script can carry the patch either way (see
@@ -772,6 +780,12 @@ final class Tab: ObservableObject, Identifiable {
 
     func startPicking() { web.evaluateInSearch("window.__officeVeil && window.__officeVeil.on()") }
     func stopPicking() { web.evaluateInSearch("window.__officeVeil && window.__officeVeil.off()") }
+
+    /// Seeks the active `<video>` element on this page (e.g. YouTube timestamp
+    /// click from an agent reply) cleanly in place without reloading.
+    func seekVideo(to seconds: Int) {
+        built?.evaluateJavaScript(YouTubeHelper.seekScript(seconds: seconds), completionHandler: nil)
+    }
 
     func foundSignIn() { onSignIn?(self) }
 

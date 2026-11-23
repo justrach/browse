@@ -776,6 +776,7 @@ final class Agent: ObservableObject {
         var tab: Tab?
         var passage: AgentPassage?
         var mentioned: [Tab] = []
+        var history: [HistoryMention] = []
         var images: [PastedImage] = []
     }
     @Published private(set) var queue: [Queued] = []
@@ -799,6 +800,35 @@ final class Agent: ObservableObject {
 
     func clearImages() {
         if !pendingImages.isEmpty { pendingImages.removeAll() }
+    }
+
+    /// A recently visited history item explicitly `@`-mentioned in the composer
+    /// (Dia-style `@history` context). Sent with the next prompt and cleared on send.
+    struct HistoryMention: Identifiable, Equatable {
+        let id: String
+        let title: String
+        let url: URL
+
+        var host: String {
+            let h = url.host() ?? ""
+            return h.hasPrefix("www.") ? String(h.dropFirst(4)) : h
+        }
+    }
+
+    @Published private(set) var mentionedHistory: [HistoryMention] = []
+
+    func mentionHistory(title: String, url: URL) {
+        let key = url.absoluteString
+        guard !mentionedHistory.contains(where: { $0.id == key }) else { return }
+        mentionedHistory.append(HistoryMention(id: key, title: title.isEmpty ? (url.host() ?? key) : title, url: url))
+    }
+
+    func unmentionHistory(_ id: String) {
+        mentionedHistory.removeAll { $0.id == id }
+    }
+
+    func clearMentionedHistory() {
+        if !mentionedHistory.isEmpty { mentionedHistory.removeAll() }
     }
 
     /// Additional open tabs explicitly `@`-mentioned in the composer (Dia-style
@@ -1207,6 +1237,7 @@ final class Agent: ObservableObject {
         pinned = nil
         passage = nil
         clearMentionedTabs()
+        clearMentionedHistory()
         clearImages()
         outcome = nil
         queue = []
@@ -1973,13 +2004,15 @@ final class Agent: ObservableObject {
         clearImages()
         let extras = mentionedTabs.filter { !$0.isBlank && $0.id != tab?.id }
         clearMentionedTabs()
+        let hist = mentionedHistory
+        clearMentionedHistory()
         // Mid-turn, it waits its turn.
         if phase == .working || prompting {
-            queue.append(Queued(text: text, tab: tab, passage: excerpt, mentioned: extras, images: images))
+            queue.append(Queued(text: text, tab: tab, passage: excerpt, mentioned: extras, history: hist, images: images))
             return
         }
         queueHeld = false
-        submit(text, page: tab, passage: excerpt, mentioned: extras, images: images)
+        submit(text, page: tab, passage: excerpt, mentioned: extras, history: hist, images: images)
     }
 
     /// NanoHarness ⌘↩ shortcut:
@@ -2003,12 +2036,14 @@ final class Agent: ObservableObject {
             let excerpt = passage
             let images = pendingImages
             let extras = mentionedTabs.filter { !$0.isBlank && $0.id != targetTab?.id }
+            let hist = mentionedHistory
             draft = ""
             writeMode = false
             passage = nil
             clearImages()
             clearMentionedTabs()
-            let item = Queued(text: trimmed, tab: targetTab, passage: excerpt, mentioned: extras, images: images)
+            clearMentionedHistory()
+            let item = Queued(text: trimmed, tab: targetTab, passage: excerpt, mentioned: extras, history: hist, images: images)
             queue.insert(item, at: 0)
             queueHeld = false
             if let asking { answer(asking, with: nil) }
@@ -2018,8 +2053,17 @@ final class Agent: ObservableObject {
         send(page: tab)
     }
 
-    private func submit(_ text: String, page tab: Tab?, passage: AgentPassage? = nil, mentioned: [Tab] = [], images: [PastedImage] = []) {
+    private func submit(
+        _ text: String,
+        page tab: Tab?,
+        passage: AgentPassage? = nil,
+        mentioned: [Tab] = [],
+        history: [HistoryMention] = [],
+        images: [PastedImage] = []
+    ) {
         let generation = self.generation
+        let skillExpansion = DiaSkill.expand(text, customTasks: tasks.all)
+        let wireText = skillExpansion?.prompt ?? text
         let pageTitle = tab.flatMap { tab -> String? in
             guard !tab.isBlank else { return nil }
             return tab.title.isEmpty ? (tab.address?.host() ?? "This page") : tab.title
@@ -2027,7 +2071,7 @@ final class Agent: ObservableObject {
         let extraTitles = mentioned.compactMap { extra -> String? in
             guard !extra.isBlank else { return nil }
             return extra.title.isEmpty ? (extra.address?.host() ?? "Tab") : extra.title
-        }
+        } + history.map(\.title)
         let displayPage: String? = {
             let names = ([pageTitle].compactMap { $0 }) + extraTitles.map { "@\($0)" }
             return names.isEmpty ? nil : names.joined(separator: " · ")
@@ -2047,9 +2091,10 @@ final class Agent: ObservableObject {
             }
             guard self.generation == generation, prefs.usesAgent else { return }
             let blocks = Agent.blocks(
-                text,
+                wireText,
                 page: page,
                 extras: extras,
+                history: history,
                 passage: passage,
                 images: images,
                 only: self.pinned != nil && tab === self.pinned
@@ -2080,7 +2125,12 @@ final class Agent: ObservableObject {
         }
         if !introduced {
             introduced = true
-            blocks.insert(["type": "text", "text": Agent.introduction], at: 0)
+            var intro = Agent.introduction
+            let memory = prefs.agentMemory.trimmingCharacters(in: .whitespacesAndNewlines)
+            if !memory.isEmpty {
+                intro += "\n\nUser's personal preferences and memory (always honor these):\n" + memory
+            }
+            blocks.insert(["type": "text", "text": intro], at: 0)
         }
         call("session/prompt", ["sessionId": session, "prompt": blocks]) { [weak self] result in
             guard let self else { return }
@@ -2126,7 +2176,7 @@ final class Agent: ObservableObject {
     private func sendQueued() {
         guard !queueHeld, !prompting, asking == nil, phase == .ready, !queue.isEmpty else { return }
         let first = queue.removeFirst()
-        submit(first.text, page: first.tab, passage: first.passage, mentioned: first.mentioned, images: first.images)
+        submit(first.text, page: first.tab, passage: first.passage, mentioned: first.mentioned, history: first.history, images: first.images)
     }
 
     /// Harness's Send now: this one goes next, and the turn under way is
@@ -2640,11 +2690,17 @@ final class Agent: ObservableObject {
         _ text: String,
         page: (address: String, title: String, text: String, tab: String)?,
         extras: [(address: String, title: String, text: String, tab: String)] = [],
+        history: [HistoryMention] = [],
         passage: AgentPassage? = nil,
         images: [PastedImage] = [],
         only: Bool = false
     ) -> [[String: Any]] {
         let imageBlocks = images.map(\.acpBlock)
+        let historyBlock: [[String: Any]] = history.isEmpty ? [] : [[
+            "type": "text",
+            "text": "Also referencing recently visited pages from browser history (use `read_pages` to inspect them if needed):\n"
+                + history.map { "- \($0.title): \($0.url.absoluteString)" }.joined(separator: "\n"),
+        ]]
         let words: [[String: Any]] = text.isEmpty ? [] : [["type": "text", "text": text]]
         let excerpt = passage?.blocks ?? []
         var sources: [(lead: String, address: String, whole: String)] = []
@@ -2661,7 +2717,7 @@ final class Agent: ObservableObject {
             let whole = extra.title.isEmpty ? extra.text : "\(extra.title)\n\n\(extra.text)"
             sources.append((lead, extra.address, whole))
         }
-        guard !sources.isEmpty else { return excerpt + imageBlocks + words }
+        guard !sources.isEmpty else { return historyBlock + excerpt + imageBlocks + words }
 
         func assemble(_ bodies: [String]) -> [[String: Any]] {
             var out: [[String: Any]] = []
@@ -2673,7 +2729,7 @@ final class Agent: ObservableObject {
                     "text": body,
                 ]])
             }
-            return out + excerpt + words
+            return out + historyBlock + excerpt + words
         }
 
         var bodies = sources.map(\.whole)
@@ -2705,9 +2761,24 @@ final class Agent: ObservableObject {
     private static func read(_ tab: Tab) async -> (address: String, title: String, text: String, tab: String)? {
         guard let web = tab.built, let address = tab.address else { return nil }
         let title = tab.title
-        let text: String = await withCheckedContinuation { done in
+        var text: String = await withCheckedContinuation { done in
             web.evaluateJavaScript("document.body ? document.body.innerText : ''") { value, _ in
                 done.resume(returning: (value as? String) ?? "")
+            }
+        }
+        if YouTubeHelper.isYouTubeWatch(address) {
+            let yt: String = await withCheckedContinuation { done in
+                web.callAsyncJavaScript(
+                    "return await \(YouTubeHelper.contextScript)",
+                    arguments: [:],
+                    in: nil,
+                    in: .page
+                ) { result in
+                    done.resume(returning: (try? result.get() as? String) ?? "")
+                }
+            }
+            if !yt.isEmpty {
+                text = yt + "\n\n---\nPage text:\n" + text
             }
         }
         return (address.absoluteString, title, text, String(tab.id.uuidString.prefix(8)).lowercased())

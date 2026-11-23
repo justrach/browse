@@ -515,12 +515,14 @@ private struct TabPaletteView: View {
         case .bookmark: "star.fill"
         case .history: "clock"
         case .search: "magnifyingglass"
+        case .ask: "sparkles"
         }
         let kindLabel: String = switch action.kind {
         case .url: "Website"
         case .bookmark: "Bookmark"
         case .history: "Visited Site"
         case .search: "Web Search"
+        case .ask: "Ask \(browser.agent.backend.shortName)"
         }
 
         return VStack(alignment: .leading, spacing: 14) {
@@ -708,6 +710,7 @@ private struct SwitcherActionRow: View {
         case .bookmark: return "star.fill"
         case .history: return "clock"
         case .search: return "magnifyingglass"
+        case .ask: return "sparkles"
         }
     }
 
@@ -717,6 +720,7 @@ private struct SwitcherActionRow: View {
         case .bookmark: return "Bookmark"
         case .history: return "Visited"
         case .search: return "Search"
+        case .ask: return "Ask"
         }
     }
 
@@ -724,7 +728,7 @@ private struct SwitcherActionRow: View {
         HStack(spacing: compact ? 9 : 11) {
             Image(systemName: iconName)
                 .font(.system(size: compact ? 11.5 : 13, weight: .medium))
-                .foregroundStyle(action.kind == .bookmark ? Palette.accent : (selected ? Palette.ink : Palette.muted))
+                .foregroundStyle((action.kind == .bookmark || action.kind == .ask) ? Palette.accent : (selected ? Palette.ink : Palette.muted))
                 .frame(width: compact ? 22 : 28, height: compact ? 22 : 28)
                 .background(
                     RoundedRectangle(cornerRadius: compact ? 6 : 7, style: .continuous)

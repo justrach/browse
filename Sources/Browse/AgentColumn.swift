@@ -114,8 +114,14 @@ struct AgentColumn: View {
         }
         .animation(Motion.settle, value: agent.asking?.id)
         // A link in what graff said opens here, as a tab, not in whichever
-        // browser the Mac would hand it to.
+        // browser the Mac would hand it to. YouTube `[MM:SS]` timestamps
+        // (`browse-seek://<seconds>`) seek the active video in place.
         .environment(\.openURL, OpenURLAction { url in
+            if url.scheme == YouTubeHelper.seekScheme,
+               let host = url.host(), let seconds = Int(host) {
+                browser.active?.seekVideo(to: seconds)
+                return .handled
+            }
             guard url.scheme?.hasPrefix("http") == true else { return .systemAction }
             browser.open(url, foreground: true)
             return .handled
@@ -1639,6 +1645,32 @@ struct AgentPage: View {
                     Pill("Choose…") { choose() }
                 }
             }
+            Rule()
+            Line("Floating selection bar", "Show a quiet Ask / Explain / Rewrite pill when you highlight text on a page") {
+                Switch(on: $prefs.selectionToolbar)
+            }
+            Rule()
+            VStack(alignment: .leading, spacing: 6) {
+                Text("Personal memory")
+                    .font(.system(size: 13))
+                    .foregroundStyle(Palette.ink)
+                Text("Kept locally on this Mac and included once per chat — writing style, preferred stack, or formatting preferences.")
+                    .font(.system(size: 11.5))
+                    .foregroundStyle(Palette.muted)
+                    .fixedSize(horizontal: false, vertical: true)
+                TextEditor(text: $prefs.agentMemory)
+                    .font(.system(size: 12))
+                    .frame(height: 62)
+                    .padding(6)
+                    .scrollContentBackground(.hidden)
+                    .background(Palette.wash, in: RoundedRectangle(cornerRadius: 8, style: .continuous))
+                    .overlay(
+                        RoundedRectangle(cornerRadius: 8, style: .continuous)
+                            .strokeBorder(Palette.hairline, lineWidth: 0.75)
+                    )
+            }
+            .padding(.horizontal, 14)
+            .padding(.vertical, 10)
             Rule()
             Line("Ask about selected text", "Right-click a passage and choose Ask graff about Selection. Review the excerpt and its source before sending") {
                 Switch(on: $prefs.agentSelection)
