@@ -6,6 +6,10 @@ All notable changes to **browse** are documented here, newest first.
 
 ## Unreleased
 
+### Added
+
+- **Auto-hiding Full Screen top panel with edge hints (`App.swift`, `Fold.swift`, `AsideBar.swift`, `Browser.swift`)**: entering macOS Full Screen frees up the 44pt top panel (`AsideBar` / `TabBar`) into a slim 9pt top gutter (reclaiming 35pt of vertical screen space for webpages and Split View). Subtle, non-overlapping edge handles in the gutter show where the hidden sidebar (left), address bar & controls (center), and `graff` (right) live; hovering the top edge or clicking the center handle smoothly slides the floating top bar down over the page (without the empty traffic-light inset or WebKit reflow).
+
 ## 1.8.6 — 23 November 2026
 
 ### Fixed

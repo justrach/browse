@@ -52,14 +52,25 @@ extension Browser {
     func peek(_ out: Bool) {
         withAnimation(Motion.glide) { peeking = out }
     }
+
+    /// The fullscreen-hidden top bar (`AsideBar` or `TabBar`) out over the
+    /// page, or tucked back into the top edge.
+    func peekTop(_ out: Bool) {
+        withAnimation(Motion.glide) { topPeeking = out }
+    }
 }
 
-/// Over the window while the column or the strip is folded: the column or
-/// the strip itself while it is out, brought out by the pointer at the
-/// window's left edge, or its top edge.
+/// Over the window while the column or the strip is folded, or while Full
+/// Screen has freed up the top bar: the column or top bar slides out over the
+/// page from its edge, with quiet spatial hints in the slim fullscreen gutter
+/// showing where the hidden controls live.
 struct Fold: View {
     @ObservedObject var browser: Browser
     @ObservedObject var prefs: Preferences
+
+    /// Slim top gutter in macOS Full Screen mode (reclaims 35pt of the 44pt
+    /// top bar while hosting non-overlapping spatial edge hints).
+    static let fullScreenGutter: CGFloat = 9
 
     /// The column going back in, a moment after the pointer left it.
     @State private var leaving: DispatchWorkItem?
@@ -67,6 +78,11 @@ struct Fold: View {
     @State private var arriving: DispatchWorkItem?
     /// The pointer is over the column.
     @State private var inside = false
+    /// Independent hover timers for the fullscreen auto-hidden top bar so
+    /// left-edge sidebar peeking and top-edge bar peeking never conflict.
+    @State private var leavingTop: DispatchWorkItem?
+    @State private var arrivingTop: DispatchWorkItem?
+    @State private var insideTop = false
     @State private var pointer = Pointer()
 
     /// How near the edge the pointer has to be.
@@ -81,8 +97,11 @@ struct Fold: View {
     /// good comes out. Long enough to cross the edge, short enough not to be
     /// waited for.
     private static let dwell: TimeInterval = 0.15
+    /// Brief dwell on the top edge in Full Screen before the bar glides down.
+    private static let topDwell: TimeInterval = 0.12
 
     var body: some View {
+        let sidebarVisible = prefs.sidebar && !browser.folded && browser.active?.immersed != true
         ZStack(alignment: .topLeading) {
             // In the column's mode the page reaches the window's top edge —
             // beside the column, and everywhere once it is folded away — and
@@ -94,7 +113,7 @@ struct Fold: View {
             // the page the top edge too, and the same band: there was nothing
             // to take hold of until the strip came down. Unfolded, the strip
             // is its own title bar, and no band lies over its tabs.
-            if (prefs.sidebar || folding), !asideBar, browser.active?.immersed != true {
+            if (prefs.sidebar || folding), !asideBar, !fullScreenTopHidden, browser.active?.immersed != true {
                 DragStrip()
                     .frame(height: Fold.top)
                     .frame(maxWidth: .infinity)
@@ -111,6 +130,40 @@ struct Fold: View {
                             .shadow(color: .black.opacity(0.14), radius: 20, y: 4)
                     }
                     .transition(.move(edge: .top))
+            }
+            if fullScreenTopHidden {
+                if browser.topPeeking {
+                    Group {
+                        if asideBarWanted {
+                            AsideBar(
+                                browser: browser,
+                                sidebarOpen: sidebarVisible,
+                                framed: false,
+                                fullScreen: true,
+                                floating: true
+                            )
+                            .padding(.leading, sidebarVisible ? prefs.sideWidth : 0)
+                        } else {
+                            TabBar(browser: browser)
+                                .background {
+                                    Palette.ground
+                                        .shadow(color: .black.opacity(0.16), radius: 18, y: 4)
+                                }
+                        }
+                    }
+                    .transition(.move(edge: .top).combined(with: .opacity))
+                } else {
+                    FullscreenEdgeHints(
+                        browser: browser,
+                        sidebarFolded: prefs.sidebar && browser.folded,
+                        agentClosed: prefs.usesAgent && !browser.consulting,
+                        revealTop: { peekTop(true) },
+                        revealSidebar: { browser.peek(true) },
+                        openAgent: { browser.toggleAgent() }
+                    )
+                    .padding(.leading, sidebarVisible ? prefs.sideWidth : 0)
+                    .transition(.opacity)
+                }
             }
             ZStack(alignment: .leading) {
                 Color.clear.frame(width: 0)
@@ -137,7 +190,16 @@ struct Fold: View {
             watch()
         })
         .onChange(of: lightsOff) { _, _ in hideLights() }
-        .onChange(of: folding) { _, _ in watch() }
+        .onChange(of: watching) { _, _ in watch() }
+        .onChange(of: fullScreenTopHidden) { _, hidden in
+            if !hidden {
+                passTop()
+                leavingTop?.cancel()
+                leavingTop = nil
+                insideTop = false
+                if browser.topPeeking { browser.peekTop(false) }
+            }
+        }
         // Back to the strip and then to the column again: the column comes
         // back as it rests — whole, not folded from a time nobody remembers,
         // unless Settings says it rests folded.
@@ -176,74 +238,164 @@ struct Fold: View {
         browser.folded && browser.active?.immersed != true
     }
 
-    private var asideBar: Bool {
+    private var asideBarWanted: Bool {
         prefs.compactTopBar && (prefs.sidebar || browser.folded) && browser.active?.immersed != true
+    }
+
+    private var asideBar: Bool {
+        asideBarWanted && !browser.fullScreen
+    }
+
+    /// True in macOS Full Screen when the top bar (`AsideBar` or `TabBar`) has
+    /// been freed up to reclaim vertical space and reveals on top-edge hover.
+    private var fullScreenTopHidden: Bool {
+        browser.fullScreen && browser.active?.immersed != true
+            && (asideBarWanted || (!prefs.sidebar && !browser.folded))
+    }
+
+    private var watching: Bool {
+        folding || fullScreenTopHidden
     }
 
     private var lightsOff: Bool {
         browser.folded && !browser.peeking && !asideBar
     }
 
-    /// The pointer is watched only while there is something folded for it
-    /// to bring out; the rest of the time no move of it costs anything.
+    /// The pointer is watched only while there is something folded or
+    /// fullscreen-hidden for it to bring out; the rest of the time no move of
+    /// it costs anything.
     private func watch() {
-        if folding {
+        if watching {
             pointer.start { follow() }
         } else {
             pointer.stop()
         }
     }
 
-    /// Opens or closes the column from the pointer's actual position, on
-    /// every move. Hover events weren't enough: a view that appears under a
-    /// still pointer never gets "entered", so it never gets "exited" either,
-    /// and after a few quick opens and closes the column stayed open, or the
-    /// edge stopped opening it.
+    /// Opens or closes the column (and/or the fullscreen top bar) from the
+    /// pointer's actual position, on every move. Hover events weren't enough:
+    /// a view that appears under a still pointer never gets "entered", so it
+    /// never gets "exited" either, and after a few quick opens and closes the
+    /// column stayed open, or the edge stopped opening it.
     private func follow() {
-        guard folding, let window = pointer.window, window.isVisible else { return pass() }
+        guard watching, let window = pointer.window, window.isVisible else {
+            pass()
+            passTop()
+            return
+        }
         let screen = NSEvent.mouseLocation
         let point = window.convertPoint(fromScreen: screen)
         let size = window.frame.size
         let inWindow = point.x >= 0 && point.x < size.width && point.y >= 0 && point.y < size.height
-        // Distance from the left edge for the column, from the top for the strip.
-        let distance = prefs.sidebar ? point.x : size.height - point.y
-        // Just past the left edge, beside the window rather than above or
-        // below it, come off the window to get there, and not on the Dock or
-        // the menu bar.
-        let beside = prefs.sidebar && point.x < 0 && point.x > -Fold.overshoot
-            && point.y >= 0 && point.y < size.height
-        let overshot = beside && pointer.crossing
-            && NSScreen.screens.contains { $0.visibleFrame.contains(screen) }
-        pointer.crossing = inWindow || overshot
-        if browser.peeking {
-            pass()
-            // Only this window counts, not another app's window over it. One
-            // of this app's own windows, such as a popover opened from the
-            // column, counts as the column.
-            let top = NSWindow.windowNumber(at: screen, belowWindowWithWindowNumber: 0)
-            let onWindow = top == window.windowNumber
-            let onOwnPanel = !onWindow && NSApp.windows.contains { $0.windowNumber == top }
-            let reach = prefs.sidebar ? prefs.sideWidth : Metrics.strip
-            // An extension's popup hangs from its button in the column: the
-            // column stays out while it is up, or the popup is left hanging
-            // from nothing (see ExtensionPopup).
-            let popup = if #available(macOS 15.4, *) { ExtensionPopup.shared.isUp } else { false }
-            let over = onOwnPanel || popup || holding || overshot || (onWindow && inWindow && distance < reach)
-            if over != inside { inside = over }
-            peek(over)
-        } else if inWindow, distance < Fold.edge {
-            // Which window is under the pointer is asked only here, at the
-            // edge: another app's window over it doesn't bring the column out.
-            guard NSWindow.windowNumber(at: screen, belowWindowWithWindowNumber: 0) == window.windowNumber
-            else { return pass() }
-            if arriving == nil { arrive() }
-        } else if overshot {
-            // Off the window, so whatever is under the pointer isn't it. The
-            // wait starts again with every move: the column comes once the
-            // pointer stops, not while it is on its way somewhere else.
-            arrive(resting: true)
+        let topDistance = size.height - point.y
+
+        if folding {
+            // Distance from the left edge for the column, from the top for the strip.
+            let distance = prefs.sidebar ? point.x : topDistance
+            // Just past the left edge, beside the window rather than above or
+            // below it, come off the window to get there, and not on the Dock or
+            // the menu bar.
+            let beside = prefs.sidebar && point.x < 0 && point.x > -Fold.overshoot
+                && point.y >= 0 && point.y < size.height
+            let overshot = beside && pointer.crossing
+                && NSScreen.screens.contains { $0.visibleFrame.contains(screen) }
+            pointer.crossing = inWindow || overshot
+            if browser.peeking {
+                pass()
+                // Only this window counts, not another app's window over it. One
+                // of this app's own windows, such as a popover opened from the
+                // column, counts as the column.
+                let top = NSWindow.windowNumber(at: screen, belowWindowWithWindowNumber: 0)
+                let onWindow = top == window.windowNumber
+                let onOwnPanel = !onWindow && NSApp.windows.contains { $0.windowNumber == top }
+                let reach = prefs.sidebar ? prefs.sideWidth : Metrics.strip
+                // An extension's popup hangs from its button in the column: the
+                // column stays out while it is up, or the popup is left hanging
+                // from nothing (see ExtensionPopup).
+                let popup = if #available(macOS 15.4, *) { ExtensionPopup.shared.isUp } else { false }
+                let over = onOwnPanel || popup || holding || overshot || (onWindow && inWindow && distance < reach)
+                if over != inside { inside = over }
+                peek(over)
+            } else if inWindow, distance < Fold.edge {
+                // Which window is under the pointer is asked only here, at the
+                // edge: another app's window over it doesn't bring the column out.
+                if NSWindow.windowNumber(at: screen, belowWindowWithWindowNumber: 0) == window.windowNumber {
+                    if arriving == nil { arrive() }
+                } else {
+                    pass()
+                }
+            } else if overshot {
+                // Off the window, so whatever is under the pointer isn't it. The
+                // wait starts again with every move: the column comes once the
+                // pointer stops, not while it is on its way somewhere else.
+                arrive(resting: true)
+            } else {
+                pass()
+            }
         } else {
             pass()
+        }
+
+        if fullScreenTopHidden {
+            let sidebarVisible = prefs.sidebar && !browser.folded && browser.active?.immersed != true
+            let minX: CGFloat = sidebarVisible ? prefs.sideWidth : (folding && prefs.sidebar ? 24 : 0)
+            let inTopZone = inWindow && point.x >= minX
+            if browser.topPeeking {
+                passTop()
+                let topWin = NSWindow.windowNumber(at: screen, belowWindowWithWindowNumber: 0)
+                let onWindow = topWin == window.windowNumber
+                let onOwnPanel = !onWindow && NSApp.windows.contains { $0.windowNumber == topWin }
+                let popup = if #available(macOS 15.4, *) { ExtensionPopup.shared.isUp } else { false }
+                let over = onOwnPanel || popup || holding || (onWindow && inTopZone && topDistance < Metrics.strip + 8)
+                if over != insideTop { insideTop = over }
+                peekTop(over)
+            } else if inTopZone, topDistance < Fold.fullScreenGutter {
+                if NSWindow.windowNumber(at: screen, belowWindowWithWindowNumber: 0) == window.windowNumber {
+                    if arrivingTop == nil { arriveTop() }
+                } else {
+                    passTop()
+                }
+            } else {
+                passTop()
+            }
+        } else {
+            passTop()
+        }
+    }
+
+    private func arriveTop() {
+        passTop()
+        let coming = DispatchWorkItem {
+            arrivingTop = nil
+            peekTop(true)
+        }
+        arrivingTop = coming
+        DispatchQueue.main.asyncAfter(deadline: .now() + Fold.topDwell, execute: coming)
+    }
+
+    private func passTop() {
+        guard let arrivingTop else { return }
+        arrivingTop.cancel()
+        self.arrivingTop = nil
+    }
+
+    private func peekTop(_ out: Bool) {
+        if out {
+            if let leavingTop {
+                leavingTop.cancel()
+                self.leavingTop = nil
+            }
+            guard !browser.topPeeking else { return }
+            browser.peekTop(true)
+        } else {
+            guard leavingTop == nil else { return }
+            let going = DispatchWorkItem {
+                leavingTop = nil
+                guard !holding else { return }
+                browser.peekTop(false)
+            }
+            leavingTop = going
+            DispatchQueue.main.asyncAfter(deadline: .now() + Fold.grace, execute: going)
         }
     }
 
@@ -413,5 +565,81 @@ private final class Pointer {
         local = nil
         global = nil
         window?.acceptsMouseMovedEvents = accepted
+    }
+}
+
+/// Whisper-quiet spatial edge handles rendered in the slim 9pt fullscreen top
+/// gutter when the top bar is auto-hidden: they never cover page content, yet
+/// show at a glance where the hidden sidebar (left), address bar & controls
+/// (top center), and `graff` (top right) live.
+private struct FullscreenEdgeHints: View {
+    @ObservedObject var browser: Browser
+    let sidebarFolded: Bool
+    let agentClosed: Bool
+    let revealTop: () -> Void
+    let revealSidebar: () -> Void
+    let openAgent: () -> Void
+
+    @Environment(\.colorScheme) private var scheme
+    @State private var hoverLeft = false
+    @State private var hoverCenter = false
+    @State private var hoverRight = false
+
+    private var isDark: Bool {
+        let tint = browser.prefs.sideTint ? PageTint(browser.activeHue, over: scheme) : nil
+        return tint?.dark ?? (scheme == .dark)
+    }
+
+    var body: some View {
+        let base = isDark ? Color.white : Color.black
+        ZStack {
+            HStack(spacing: 0) {
+                if sidebarFolded {
+                    Button(action: revealSidebar) {
+                        Capsule()
+                            .fill(base.opacity(hoverLeft ? 0.44 : 0.18))
+                            .frame(width: hoverLeft ? 28 : 22, height: 3)
+                            .frame(width: 44, height: Fold.fullScreenGutter, alignment: .leading)
+                            .contentShape(Rectangle())
+                    }
+                    .buttonStyle(.plain)
+                    .padding(.leading, 14)
+                    .onHover { hoverLeft = $0 }
+                    .help("Sidebar at left edge   ⌘S")
+                }
+
+                Spacer(minLength: 0)
+
+                if agentClosed {
+                    Button(action: openAgent) {
+                        Capsule()
+                            .fill(Palette.accent.opacity(hoverRight ? 0.72 : 0.34))
+                            .frame(width: hoverRight ? 28 : 22, height: 3)
+                            .frame(width: 44, height: Fold.fullScreenGutter, alignment: .trailing)
+                            .contentShape(Rectangle())
+                    }
+                    .buttonStyle(.plain)
+                    .padding(.trailing, 14)
+                    .onHover { hoverRight = $0 }
+                    .help("Open graff   ⌘;")
+                }
+            }
+
+            Button(action: revealTop) {
+                Capsule()
+                    .fill(base.opacity(hoverCenter ? 0.46 : 0.22))
+                    .frame(width: hoverCenter ? 64 : 50, height: 3.5)
+                    .frame(width: 96, height: Fold.fullScreenGutter)
+                    .contentShape(Rectangle())
+            }
+            .buttonStyle(.plain)
+            .onHover { hoverCenter = $0 }
+            .help("Hover or click top edge for address bar & controls")
+        }
+        .frame(maxWidth: .infinity)
+        .frame(height: Fold.fullScreenGutter)
+        .animation(Motion.quick, value: hoverLeft)
+        .animation(Motion.quick, value: hoverCenter)
+        .animation(Motion.quick, value: hoverRight)
     }
 }
