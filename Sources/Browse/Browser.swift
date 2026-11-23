@@ -45,12 +45,14 @@ struct SwitcherAction: Identifiable, Equatable {
         case bookmark
         case history
         case search
+        case ask
     }
     let id: String
     let kind: Kind
     let title: String
     let subtitle: String
     let url: URL
+    var prompt: String? = nil
 }
 
 /// Isolated observable state for the tab switcher / overview so search typing
@@ -69,6 +71,7 @@ final class Browser: NSObject, ObservableObject {
     @Published var activeID: Tab.ID? {
         didSet {
             guard oldValue != activeID else { return }
+            pageSelection = nil
             activeHue = active?.hue
             if prefs.agentDrafts { agent.moveDraft(to: active) }
             guess()
@@ -785,6 +788,13 @@ final class Browser: NSObject, ObservableObject {
     /// where that box is — a list hangs from it, and a click fills the form.
     /// Nothing is put into a page until you have pointed at it.
     @Published private(set) var suggesting: Suggesting?
+    /// Active Dia-style floating text selection bar on the front tab.
+    @Published var pageSelection: PageSelection?
+    /// Visual `⌃Tab` MRU tab switcher order & currently highlighted tab.
+    @Published private(set) var tabCycleOrder: [Tab] = []
+    @Published private(set) var tabCycleSelectedID: Tab.ID?
+
+    var isTabCycling: Bool { !tabCycleOrder.isEmpty }
 
     struct Suggesting: Equatable {
         let tab: Tab.ID
@@ -1272,6 +1282,99 @@ final class Browser: NSObject, ObservableObject {
     }
 
     /// The context menu prepares a draft. Selecting text never sends it.
+    /// Dia-style floating selection bar actions (Ask, Explain, Rewrite, Copy).
+    func runSelectionAction(_ kind: SelectionActionKind) {
+        guard let sel = pageSelection,
+              let tab = tabs.first(where: { $0.id == sel.tabID }) else { return }
+        pageSelection = nil
+        switch kind {
+        case .copy:
+            NSPasteboard.general.clearContents()
+            NSPasteboard.general.setString(sel.text, forType: .string)
+            announce("Copied")
+        case .ask:
+            guard prefs.usesAgent, agent.asking == nil,
+                  let passage = AgentPassage(text: sel.text, from: tab) else { return }
+            agent.passage = passage
+            talkToColumn()
+        case .explain:
+            guard prefs.usesAgent, agent.asking == nil,
+                  let passage = AgentPassage(text: sel.text, from: tab) else { return }
+            agent.passage = passage
+            agent.draft = "Explain this passage clearly and concisely in context."
+            talkToColumn()
+            if agent.canSend { agent.send(page: tab) }
+        case .rewrite:
+            guard prefs.usesAgent, agent.asking == nil,
+                  let passage = AgentPassage(text: sel.text, from: tab) else { return }
+            agent.passage = passage
+            agent.draft = "Rewrite this more clearly, naturally, and concisely while keeping my intent. Return the ready-to-paste rewrite first."
+            talkToColumn()
+            if agent.canSend { agent.send(page: tab) }
+        }
+    }
+
+    enum SelectionActionKind { case ask, explain, rewrite, copy }
+
+    /// Visual `⌃Tab` / `⌃⇧Tab` MRU preview switcher: holding Control cycles
+    /// recent tabs with live thumbnails; releasing Control commits the switch.
+    func stepMRU(_ direction: Int) {
+        guard tabs.count > 1 else { return }
+        if tabCycleOrder.isEmpty {
+            let active = tabs.filter { $0.id == activeID }
+            let others = tabs.filter { $0.id != activeID }.sorted { $0.touched > $1.touched }
+            let order = active + others
+            tabCycleOrder = order
+            // Prime live previews for the visible MRU cards via the shared cache.
+            for tab in order.prefix(7) where !tab.isBlank {
+                TabPreviewCache.shared.request(tab, width: 320)
+            }
+            let nextIdx = (0 + direction + order.count) % order.count
+            tabCycleSelectedID = order[nextIdx].id
+        } else {
+            let cur = tabCycleOrder.firstIndex { $0.id == tabCycleSelectedID } ?? 0
+            let nextIdx = (cur + direction + tabCycleOrder.count) % tabCycleOrder.count
+            tabCycleSelectedID = tabCycleOrder[nextIdx].id
+        }
+    }
+
+    func commitTabCycle() {
+        guard !tabCycleOrder.isEmpty else { return }
+        let targetID = tabCycleSelectedID
+        let order = tabCycleOrder
+        tabCycleOrder = []
+        tabCycleSelectedID = nil
+        if let targetID, let tab = order.first(where: { $0.id == targetID }), tabs.contains(where: { $0.id == tab.id }) {
+            select(tab)
+        }
+    }
+
+    func pickFromTabCycle(_ tab: Tab) {
+        tabCycleOrder = []
+        tabCycleSelectedID = nil
+        if tabs.contains(where: { $0.id == tab.id }) { select(tab) }
+    }
+
+    func cancelTabCycle() {
+        guard !tabCycleOrder.isEmpty else { return }
+        tabCycleOrder = []
+        tabCycleSelectedID = nil
+    }
+
+    /// Arc-style auto-archive: closes untouched unpinned tabs older than
+    /// `prefs.autoArchiveHours` (recording them in closed-tab history so
+    /// `⌘⇧T` or History brings any tab back immediately).
+    func archiveStaleTabs() {
+        let hours = prefs.autoArchiveHours
+        guard hours > 0 else { return }
+        let cutoff = Date().addingTimeInterval(-Double(hours) * 3600)
+        let stale = tabs.filter { tab in
+            tab.id != activeID && tab.pin == nil && !tab.isBlank && !tab.noisy && tab.touched < cutoff
+        }
+        guard !stale.isEmpty else { return }
+        for tab in stale { close(tab) }
+    }
+
     func askAboutSelection(_ text: String, from tab: Tab) {
         guard agent.asking == nil else {
             announce("Answer Codegraff's question before attaching selected text")
@@ -2609,6 +2712,14 @@ final class Browser: NSObject, ObservableObject {
             self?.prefs.usesAgent == true && self?.prefs.agentSelection == true && self?.agent.asking == nil
         }
         tab.onAskSelection = { [weak self] tab, text in self?.askAboutSelection(text, from: tab) }
+        tab.onSelection = { [weak self] tab, selection in
+            guard let self, tab.id == self.activeID else { return }
+            if let selection, self.prefs.usesAgent, self.prefs.selectionToolbar, self.agent.asking == nil {
+                self.pageSelection = selection
+            } else if self.pageSelection?.tabID == tab.id {
+                self.pageSelection = nil
+            }
+        }
         tab.onStoreAdd = { [weak self] tab in self?.addFromStore(tab) }
         // The middle button on a link opens it beside the tab you are on, as
         // it does in every other browser (see MiddleRelay).
@@ -2841,6 +2952,35 @@ final class Browser: NSObject, ObservableObject {
 
         for s in exactHostSites { add(siteAction(s)) }
 
+        // Dia-style inline `/skill` or direct "Ask graff" inside ⌘K when Agent is on.
+        if prefs.usesAgent, directURL == nil {
+            if let matchedSkill = DiaSkill.expand(q, customTasks: agent.tasks.all) {
+                actions.insert(SwitcherAction(
+                    id: "ask-skill:\(q)",
+                    kind: .ask,
+                    title: "/\(matchedSkill.skill.slug) — \(matchedSkill.skill.title)",
+                    subtitle: matchedSkill.skill.description,
+                    url: URL(fileURLWithPath: "/"),
+                    prompt: q
+                ), at: 0)
+            } else if q.hasPrefix("/") {
+                let needle = String(q.dropFirst()).lowercased()
+                let skills = DiaSkill.all(customTasks: agent.tasks.all).filter {
+                    needle.isEmpty || $0.slug.hasPrefix(needle) || $0.slug.contains(needle)
+                }
+                for skill in skills.prefix(3) where actions.count < limit {
+                    actions.append(SwitcherAction(
+                        id: "ask-skill:/\(skill.slug)",
+                        kind: .ask,
+                        title: "/\(skill.slug) — \(skill.title)",
+                        subtitle: skill.description,
+                        url: URL(fileURLWithPath: "/"),
+                        prompt: "/\(skill.slug)"
+                    ))
+                }
+            }
+        }
+
         if let search = searchURL(for: q) {
             let engineName = prefs.engine.name(custom: prefs.customEngine)
             add(SwitcherAction(
@@ -2849,6 +2989,19 @@ final class Browser: NSObject, ObservableObject {
                 title: "Search \(engineName) for “\(q)”",
                 subtitle: search.host() ?? engineName,
                 url: search
+            ))
+        }
+
+        // Offer "Ask graff" right beneath web search for natural-language prompts.
+        if prefs.usesAgent, directURL == nil, !q.hasPrefix("/"),
+           (q.contains(" ") || q.hasSuffix("?")), actions.count < limit {
+            actions.append(SwitcherAction(
+                id: "ask:\(q)",
+                kind: .ask,
+                title: "Ask \(agent.backend.shortName): “\(q)”",
+                subtitle: active?.isBlank == false ? "With \(active?.label ?? "this page")" : "Start a conversation",
+                url: URL(fileURLWithPath: "/"),
+                prompt: q
             ))
         }
 
@@ -2861,6 +3014,10 @@ final class Browser: NSObject, ObservableObject {
 
     func openActionFromSwitcher(_ action: SwitcherAction, split: Bool = false) {
         closeTabSwitcher()
+        if action.kind == .ask {
+            ask(action.prompt ?? action.title)
+            return
+        }
         if split, let current = active, !current.isBlank {
             let created = open(action.url, foreground: false)
             open(created, on: .right)

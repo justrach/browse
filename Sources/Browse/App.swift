@@ -571,7 +571,20 @@ struct ContentView: View {
                     .transition(.opacity)
             }
         }
+        .overlay(alignment: .topLeading) {
+            if front, let selection = browser.pageSelection, selection.tabID == tab.id {
+                SelectionBar(
+                    selection: selection,
+                    viewport: tab.built?.bounds.size ?? .zero,
+                    onAsk: { browser.runSelectionAction(.ask) },
+                    onExplain: { browser.runSelectionAction(.explain) },
+                    onRewrite: { browser.runSelectionAction(.rewrite) },
+                    onCopy: { browser.runSelectionAction(.copy) }
+                )
+            }
+        }
         .animation(Motion.quick, value: browser.suggesting)
+        .animation(Motion.quick, value: browser.pageSelection)
     }
 
     /// What the column and the strip take from the page right now: animated
@@ -754,6 +767,19 @@ struct ContentView: View {
         if browser.showingShortcuts {
             sheet { ShortcutGuide(browser: browser) }
                 close: { browser.showingShortcuts = false }
+        }
+        if browser.isTabCycling {
+            ZStack {
+                Color.black.opacity(0.08)
+                    .ignoresSafeArea()
+                    .onTapGesture { browser.cancelTabCycle() }
+                TabCycleHUD(
+                    tabs: browser.tabCycleOrder,
+                    selectedID: browser.tabCycleSelectedID,
+                    onSelect: { browser.pickFromTabCycle($0) }
+                )
+            }
+            .transition(.opacity)
         }
         if browser.managing {
             sheet { PasswordsPanel(browser: browser) } close: { browser.managing = false }
@@ -1250,6 +1276,8 @@ struct ContentView: View {
             guard event.type == .keyDown else {
                 // ⌘ let go of ends a ⌘K walk, wherever it stopped.
                 if !event.modifierFlags.contains(.command) { browser.landSummon() }
+                // ⌃ let go of commits a visual ⌃Tab MRU cycle.
+                if !event.modifierFlags.contains(.control) { browser.commitTabCycle() }
                 return event
             }
             return take(event) ? nil : event
@@ -1346,6 +1374,14 @@ struct ContentView: View {
         // Escape puts the page back. On a blank tab there is no page to put
         // back, so it belongs to whatever else wants it.
         if event.keyCode == 53 {
+            if browser.isTabCycling {
+                browser.cancelTabCycle()
+                return true
+            }
+            if browser.pageSelection != nil {
+                browser.pageSelection = nil
+                return true
+            }
             if browser.tabSwitcher != nil {
                 browser.closeTabSwitcher()
                 return true
@@ -1483,7 +1519,7 @@ struct ContentView: View {
         // there is to move through, and Return takes whatever the walk landed on.
         if event.keyCode == 48, !flags.contains(.command), !flags.contains(.option) {
             if flags.contains(.control) {
-                browser.step(flags.contains(.shift) ? -1 : 1)
+                browser.stepMRU(flags.contains(.shift) ? -1 : 1)
                 return true
             }
             if browser.editingTab != nil { return true }

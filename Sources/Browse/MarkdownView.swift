@@ -531,13 +531,13 @@ enum MathTex {
     static func inlineRich(_ text: String, size: CGFloat) -> AttributedString {
         let segments = splitInline(text)
         if segments.count == 1, case .markdown(let raw) = segments[0] {
-            return Citations.style(Agent.rich(raw), size: size)
+            return Citations.style(Agent.rich(YouTubeHelper.linkTimestamps(in: raw)), size: size)
         }
         var result = AttributedString()
         for segment in segments {
             switch segment {
             case .markdown(let raw):
-                result.append(Citations.style(Agent.rich(raw), size: size))
+                result.append(Citations.style(Agent.rich(YouTubeHelper.linkTimestamps(in: raw)), size: size))
             case .math(let tex):
                 result.append(renderInlineMath(tex, size: size))
             }

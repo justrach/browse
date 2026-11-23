@@ -690,6 +690,13 @@ struct SettingsPanel: View {
                 .padding(.leading, 14)
             }
             Rule()
+            Line("Auto-archive unpinned tabs", "Quietly close untouched unpinned tabs to keep your sidebar clean (recoverable anytime with ⌘⇧T or History)") {
+                Segmented(
+                    options: [(0, "Never"), (12, "12h"), (24, "24h"), (168, "7d")],
+                    selection: $prefs.autoArchiveHours
+                )
+            }
+            Rule()
             Line("Spaces", "Separate sets of tabs, signed in where the others are or starting afresh, switched with ⌃1–⌃9, two fingers sideways over the column, or the space's icon. Mission Control's own ⌃1–⌃9, if you turned them on, take those keys first.") {
                 Switch(on: $prefs.usesSpaces)
             }

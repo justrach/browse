@@ -6,6 +6,15 @@ All notable changes to **browse** are documented here, newest first.
 
 ## Unreleased
 
+### Added
+
+- **Dia inline `/skills`, `@history` mentions & local Personal Memory (`AgentSkills.swift`, `Agent.swift`, `AgentComposer.swift`, `NanoComposerField.swift`, `AgentColumn.swift`, `Prefs.swift`)**:
+  - Added built-in Dia `/skills` (`/summarize`, `/factcheck`, `/explain`, `/compare`, `/reply`, `/extract`, `/translate`) plus automatic `/slug` registration for every saved custom task in `AgentTasks` — invocable directly in the composer `/` menu or inside the `⌘K` Command Switcher (`Ask graff` / `/skill`).
+  - Extended `@` mentions in the composer to search and attach recently visited history pages (`@history` + fuzzy recent matches) alongside open tabs, and added local **Personal memory** in Settings › Agent (stored strictly on your Mac, injected once per chat).
+- **Dia YouTube Video Timestamp Chat (`AgentSkills.swift`, `Agent.swift`, `MarkdownView.swift`, `AgentColumn.swift`, `Tab.swift`)**: automatically extracts YouTube video metadata, current playback timestamp `[MM:SS]`, and caption transcripts into page context, and turns `[MM:SS]` / `[H:MM:SS]` timestamps in agent replies into clickable links that seek the active `<video>` in place without reloading.
+- **Dia Floating Selection Action Pill (`SelectionBar.swift`, `Tab.swift`, `Browser.swift`, `App.swift`, `Prefs.swift`)**: highlighting text on any page displays a quiet frosted capsule (`Ask`, `Explain`, `Rewrite` inside editable fields like Gmail compose or X reply boxes, and `Copy`) using passive `mouseup`/`keyup` listeners with zero scroll overhead (toggleable in Settings › Agent).
+- **Visual `⌃Tab` MRU Tab Switcher with Live Previews & Arc-style Auto-Archive (`TabCycleHUD.swift`, `Browser.swift`, `App.swift`, `Sleep.swift`, `Settings.swift`, `Prefs.swift`)**: holding `⌃Tab` / `⌃⇧Tab` displays a centered frosted MRU tab switcher with live cached page thumbnails (releasing `⌃` commits the switch; `Esc` cancels), and Settings › Tabs now includes an optional **Auto-archive unpinned tabs** setting (`Never` / `12h` / `24h` / `7d`, recoverable anytime via `⌘⇧T` or History).
+
 ## 1.8.8 — 23 November 2026
 
 ### Added

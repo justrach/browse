@@ -60,7 +60,10 @@ extension Browser {
 
         let every = min(30, max(5, sleepAfter / 4))
         let timer = Timer(timeInterval: every, repeats: true) { [weak self] _ in
-            MainActor.assumeIsolated { self?.sleepIdle() }
+            MainActor.assumeIsolated {
+                self?.sleepIdle()
+                self?.archiveStaleTabs()
+            }
         }
         timer.tolerance = every / 4
         RunLoop.main.add(timer, forMode: .common)

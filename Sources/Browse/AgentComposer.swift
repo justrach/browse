@@ -85,6 +85,7 @@ struct AgentComposer: View {
         guard let query = slashQuery else { return [] }
         let all = NanoSlashCommand.catalog(
             agentCommands: agent.commands,
+            customTasks: agent.tasks.all,
             working: agent.phase == .working,
             full: full
         )
@@ -140,18 +141,71 @@ struct AgentComposer: View {
         }
     }
 
-    private var mentionMenuOpen: Bool { !mentionMatches.isEmpty }
+    /// Unified `@` mention candidate: either an open tab or a recently visited
+    /// history item (Dia-style `@tab` + `@history`).
+    private enum MentionCandidate: Identifiable {
+        case tab(Tab)
+        case history(History.Trace)
+
+        var id: String {
+            switch self {
+            case .tab(let t): return "tab-\(t.id.uuidString)"
+            case .history(let h): return "hist-\(h.url.absoluteString)"
+            }
+        }
+    }
+
+    private var mentionCandidates: [MentionCandidate] {
+        guard let token = mentionToken else { return [] }
+        let rawNeedle = token.query.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+        let historyOnly = rawNeedle == "history" || rawNeedle.hasPrefix("history:")
+        let needle: String = {
+            if rawNeedle == "history" { return "" }
+            if rawNeedle.hasPrefix("history:") { return String(rawNeedle.dropFirst("history:".count)).trimmingCharacters(in: .whitespaces) }
+            return rawNeedle
+        }()
+
+        var out: [MentionCandidate] = []
+        var openURLs = Set<String>()
+        if !historyOnly {
+            for tab in mentionMatches.prefix(5) {
+                if let url = tab.address?.absoluteString { openURLs.insert(url) }
+                out.append(.tab(tab))
+            }
+        } else {
+            for tab in browser.tabs where !tab.isBlank {
+                if let url = tab.address?.absoluteString { openURLs.insert(url) }
+            }
+        }
+        let alreadyHist = Set(agent.mentionedHistory.map(\.id))
+        let traces: [History.Trace] = needle.isEmpty
+            ? browser.history.recent()
+            : Array(browser.history.everything(matching: needle).prefix(8))
+        let histCap = historyOnly ? 7 : max(2, 7 - out.count)
+        for trace in traces where !openURLs.contains(trace.url.absoluteString) && !alreadyHist.contains(trace.url.absoluteString) {
+            out.append(.history(trace))
+            if out.count >= (historyOnly ? histCap : 7) { break }
+        }
+        return out
+    }
+
+    private var mentionMenuOpen: Bool { !mentionCandidates.isEmpty }
 
     private var anyCompletionOpen: Bool { slashMenuOpen || mentionMenuOpen }
 
-    private func acceptMention(_ tab: Tab? = nil) {
-        let matches = mentionMatches
-        guard let chosen = tab ?? (matches.indices.contains(mentionSelection) ? matches[mentionSelection] : matches.first) else { return }
+    private func acceptMentionCandidate(_ candidate: MentionCandidate? = nil) {
+        let items = mentionCandidates
+        guard let chosen = candidate ?? (items.indices.contains(mentionSelection) ? items[mentionSelection] : items.first) else { return }
         if let token = mentionToken {
             let prefix = String(composer.text[..<token.start])
             agent.draft = prefix
         }
-        agent.mentionTab(chosen)
+        switch chosen {
+        case .tab(let tab):
+            agent.mentionTab(tab)
+        case .history(let trace):
+            agent.mentionHistory(title: trace.title, url: trace.url)
+        }
         mentionSelection = 0
         mentionDismissed = false
         localFocusToken &+= 1
@@ -211,6 +265,12 @@ struct AgentComposer: View {
         case .guide:
             agent.draft = ""
             onShowGuide?()
+        case .skill(let skill):
+            // Run immediately when the draft is just the `/skill` token so Dia
+            // skills feel effortless (`/` → `/summarize` → ↩).
+            agent.draft = "/\(skill.slug)"
+            slashDismissed = true
+            send()
         case .insert(let prefix):
             agent.draft = prefix
             localFocusToken &+= 1
@@ -302,7 +362,7 @@ struct AgentComposer: View {
                 if let tab = contextTab {
                     AgentPageContext(tab: tab, agent: agent, embedded: true)
                 }
-                if !agent.mentionedTabs.isEmpty, agent.asking?.isQuestion != true {
+                if (!agent.mentionedTabs.isEmpty || !agent.mentionedHistory.isEmpty), agent.asking?.isQuestion != true {
                     mentionedStrip
                 }
                 if !agent.pendingImages.isEmpty, agent.asking?.isQuestion != true {
@@ -345,7 +405,7 @@ struct AgentComposer: View {
                                     guard count > 0 else { return }
                                     slashSelection = (slashSelection + delta + count) % count
                                 } else if mentionMenuOpen {
-                                    let count = min(7, mentionMatches.count)
+                                    let count = mentionCandidates.count
                                     guard count > 0 else { return }
                                     mentionSelection = (mentionSelection + delta + count) % count
                                 }
@@ -354,7 +414,7 @@ struct AgentComposer: View {
                                 if slashMenuOpen {
                                     acceptSlashCommand()
                                 } else if mentionMenuOpen {
-                                    acceptMention()
+                                    acceptMentionCandidate()
                                 }
                             },
                             onSlashDismiss: {
@@ -516,36 +576,57 @@ struct AgentComposer: View {
         .shadow(color: .black.opacity(0.14), radius: 14, y: 4)
     }
 
-    /// Dia-style floating tab mention picker triggered by `@` in the composer.
+    /// Dia-style floating tab & history mention picker triggered by `@` (or `@history`).
     private var mentionMenu: some View {
-        let matches = Array(mentionMatches.prefix(7))
+        let items = mentionCandidates
         return VStack(alignment: .leading, spacing: 2) {
-            Text("Mention an open tab")
+            Text("Mention an open tab or recent page (@history)")
                 .font(.system(size: 10.5, weight: .semibold))
                 .foregroundStyle(Palette.muted.opacity(0.75))
                 .padding(.horizontal, 9)
                 .padding(.top, 4)
                 .padding(.bottom, 2)
-            ForEach(Array(matches.enumerated()), id: \.element.id) { index, tab in
-                let lit = index == min(mentionSelection, max(0, matches.count - 1))
-                let host: String = {
-                    guard let h = tab.address?.host(), !h.isEmpty else { return "" }
-                    return h.hasPrefix("www.") ? String(h.dropFirst(4)) : h
-                }()
-                Button { acceptMention(tab) } label: {
+            ForEach(Array(items.enumerated()), id: \.element.id) { index, candidate in
+                let lit = index == min(mentionSelection, max(0, items.count - 1))
+                Button { acceptMentionCandidate(candidate) } label: {
                     HStack(spacing: 8) {
-                        Mark(icon: tab.icon, letter: tab.monogram, size: 14)
-                        Text(tab.label)
-                            .font(.system(size: 12, weight: .medium))
-                            .foregroundStyle(Palette.ink)
-                            .lineLimit(1)
-                            .truncationMode(.tail)
-                        if !host.isEmpty {
-                            Text(host)
-                                .font(.system(size: 11))
-                                .foregroundStyle(Palette.muted)
+                        switch candidate {
+                        case .tab(let tab):
+                            let host: String = {
+                                guard let h = tab.address?.host(), !h.isEmpty else { return "" }
+                                return h.hasPrefix("www.") ? String(h.dropFirst(4)) : h
+                            }()
+                            Mark(icon: tab.icon, letter: tab.monogram, size: 14)
+                            Text(tab.label)
+                                .font(.system(size: 12, weight: .medium))
+                                .foregroundStyle(Palette.ink)
                                 .lineLimit(1)
                                 .truncationMode(.tail)
+                            if !host.isEmpty {
+                                Text(host)
+                                    .font(.system(size: 11))
+                                    .foregroundStyle(Palette.muted)
+                                    .lineLimit(1)
+                                    .truncationMode(.tail)
+                            }
+                        case .history(let trace):
+                            let host = (trace.url.host() ?? "").replacingOccurrences(of: "www.", with: "")
+                            Image(systemName: "clock")
+                                .font(.system(size: 11, weight: .medium))
+                                .foregroundStyle(Palette.muted)
+                                .frame(width: 14, height: 14)
+                            Text(trace.title.isEmpty ? host : trace.title)
+                                .font(.system(size: 12, weight: .medium))
+                                .foregroundStyle(Palette.ink)
+                                .lineLimit(1)
+                                .truncationMode(.tail)
+                            if !host.isEmpty {
+                                Text(host)
+                                    .font(.system(size: 11))
+                                    .foregroundStyle(Palette.muted)
+                                    .lineLimit(1)
+                                    .truncationMode(.tail)
+                            }
                         }
                         Spacer(minLength: 4)
                     }
@@ -691,6 +772,39 @@ struct AgentComposer: View {
                     .overlay(
                         Capsule()
                             .strokeBorder(Palette.accent.opacity(0.24), lineWidth: 0.75)
+                    )
+                }
+                ForEach(agent.mentionedHistory) { item in
+                    HStack(spacing: 5) {
+                        Image(systemName: "clock")
+                            .font(.system(size: 10, weight: .medium))
+                            .foregroundStyle(Palette.muted)
+                        Text("@\(item.title)")
+                            .font(.system(size: 11.5, weight: .medium))
+                            .foregroundStyle(Palette.ink.opacity(0.9))
+                            .lineLimit(1)
+                            .truncationMode(.tail)
+                            .frame(maxWidth: 150, alignment: .leading)
+                        Button { agent.unmentionHistory(item.id) } label: {
+                            Image(systemName: "xmark")
+                                .font(.system(size: 8.5, weight: .semibold))
+                                .foregroundStyle(Palette.muted)
+                                .frame(width: 14, height: 14)
+                                .contentShape(Circle())
+                        }
+                        .buttonStyle(.plain)
+                        .help("Remove \(item.title)")
+                    }
+                    .padding(.leading, 7)
+                    .padding(.trailing, 5)
+                    .frame(height: 24)
+                    .background(
+                        Capsule()
+                            .fill(Palette.ink.opacity(scheme == .dark ? 0.08 : 0.05))
+                    )
+                    .overlay(
+                        Capsule()
+                            .strokeBorder(Palette.hairline, lineWidth: 0.75)
                     )
                 }
             }

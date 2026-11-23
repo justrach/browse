@@ -62,6 +62,7 @@ struct NanoSlashCommand: Identifiable, Equatable {
         case feedback
         case reconnect
         case guide
+        case skill(DiaSkill)
         case insert(String)
     }
 
@@ -71,15 +72,24 @@ struct NanoSlashCommand: Identifiable, Equatable {
     let icon: String
     let action: Action
 
-    static func catalog(agentCommands: [String], working: Bool, full: Bool) -> [NanoSlashCommand] {
-        var list: [NanoSlashCommand] = [
+    static func catalog(agentCommands: [String], customTasks: [AgentTask] = [], working: Bool, full: Bool) -> [NanoSlashCommand] {
+        var list: [NanoSlashCommand] = DiaSkill.all(customTasks: customTasks).map { skill in
+            NanoSlashCommand(
+                id: skill.id,
+                name: skill.slug,
+                description: skill.description,
+                icon: skill.icon,
+                action: .skill(skill)
+            )
+        }
+        list.append(contentsOf: [
             NanoSlashCommand(id: "new", name: "new", description: "Start a new conversation", icon: "square.and.pencil", action: .newChat),
             NanoSlashCommand(id: "model", name: "model", description: "Switch model, reasoning, or speed", icon: "cpu", action: .model),
             NanoSlashCommand(id: "fast", name: "fast", description: "Toggle Fast mode (priority tier)", icon: "bolt", action: .fast),
             NanoSlashCommand(id: "ultrafast", name: "ultrafast", description: "Toggle Ultra Fast mode (GPT-6.2)", icon: "bolt.fill", action: .ultrafast),
             NanoSlashCommand(id: "write", name: "write", description: "Open full-page editor (⌘⇧E)", icon: "doc.text", action: .writeMode),
             NanoSlashCommand(id: "expand", name: "expand", description: full ? "Move sidebar beside page (⇧⌘;)" : "Expand conversation full screen (⇧⌘;)", icon: full ? "sidebar.right" : "arrow.up.left.and.arrow.down.right", action: .expand),
-        ]
+        ])
         if working {
             list.insert(
                 NanoSlashCommand(id: "stop", name: "stop", description: "Stop the current run", icon: "stop.circle", action: .stop),

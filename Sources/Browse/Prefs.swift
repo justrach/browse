@@ -346,6 +346,23 @@ final class Preferences: ObservableObject {
     @Published var agentWidth: CGFloat {
         didSet { store.set(Double(agentWidth), forKey: "agent.width") }
     }
+    /// Local personal instructions & preferences included once per agent
+    /// session (Dia-style personal memory — stored strictly on this Mac).
+    @Published var agentMemory: String {
+        didSet { store.set(agentMemory, forKey: "agent.memory") }
+    }
+    /// Floating Dia-style action pill above highlighted text (Ask, Explain,
+    /// Rewrite, Copy).
+    @Published var selectionToolbar: Bool {
+        didSet {
+            store.set(selectionToolbar, forKey: "agent.selectionBar")
+            SelectionRelay.on = selectionToolbar
+        }
+    }
+    /// Auto-archive untouched unpinned tabs after N hours (0 = Never, 12, 24, 168).
+    @Published var autoArchiveHours: Int {
+        didSet { store.set(autoArchiveHours, forKey: "tabs.archiveHours") }
+    }
 
     init() {
         // Carried over from when there were four ways of holding the browser
@@ -439,6 +456,11 @@ final class Preferences: ObservableObject {
         agentServiceTier = store.string(forKey: "agent.serviceTier") ?? ""
         let agentWide = store.object(forKey: "agent.width") as? Double ?? Double(Metrics.agent)
         agentWidth = min(Metrics.agentMax, max(Metrics.agentMin, CGFloat(agentWide)))
+        agentMemory = store.string(forKey: "agent.memory") ?? ""
+        let selBar = store.object(forKey: "agent.selectionBar") as? Bool ?? true
+        selectionToolbar = selBar
+        SelectionRelay.on = selBar
+        autoArchiveHours = store.object(forKey: "tabs.archiveHours") as? Int ?? 0
         let flicks = store.bool(forKey: "float.flicks")
         floatFlicks = flicks
         Float.flicks = flicks
