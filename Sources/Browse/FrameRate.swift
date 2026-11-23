@@ -41,8 +41,14 @@ enum FrameRate {
     /// Before a page's view is made, which is when WebKit reads the flag:
     /// a new tab, one opened by a site, and one woken from sleep.
     @MainActor static func apply(to preferences: WKPreferences) {
-        guard fast, near60 != nil else { return }
-        set(false, in: preferences)
+        // Always promote `position: fixed` / sticky headers (GitHub, X, Notion,
+        // Linear, Reddit, docs) onto GPU compositing layers so WebKit's
+        // ScrollingThread scrolls them at 120 FPS without CPU main-thread repaints.
+        if let fixed = acceleratedFixedPosition {
+            set(true, for: fixed, in: preferences)
+        }
+        guard fast, let flag = near60 else { return }
+        set(false, for: flag, in: preferences)
         changed.add(preferences)
     }
 
@@ -55,25 +61,36 @@ enum FrameRate {
         return unsafeBitCast(preferences.method(for: get), to: Getter.self)(preferences, get, flag)
     }
 
-    // MARK: - WebKit's switch
+    // MARK: - WebKit's switches
 
-    /// The switch is one of WebKit's feature flags, the list Safari shows
-    /// under Develop › Feature Flags. It isn't in the public framework, so
-    /// each step is asked first, and a WebKit without it is left alone.
-    /// Looked up once: the list has a few hundred entries, and walking it
-    /// for every tab would be for nothing.
-    private static let near60: NSObject? = {
+    private static let allFeatures: [NSObject] = {
         let list = NSSelectorFromString("_features")
         let type: AnyObject = WKPreferences.self
         guard type.responds(to: list),
               let all = type.perform(list)?.takeUnretainedValue() as? [NSObject]
-        else { return nil }
-        return all.first { $0.value(forKey: "key") as? String == "PreferPageRenderingUpdatesNear60FPSEnabled" }
+        else { return [] }
+        return all
     }()
 
+    /// The switch is one of WebKit's feature flags, the list Safari shows
+    /// under Develop › Feature Flags. It isn't in the public framework, so
+    /// each step is asked first, and a WebKit without it is left alone.
+    private static let near60: NSObject? = allFeatures.first {
+        $0.value(forKey: "key") as? String == "PreferPageRenderingUpdatesNear60FPSEnabled"
+    }
+
+    private static let acceleratedFixedPosition: NSObject? = allFeatures.first {
+        $0.value(forKey: "key") as? String == "AcceleratedCompositingForFixedPositionEnabled"
+    }
+
     private static func set(_ on: Bool, in preferences: WKPreferences) {
+        guard let flag = near60 else { return }
+        set(on, for: flag, in: preferences)
+    }
+
+    private static func set(_ on: Bool, for flag: NSObject, in preferences: WKPreferences) {
         let set = NSSelectorFromString("_setEnabled:forFeature:")
-        guard let flag = near60, preferences.responds(to: set) else { return }
+        guard preferences.responds(to: set) else { return }
         typealias Setter = @convention(c) (AnyObject, Selector, Bool, AnyObject) -> Void
         unsafeBitCast(preferences.method(for: set), to: Setter.self)(preferences, set, on, flag)
     }

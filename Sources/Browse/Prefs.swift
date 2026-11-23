@@ -115,7 +115,10 @@ final class Preferences: ObservableObject {
         didSet { store.set(memoryMode.rawValue, forKey: "tabs.memoryMode") }
     }
     @Published var showsReading: Bool {
-        didSet { store.set(showsReading, forKey: "tabs.reading") }
+        didSet {
+            store.set(showsReading, forKey: "tabs.reading")
+            ScrollRelay.on = showsReading
+        }
     }
     /// The ad blocker. On unless turned off; there is nothing else to it.
     @Published var shielded: Bool {
@@ -397,7 +400,9 @@ final class Preferences: ObservableObject {
         googleSuggestions = store.bool(forKey: "search.google.suggestions")
         sleepsTabs = store.object(forKey: "tabs.sleep") as? Bool ?? true
         memoryMode = store.string(forKey: "tabs.memoryMode").flatMap(MemoryMode.init) ?? .balanced
-        showsReading = store.object(forKey: "tabs.reading") as? Bool ?? true
+        let reading = store.object(forKey: "tabs.reading") as? Bool ?? true
+        showsReading = reading
+        ScrollRelay.on = reading
         shielded = store.object(forKey: "shield") as? Bool ?? true
         let keeps = store.bool(forKey: "sites.keep")
         keepsSignIns = keeps

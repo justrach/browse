@@ -186,6 +186,8 @@ check(
     mutation_files == ["Forms.swift", "StoreRelay.swift"],
     f"Only audited, fast-bailed MutationObservers exist in Sources/Browse/ (found {mutation_files})",
 )
+framerate_src = read("Sources/Browse/FrameRate.swift")
+tab_scroll_src = read("Sources/Browse/Tab.swift")
 check(
     "pruneSlowGlobalCosmetics" in shield_src
     and '"[id^=' not in shield_src
@@ -195,8 +197,11 @@ check(
     and "removeEventListener('scroll', hide" in selection_src
     and "removeEventListener('scroll', moved" in forms_src
     and "event.clientX === lastX && event.clientY === lastY" in status_src
-    and "layer?.shadowPath" in stage_src,
-    "Universal 120 FPS scroll fast path: zero permanent wheel/capture-scroll listeners, stationary-cursor hover filter, explicit CALayer.shadowPath",
+    and "layer?.shadowPath" in stage_src
+    and "opaqueOcclusion.isOpaque = true" in stage_src
+    and "AcceleratedCompositingForFixedPositionEnabled" in framerate_src
+    and "addEventListener('scrollend'" in tab_scroll_src,
+    "Universal 120 FPS scroll fast path: zero permanent wheel/capture-scroll listeners, stationary-cursor hover filter, GPU fixed-position compositing, opaque backdrop occlusion, trailing-edge scrollend ScrollRelay",
 )
 
 # 14. Strict modal overlay mutual exclusion (⌘K + ⌘Y can never stack; matches Browse.OverlayMutex).
