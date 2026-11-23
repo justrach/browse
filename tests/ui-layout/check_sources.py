@@ -191,6 +191,29 @@ check(
     "Shield prunes unindexed global selectors, Swipe guards layout reads, and StatusLine coalesces mouseover via rAF",
 )
 
+# 14. Strict modal overlay mutual exclusion (⌘K + ⌘Y can never stack; matches Browse.OverlayMutex).
+browser_src = read("Sources/Browse/Browser.swift")
+app_src = read("Sources/Browse/App.swift")
+required_overlay_guards = [
+    "dismissOverlays(keeping: .switcher)",
+    "dismissOverlays(keeping: .history)",
+    "dismissOverlays(keeping: .downloads)",
+    "dismissOverlays(keeping: .settings)",
+    "dismissOverlays(keeping: .bookmarks)",
+    "dismissOverlays(keeping: .shortcuts)",
+    "dismissOverlays(keeping: .passwords)",
+    "dismissOverlays(keeping: .importing)",
+    "dismissOverlays(keeping: .reviewing)",
+    "dismissOverlays(keeping: .tabCycle)",
+    "dismissOverlays(keeping: .welcome)",
+    "dismissOverlays(keeping: .address)",
+]
+missing_guards = [g for g in required_overlay_guards if g not in browser_src]
+check(
+    not missing_guards and "!browser.hasModalOverlay" in app_src,
+    f"All 12 modal overlays enforce mutual exclusion via dismissOverlays(keeping:) (missing: {missing_guards})",
+)
+
 if failures:
     print(f"\n{len(failures)} source guardrail check(s) failed.", file=sys.stderr)
     sys.exit(1)
