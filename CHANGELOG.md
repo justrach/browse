@@ -6,6 +6,8 @@ All notable changes to **browse** are documented here, newest first.
 
 ## Unreleased
 
+## 1.9.0 — 23 November 2026
+
 ### Added
 
 - **Dia inline `/skills`, `@history` mentions & local Personal Memory (`AgentSkills.swift`, `Agent.swift`, `AgentComposer.swift`, `NanoComposerField.swift`, `AgentColumn.swift`, `Prefs.swift`)**:
