@@ -91,14 +91,21 @@ struct AgentColumn: View {
                 }
             }
         }
-        .shadow(
-            color: overlayDrawer
-                ? .black.opacity(darkRim ? 0.42 : 0.16)
-                : (floatingCard ? .black.opacity(darkRim ? 0.26 : 0.06) : .clear),
-            radius: overlayDrawer ? 22 : (darkRim ? 8 : 5),
-            x: overlayDrawer ? -4 : 0,
-            y: overlayDrawer ? 6 : 1.5
-        )
+        .background {
+            if floatingCard {
+                // O(1) GPU CALayer.shadowPath + opaque occlusion backing
+                // instead of SwiftUI .shadow(...) offscreen blur over the
+                // entire chat transcript on every 120 Hz slide frame.
+                BackdropShadowView(
+                    corner: Split.corner,
+                    fill: Palette.NS.ground,
+                    shadowOpacity: overlayDrawer ? (darkRim ? 0.42 : 0.16) : (darkRim ? 0.26 : 0.06),
+                    shadowRadius: overlayDrawer ? 22 : (darkRim ? 8 : 5),
+                    shadowOffset: overlayDrawer ? CGSize(width: -4, height: -6) : CGSize(width: 0, height: -1.5)
+                )
+                .allowsHitTesting(false)
+            }
+        }
         .padding(.top, 0)
         .padding(.trailing, trailingGap)
         .padding(.bottom, floatingCard ? Split.gap : 0)

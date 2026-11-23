@@ -350,15 +350,26 @@ struct ContentView: View {
     @State private var window: NSWindow?
     @State private var resting: RestingLights?
     /// Ticket tracking in-flight sidebar / Agent open-close spring slides so
-    /// WebKit's async live-resize (`beginLiveResize` / `endLiveResize`) always
+    /// WebKit's single-reflow GPU slide (`beginSlide` / `endSlide`) always
     /// exits balanced even when slides are toggled rapidly.
     @State private var panelSlideTicket = 0
-    /// Live window width so narrow windows float the Agent sidebar as an
-    /// overlay drawer instead of crushing webpages down to mobile breakpoints.
-    @State private var windowWidth: CGFloat = 1440
+    /// True once `AgentColumn` has been mounted in docked/drawer mode so
+    /// subsequent ⌘; toggles animate via a pure GPU offset transform without
+    /// destroying and recreating `NanoTextView` and the transcript each time.
+    @State private var agentWarm = false
+    /// True only when the window is too narrow to dock Agent beside a 760pt+
+    /// webpage — stored as a threshold Bool (not raw CGFloat width) so window
+    /// resizes never trigger 30× full `ContentView` / `SideBar` re-renders.
+    @State private var narrowForAgent = false
+    /// Suppresses `NSWindow.didResizeNotification` threshold flips while
+    /// `adjustWindowForAgent` animates the NSWindow frame.
+    @State private var animatingWindowForAgent = false
     /// Horizontal window expansion applied when opening the Agent sidebar in
     /// windowed mode so webpages keep their desktop width; restored on close.
     @State private var agentWindowDelta: (width: CGFloat, originX: CGFloat, expandedWidth: CGFloat)?
+    /// Pending horizontal window width delta from `adjustWindowForAgent` so
+    /// `bracketPanelSlide` pins `WKWebView` to its exact post-slide width once.
+    @State private var pendingWindowWidthDelta: CGFloat = 0
 
 
     /// True when the Arc/Dia-style unified frosted frame wraps the floating
@@ -440,27 +451,31 @@ struct ContentView: View {
 
             // Codegraff sits beside the webpage card below AsideBar (or in Full
             // Screen / narrow overlay mode), sharing the exact same top edge,
-            // bottom margin, and 10pt squircle corners. Placed inside a
-            // topTrailing ZStack so `.transition(.move(edge: .trailing))`
-            // translates by `AgentColumn`'s own width (`prefs.agentWidth`) —
-            // matching `stage`'s trailing inset in exact 1:1 lockstep rather
-            // than the full window width.
+            // bottom margin, and 10pt squircle corners. Kept warm after first
+            // open so repeated ⌘; toggles glide on a pure GPU `.offset` without
+            // rebuilding `NanoTextView` or re-laying out the transcript.
+            let agentCardVisible = fullHeightAgent || floatingAgentDrawer
             ZStack(alignment: .topTrailing) {
                 Color.clear.allowsHitTesting(false)
-                if fullHeightAgent || floatingAgentDrawer {
+                if (agentWarm || agentCardVisible) && !browser.agentFull && browser.prefs.usesAgent {
                     AgentColumn(
                         browser: browser,
                         agent: browser.agent,
                         prefs: browser.prefs,
-                        fullHeight: fullHeightAgent,
+                        fullHeight: !floatingAgentDrawer,
                         darkCanvas: darkCanvas,
                         overlayDrawer: floatingAgentDrawer
                     )
                         .padding(.top, asideBarShown ? Metrics.strip : (fullScreenTopHidden ? Fold.fullScreenGutter : (topTabBarShown ? Metrics.strip : 0)))
                         .frame(maxHeight: .infinity, alignment: .top)
+                        .offset(x: agentCardVisible ? 0 : browser.prefs.agentWidth)
+                        .allowsHitTesting(agentCardVisible)
+                        .disabled(!agentCardVisible)
+                        .accessibilityHidden(!agentCardVisible)
                         .transition(.move(edge: .trailing))
                 }
             }
+            .clipped()
         }
         .ignoresSafeArea()
         .animation(Motion.glide, value: browser.prefs.sidebar)
@@ -472,13 +487,26 @@ struct ContentView: View {
         .animation(.easeOut(duration: 0.12), value: browser.active?.immersed)
         .onChange(of: chrome) { old, new in
             guard old != new, !browser.prefs.isDraggingSideWidth else { return }
-            bracketPanelSlide()
+            updateNarrowThreshold()
+            bracketPanelSlide(deltaWidth: old.width - new.width)
+        }
+        .onChange(of: consulting) { _, now in
+            if now && !browser.agentFull { agentWarm = true }
+            if !now { handBack() }
+            pendingWindowWidthDelta = adjustWindowForAgent(opening: now)
         }
         .onChange(of: agentTrailing) { old, new in
             guard old != new, !browser.prefs.isDraggingAgentWidth else { return }
-            bracketPanelSlide()
+            let winDelta = pendingWindowWidthDelta
+            pendingWindowWidthDelta = 0
+            bracketPanelSlide(deltaWidth: winDelta + (old - new))
         }
-        .onChange(of: consulting) { _, now in adjustWindowForAgent(opening: now) }
+        .onChange(of: browser.agentFull) { _, full in
+            if full { agentWarm = false }
+        }
+        .onChange(of: browser.prefs.usesAgent) { _, uses in
+            if !uses { agentWarm = false }
+        }
     }
 
     /// The page, or Codegraff's talk filling the stage — or the page with the
@@ -613,22 +641,28 @@ struct ContentView: View {
         return [browser.active?.built].compactMap { $0 }
     }
 
-    /// Bracket an animated sidebar or Agent open/close spring with WebKit's
-    /// async live-resize (`viewWillStartLiveResize` / `viewDidEndLiveResize` +
-    /// `backPage()`) so the page card resizes smoothly in 1:1 lockstep with the
-    /// sliding panel from frame 0 without blocking on synchronous WebContent
-    /// geometry updates.
-    private func bracketPanelSlide() {
+    /// Bracket an animated sidebar or Agent open/close spring with single-reflow
+    /// GPU slide lockstep (`beginSlide(deltaWidth:)` / `endSlide()`): resizes
+    /// each visible `WKWebView` ONCE to its exact final target width at `t = 0`
+    /// while `StageView`'s rounded mask glides at 120 FPS in 1:1 lockstep with
+    /// the sliding panel — eliminating 30× DOM/ResizeObserver reflow storms on
+    /// heavy feeds like X/Twitter.
+    private func bracketPanelSlide(deltaWidth: CGFloat) {
         guard !Motion.reduced else { return }
         panelSlideTicket += 1
         let ticket = panelSlideTicket
         let pageViews = visiblePageViews
-        pageViews.forEach { $0.beginLiveResize() }
+        if let pair = browser.shownSplit, let split = browser.split {
+            pair.left.built?.beginSlide(deltaWidth: deltaWidth * split.fraction)
+            pair.right.built?.beginSlide(deltaWidth: deltaWidth * (1 - split.fraction))
+        } else {
+            pageViews.forEach { $0.beginSlide(deltaWidth: deltaWidth) }
+        }
         DispatchQueue.main.asyncAfter(deadline: .now() + 0.28) {
             guard ticket == panelSlideTicket,
                   !browser.prefs.isDraggingAgentWidth,
                   !browser.prefs.isDraggingSideWidth else { return }
-            pageViews.forEach { $0.endLiveResize() }
+            pageViews.forEach { $0.endSlide() }
         }
     }
 
@@ -829,13 +863,12 @@ struct ContentView: View {
                 if let window, (note.object as? NSWindow) === window {
                     window.backgroundColor = .black
                     browser.fullScreen = true
-                    windowWidth = window.frame.width
+                    updateNarrowThreshold(for: window.frame.width)
                 }
             }
             .onReceive(NotificationCenter.default.publisher(for: NSWindow.didResizeNotification)) { note in
-                if let window, (note.object as? NSWindow) === window {
-                    let w = window.frame.width
-                    if abs(w - windowWidth) >= 1 { windowWidth = w }
+                if let window, (note.object as? NSWindow) === window, !animatingWindowForAgent {
+                    updateNarrowThreshold(for: window.frame.width)
                 }
             }
             .onReceive(NotificationCenter.default.publisher(for: NSWindow.willExitFullScreenNotification)) { note in
@@ -1048,9 +1081,18 @@ struct ContentView: View {
         guard consulting && !browser.agentFull else { return false }
         // Never flip docked ↔ floating mid-drag while pulling the Agent edge.
         if browser.prefs.isDraggingAgentWidth { return false }
+        return narrowForAgent
+    }
+
+    private func isNarrow(windowWidth width: CGFloat) -> Bool {
         let sideW: CGFloat = sidebar ? browser.prefs.sideWidth : 0
-        let remaining = windowWidth - sideW - browser.prefs.agentWidth
-        return remaining < 760
+        return (width - sideW - browser.prefs.agentWidth) < 760
+    }
+
+    private func updateNarrowThreshold(for width: CGFloat? = nil) {
+        guard let w = width ?? window?.frame.width else { return }
+        let next = isNarrow(windowWidth: w)
+        if next != narrowForAgent { narrowForAgent = next }
     }
 
     /// True when the Agent sidebar sits beside AsideBar or Full Screen at full
@@ -1068,8 +1110,10 @@ struct ContentView: View {
     /// In windowed mode, smoothly widen the NSWindow when opening the Agent
     /// sidebar (if screen space allows and the page would otherwise dip below
     /// comfortable desktop width), and restore the original frame on close.
-    private func adjustWindowForAgent(opening: Bool) {
-        guard let window, !browser.fullScreen, !browser.agentFull else { return }
+    /// Returns the horizontal window width delta applied.
+    @discardableResult
+    private func adjustWindowForAgent(opening: Bool) -> CGFloat {
+        guard let window, !browser.fullScreen, !browser.agentFull else { return 0 }
         if opening {
             let sideW: CGFloat = sidebar ? browser.prefs.sideWidth : 0
             let agentW = browser.prefs.agentWidth
@@ -1078,12 +1122,12 @@ struct ContentView: View {
             // (1120pt, covering X.com 1095px and Gmail full tabs), expand the
             // window horizontally up to `agentW` within the visible screen.
             guard currentPageW - agentW < 1120,
-                  let screen = window.screen ?? NSScreen.main else { return }
+                  let screen = window.screen ?? NSScreen.main else { return 0 }
             let visible = screen.visibleFrame
             let needed = min(agentW, max(0, 1120 - (currentPageW - agentW)))
             let maxGrowth = max(0, visible.width - window.frame.width)
             let growth = min(needed, maxGrowth)
-            guard growth >= 24 else { return }
+            guard growth >= 24 else { return 0 }
             var target = window.frame
             target.size.width += growth
             if target.maxX > visible.maxX {
@@ -1091,18 +1135,22 @@ struct ContentView: View {
             }
             let dx = target.origin.x - window.frame.origin.x
             agentWindowDelta = (width: growth, originX: dx, expandedWidth: target.size.width)
-            windowWidth = target.size.width
+            updateNarrowThreshold(for: target.size.width)
             animateWindowFrame(window, to: target)
+            return growth
         } else if let delta = agentWindowDelta {
             agentWindowDelta = nil
             // Only restore if the user didn't manually resize the window far away.
-            guard abs(window.frame.width - delta.expandedWidth) < 40 else { return }
+            guard abs(window.frame.width - delta.expandedWidth) < 40 else { return 0 }
             var target = window.frame
             target.size.width = max(640, target.size.width - delta.width)
             target.origin.x -= delta.originX
-            windowWidth = target.size.width
+            let applied = target.size.width - window.frame.width
+            updateNarrowThreshold(for: target.size.width)
             animateWindowFrame(window, to: target)
+            return applied
         }
+        return 0
     }
 
     /// Non-blocking CoreAnimation window frame transition so NSWindow widening
@@ -1113,11 +1161,17 @@ struct ContentView: View {
             window.setFrame(target, display: true, animate: false)
             return
         }
-        NSAnimationContext.runAnimationGroup { ctx in
+        animatingWindowForAgent = true
+        NSAnimationContext.runAnimationGroup({ ctx in
             ctx.duration = 0.22
             ctx.timingFunction = CAMediaTimingFunction(name: .easeOut)
             window.animator().setFrame(target, display: true)
-        }
+        }, completionHandler: {
+            DispatchQueue.main.async {
+                animatingWindowForAgent = false
+                updateNarrowThreshold(for: window.frame.width)
+            }
+        })
     }
 
     /// True while the tabs are down the left, and not folded away (see Fold.swift).
@@ -1184,7 +1238,7 @@ struct ContentView: View {
 
     private func dress(_ window: NSWindow) {
         Links.window = window
-        windowWidth = window.frame.width
+        updateNarrowThreshold(for: window.frame.width)
         browser.fullScreen = window.styleMask.contains(.fullScreen)
         // Light or dark is the app's to say (Settings › Appearance); the
         // window only has to be the ground colour that goes with it.

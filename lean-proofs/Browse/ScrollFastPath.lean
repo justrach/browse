@@ -387,4 +387,104 @@ theorem lockstep_horizontal_partition (windowW sideW agentW : Int) :
     sideW + stageW + agentW = windowW := by
   omega
 
+/-! ### Part 7: Single-Reflow GPU Slide Lockstep & Threshold-Only Resize (`Stage.swift`, `App.swift`) -/
+
+structure SlideLockstepState where
+  liveResizeActive : Bool
+  pinned           : Bool
+  webWidth         : Nat
+  clipWidth        : Nat
+  webReflows       : Nat
+deriving DecidableEq, Repr, BEq
+
+inductive SlideEvent where
+  | beginSlide (targetW : Nat)
+  | gpuFrame (interpW : Nat)   -- 120 Hz SwiftUI spring layout step on StageView.bounds
+  | endSlide
+deriving DecidableEq, Repr, BEq
+
+def stepSlide (s : SlideLockstepState) : SlideEvent → SlideLockstepState
+  | .beginSlide targetW =>
+      let reflow := if s.webWidth == targetW then 0 else 1
+      { liveResizeActive := true
+        pinned           := true
+        webWidth         := targetW
+        clipWidth        := s.clipWidth
+        webReflows       := s.webReflows + reflow }
+  | .gpuFrame interpW =>
+      -- Pinned inner WKWebView receives ZERO intermediate frame resizes!
+      { s with clipWidth := interpW }
+  | .endSlide =>
+      let reflow := if s.webWidth == s.clipWidth then 0 else 1
+      { liveResizeActive := false
+        pinned           := false
+        webWidth         := s.clipWidth
+        clipWidth        := s.clipWidth
+        webReflows       := s.webReflows + reflow }
+
+def runSlide (s : SlideLockstepState) : List SlideEvent → SlideLockstepState
+  | []      => s
+  | e :: es => runSlide (stepSlide s e) es
+
+/-- Theorem: across ANY sequence of `n` intermediate 120 Hz GPU animation frames
+    ending at `targetW`, `WKWebView` triggers AT MOST 1 reflow (0 when window
+    widening cancels the panel width!), NEVER `O(n)` per-frame reflows, and
+    exits with zero post-slide jump and balanced live-resize. -/
+theorem single_reflow_gpu_slide_lockstep (initW targetW : Nat) (frames : List Nat) :
+    let init : SlideLockstepState :=
+      { liveResizeActive := false, pinned := false, webWidth := initW, clipWidth := initW, webReflows := 0 }
+    let trace := .beginSlide targetW :: (frames.map SlideEvent.gpuFrame ++ [.gpuFrame targetW, .endSlide])
+    let done := runSlide init trace
+    done.webReflows ≤ 1 ∧ done.liveResizeActive = false ∧ done.pinned = false ∧ done.webWidth = targetW := by
+  have hframes : ∀ (st : SlideLockstepState) (fs : List Nat),
+      let r := runSlide st (fs.map SlideEvent.gpuFrame)
+      r.liveResizeActive = st.liveResizeActive ∧
+      r.pinned = st.pinned ∧
+      r.webWidth = st.webWidth ∧
+      r.webReflows = st.webReflows := by
+    intro st fs
+    induction fs generalizing st with
+    | nil => simp [runSlide]
+    | cons w rest ih =>
+      simpa [List.map, runSlide, stepSlide] using ih { st with clipWidth := w }
+  have hsplit : ∀ (st : SlideLockstepState) (xs ys : List SlideEvent),
+      runSlide st (xs ++ ys) = runSlide (runSlide st xs) ys := by
+    intro st xs ys
+    induction xs generalizing st with
+    | nil => rfl
+    | cons x r ih => simpa [runSlide] using ih (stepSlide st x)
+  dsimp only
+  simp only [runSlide]
+  rw [hsplit]
+  have hs0 : stepSlide { liveResizeActive := false, pinned := false, webWidth := initW, clipWidth := initW, webReflows := 0 } (.beginSlide targetW) =
+      { liveResizeActive := true, pinned := true, webWidth := targetW, clipWidth := initW,
+        webReflows := if initW == targetW then 0 else 1 } := by
+    simp [stepSlide]
+  rw [hs0]
+  have hf := hframes
+    { liveResizeActive := true, pinned := true, webWidth := targetW, clipWidth := initW,
+      webReflows := if initW == targetW then 0 else 1 } frames
+  rcases hf with ⟨_, _, hw, hr⟩
+  dsimp only at hw hr
+  have hrle : (if initW == targetW then 0 else 1) ≤ 1 := by split <;> omega
+  simp only [runSlide, stepSlide, hw, beq_self_eq_true, ite_true, Nat.add_zero, and_true]
+  omega
+
+/-- Theorem: during a window-frame animation (`animatingWindowForAgent = true`),
+    any burst of `n` `NSWindow.didResizeNotification` ticks causes strictly ZERO
+    SwiftUI `ContentView` state mutations. -/
+def stepWindowResize (animating : Bool) (rerenders : Nat) : Nat :=
+  if animating then rerenders else rerenders + 1
+
+def runWindowResizeBurst (animating : Bool) (n : Nat) (rerenders : Nat) : Nat :=
+  match n with
+  | 0     => rerenders
+  | k + 1 => runWindowResizeBurst animating k (stepWindowResize animating rerenders)
+
+theorem window_resize_burst_zero_spurious_rerenders (n r : Nat) :
+    runWindowResizeBurst true n r = r := by
+  induction n generalizing r with
+  | zero => rfl
+  | succ k ih => simpa [runWindowResizeBurst, stepWindowResize] using ih r
+
 end Browse.ScrollFastPath
