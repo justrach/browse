@@ -114,23 +114,30 @@ struct SideBar: View {
         // When peeking over a folded page, supply our own glass backdrop.
         .background {
             if floating {
-                ZStack {
-                    SideGlass(dark: tint?.dark)
-                    if let tint {
-                        tint.wash
-                        if landing { Palette.hover.opacity(0.45) }
-                    } else {
-                        (landing ? Palette.hover : Palette.ground).opacity(0.45)
+                if browser.fullScreen {
+                    ZStack {
+                        Color.black.opacity(0.94)
+                        if landing { Color.white.opacity(0.08) }
                     }
+                } else {
+                    ZStack {
+                        SideGlass(dark: tint?.dark)
+                        if let tint {
+                            tint.wash
+                            if landing { Palette.hover.opacity(0.45) }
+                        } else {
+                            (landing ? Palette.hover : Palette.ground).opacity(0.45)
+                        }
+                    }
+                    .animation(Motion.glide, value: tint)
                 }
-                .animation(Motion.glide, value: tint)
             } else if landing {
                 Palette.hover.opacity(0.45)
             }
         }
         .overlay(alignment: .trailing) {
             if floating {
-                Rectangle().fill(seam).frame(width: 1)
+                Rectangle().fill(browser.fullScreen ? Color.white.opacity(0.10) : seam).frame(width: 1)
             }
         }
         .overlay(alignment: .trailing) { edge }
@@ -142,9 +149,9 @@ struct SideBar: View {
         .animation(Motion.glide, value: browser.editingTab)
         .animation(Motion.settle, value: browser.tabs.map(\.id))
         .animation(Motion.settle, value: browser.pinnedCount)
-        // On a dark page the column is dark, whatever the window is: its
-        // words and greys follow what's behind them, not the Mac.
-        .environment(\.colorScheme, tint.map { $0.dark ? .dark : .light } ?? scheme)
+        // On a dark page — or in Full Screen over the pure black bezel — the
+        // column uses dark appearance so its text and icons stay crisp.
+        .environment(\.colorScheme, browser.fullScreen ? .dark : (tint.map { $0.dark ? .dark : .light } ?? scheme))
     }
 
     @Environment(\.colorScheme) private var scheme

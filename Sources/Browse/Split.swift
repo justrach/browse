@@ -242,7 +242,7 @@ struct SplitStage<Overlay: View>: View {
         .background {
             if !inUnifiedCanvas { ground }
         }
-        .environment(\.colorScheme, tint.map { $0.dark ? .dark : .light } ?? scheme)
+        .environment(\.colorScheme, browser.fullScreen ? .dark : (tint.map { $0.dark ? .dark : .light } ?? scheme))
     }
 
     private var tint: PageTint? {
@@ -250,17 +250,24 @@ struct SplitStage<Overlay: View>: View {
     }
 
     private var darkChrome: Bool {
-        tint?.dark ?? (scheme == .dark)
+        browser.fullScreen || (tint?.dark ?? (scheme == .dark))
     }
 
-    /// The same surface as the sidebar's (SideBar's background): the
-    /// desktop through glass, under the page's colour when there is one.
+    /// The same surface as the sidebar's (SideBar's background): pure black in
+    /// Full Screen to blend into the bezel, or the desktop through glass under
+    /// the page's colour when windowed.
     private var ground: some View {
-        ZStack {
-            SideGlass(dark: tint?.dark)
-            if let tint { tint.wash } else { Palette.ground.opacity(0.45) }
+        Group {
+            if browser.fullScreen {
+                Color.black
+            } else {
+                ZStack {
+                    SideGlass(dark: tint?.dark)
+                    if let tint { tint.wash } else { Palette.ground.opacity(0.45) }
+                }
+                .animation(Motion.glide, value: tint)
+            }
         }
-        .animation(Motion.glide, value: tint)
     }
 }
 
