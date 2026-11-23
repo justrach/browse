@@ -375,18 +375,20 @@ struct AgentComposer: View {
                     .contentShape(Rectangle())
                     .onTapGesture { localFocusToken &+= 1 }
 
-                    HStack(spacing: 4) {
+                    let narrow = !full && browser.prefs.agentWidth < 340
+                    HStack(spacing: narrow ? 2 : 4) {
                         choices
                             .frame(maxWidth: .infinity, alignment: .leading)
+                            .layoutPriority(1)
                         if let ctx = agent.context, ctx.window > 0 {
-                            ContextUsageRing(used: ctx.used, window: ctx.window)
+                            ContextUsageRing(used: ctx.used, window: ctx.window, compact: narrow)
                         }
                         if agent.asking?.isQuestion != true, composer.editingQueueID == nil {
                             Button(action: pickImageFiles) {
                                 Image(systemName: "photo.badge.plus")
                                     .font(.system(size: 11, weight: .medium))
                                     .foregroundStyle(attachHover ? Palette.ink : Palette.muted.opacity(0.82))
-                                    .frame(width: 24, height: 24)
+                                    .frame(width: narrow ? 22 : 24, height: narrow ? 22 : 24)
                                     .background(
                                         RoundedRectangle(cornerRadius: 6, style: .continuous)
                                             .fill(attachHover ? Palette.hover : .clear)
@@ -403,7 +405,7 @@ struct AgentComposer: View {
                                     Text("@")
                                         .font(.system(size: 12.5, weight: .medium, design: .rounded))
                                         .foregroundStyle(mentionHover ? Palette.ink : Palette.muted.opacity(0.82))
-                                        .frame(width: 24, height: 24)
+                                        .frame(width: narrow ? 22 : 24, height: narrow ? 22 : 24)
                                         .background(
                                             RoundedRectangle(cornerRadius: 6, style: .continuous)
                                                 .fill(mentionHover ? Palette.hover : .clear)
@@ -416,22 +418,24 @@ struct AgentComposer: View {
                                 .help("Mention another open tab   @")
                                 .accessibilityLabel("Mention open tab")
                             }
-                            Button(action: openWriteMode) {
-                                Image(systemName: "arrow.up.left.and.arrow.down.right")
-                                    .font(.system(size: 10.5, weight: .medium))
-                                    .foregroundStyle(writeHover ? Palette.ink : Palette.muted.opacity(0.8))
-                                    .frame(width: 24, height: 24)
-                                    .background(
-                                        RoundedRectangle(cornerRadius: 6, style: .continuous)
-                                            .fill(writeHover ? Palette.hover : .clear)
-                                    )
-                                    .contentShape(Rectangle())
+                            if !narrow {
+                                Button(action: openWriteMode) {
+                                    Image(systemName: "arrow.up.left.and.arrow.down.right")
+                                        .font(.system(size: 10.5, weight: .medium))
+                                        .foregroundStyle(writeHover ? Palette.ink : Palette.muted.opacity(0.8))
+                                        .frame(width: 24, height: 24)
+                                        .background(
+                                            RoundedRectangle(cornerRadius: 6, style: .continuous)
+                                                .fill(writeHover ? Palette.hover : .clear)
+                                        )
+                                        .contentShape(Rectangle())
+                                }
+                                .buttonStyle(TactilePress())
+                                .onHover { writeHover = $0 }
+                                .animation(Motion.quick, value: writeHover)
+                                .help("Expand editor   ⌘⇧E")
+                                .accessibilityLabel("Expand editor")
                             }
-                            .buttonStyle(TactilePress())
-                            .onHover { writeHover = $0 }
-                            .animation(Motion.quick, value: writeHover)
-                            .help("Expand editor   ⌘⇧E")
-                            .accessibilityLabel("Expand editor")
                         }
                         actions
                     }
@@ -775,6 +779,7 @@ struct AgentComposer: View {
 struct ContextUsageRing: View {
     let used: Int
     let window: Int
+    var compact = false
 
     private var ratio: Double {
         guard window > 0 else { return 0 }
@@ -790,7 +795,7 @@ struct ContextUsageRing: View {
     }
 
     var body: some View {
-        HStack(spacing: 4) {
+        HStack(spacing: compact ? 0 : 4) {
             ZStack {
                 Circle()
                     .stroke(Palette.ink.opacity(0.12), lineWidth: 1.6)
@@ -801,12 +806,14 @@ struct ContextUsageRing: View {
             }
             .frame(width: 12, height: 12)
 
-            Text("\(percent)%")
-                .font(.system(size: 10.5, weight: .medium))
-                .foregroundStyle(ratio >= 0.80 ? ringColor : Palette.muted.opacity(0.85))
-                .monospacedDigit()
+            if !compact {
+                Text("\(percent)%")
+                    .font(.system(size: 10.5, weight: .medium))
+                    .foregroundStyle(ratio >= 0.80 ? ringColor : Palette.muted.opacity(0.85))
+                    .monospacedDigit()
+            }
         }
-        .padding(.horizontal, 5)
+        .padding(.horizontal, compact ? 3 : 5)
         .frame(height: 22)
         .help("Context window: \(Self.formatTokens(used)) / \(Self.formatTokens(window)) tokens (\(percent)%)")
         .accessibilityLabel("Context window \(percent) percent used")

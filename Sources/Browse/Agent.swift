@@ -310,6 +310,9 @@ final class Agent: ObservableObject {
         case antigravity
         case opencode
         case gemini
+        case grok
+        case devin
+        case hermes
         case pi
 
         var id: String { rawValue }
@@ -320,6 +323,9 @@ final class Agent: ObservableObject {
             case .antigravity: return "Antigravity"
             case .opencode: return "OpenCode"
             case .gemini: return "Gemini CLI"
+            case .grok: return "Grok"
+            case .devin: return "Devin"
+            case .hermes: return "Hermes"
             case .pi: return "Pi"
             }
         }
@@ -330,6 +336,9 @@ final class Agent: ObservableObject {
             case .antigravity: return "Antigravity"
             case .opencode: return "OpenCode"
             case .gemini: return "Gemini"
+            case .grok: return "Grok"
+            case .devin: return "Devin"
+            case .hermes: return "Hermes"
             case .pi: return "Pi"
             }
         }
@@ -340,6 +349,9 @@ final class Agent: ObservableObject {
             case .antigravity: return "antigravity"
             case .opencode: return "opencode"
             case .gemini: return "google"
+            case .grok: return "xai"
+            case .devin: return "devin"
+            case .hermes: return "hermes"
             case .pi: return "pi"
             }
         }
@@ -350,8 +362,17 @@ final class Agent: ObservableObject {
             case .antigravity: return ["acp", "--dangerously-skip-permissions"]
             case .opencode: return ["acp"]
             case .gemini: return ["--acp"]
+            case .grok: return ["--no-auto-update", "agent", "--no-leader", "stdio"]
+            case .devin: return ["acp"]
+            case .hermes: return ["acp"]
             case .pi: return []
             }
+        }
+
+        /// Whether this backend cleanly handles multiple sequential
+        /// `session/new` calls on the same already-warm ACP process.
+        var supportsMultiSession: Bool {
+            self != .graff
         }
     }
 
@@ -582,6 +603,8 @@ final class Agent: ObservableObject {
                 "codegraff": "Codegraff",
                 "antigravity": "Antigravity",
                 "opencode": "OpenCode",
+                "devin": "Devin",
+                "hermes": "Hermes",
                 "pi": "Pi",
                 "claude-agent": "Claude Agent",
                 "codex": "Codex / ChatGPT",
@@ -642,6 +665,9 @@ final class Agent: ObservableObject {
     @Published private(set) var serviceTier: ServiceTier = .standard
     private var pendingServiceTier: ServiceTier?
     private var applyingServiceTier = false
+    /// Suppresses visible transcript chunks while a live control slash command
+    /// (`/fast` or `/model`) executes in-session.
+    private var suppressingControlOutput = false
     /// Isolated typing buffer observed only by the composer and Write view.
     let composer = ComposerBuffer()
     /// Flips only when draft transitions between empty and non-empty so views
@@ -853,6 +879,8 @@ final class Agent: ObservableObject {
     init(prefs: Preferences) {
         self.prefs = prefs
         self.backend = Backend(rawValue: prefs.agentBackend) ?? .graff
+        // Hydrate cached model catalog in <1 ms so the model picker is never empty.
+        hydrateCachedCatalog(for: self.backend)
         // graff saves its session when its input ends, and ends with it.
         NotificationCenter.default.addObserver(
             forName: NSApplication.willTerminateNotification, object: nil, queue: .main
@@ -861,31 +889,170 @@ final class Agent: ObservableObject {
                 self?.keep()
                 self?.chats.flush()
                 self?.pipe?.stop()
+                AgentEngine.shared.shutdownAll()
                 // The port dies with the app; nothing should be told of it.
                 AgentTools.withdraw()
             }
         }
         refreshBackends()
+        // Pre-warm the active backend in the background right after launch so
+        // opening the Agent sidebar has zero warm time.
+        if prefs.usesAgent && !Store.testing {
+            Task { [weak self] in
+                try? await Task.sleep(nanoseconds: 250_000_000)
+                guard let self, self.prefs.usesAgent, self.pipe == nil, self.phase == .asleep else { return }
+                AgentEngine.shared.prewarm(backend: self.backend, prefs: self.prefs)
+            }
+        }
+    }
+
+    private func hydrateCachedCatalog(for target: Backend) {
+        guard let cached = AgentEngine.shared.cachedCatalog(for: target) else { return }
+        let savedID = prefs.agentModel(for: target.rawValue)
+        var list = cached.models
+        let chosen = (!savedID.isEmpty ? list.first(where: { $0.id == savedID || $0.acpValue == savedID }) : nil)
+            ?? cached.current
+            ?? list.first
+        if let chosen {
+            list.removeAll { $0 == chosen }
+            list.insert(chosen, at: 0)
+        }
+        self.models = list
+        self.model = chosen
+        self.effort = cached.effort
+        self.modelConfigID = cached.modelConfigID
     }
 
     func refreshBackends() {
         let custom = prefs.agentPath
         Task {
-            let found = await Agent.discoverBackends(customGraff: custom)
+            let found = await AgentEngine.shared.discoverAll(customGraff: custom)
             if !found.isEmpty {
                 self.availableBackends = found
             }
         }
     }
 
+    /// Quietly pre-warms the top secondary installed backend(s) when the user
+    /// opens the Model Picker so clicking another agent pill is 0 ms instant.
+    func prewarmSecondaryBackends() {
+        guard prefs.usesAgent, !Store.testing else { return }
+        let others = availableBackends.filter { $0 != backend }
+        // Prioritize Antigravity and Codegraff first since they're the primary daily drivers.
+        let ordered = others.sorted { a, b in
+            let rank: (Backend) -> Int = {
+                switch $0 {
+                case .antigravity: return 0
+                case .graff: return 1
+                case .opencode: return 2
+                case .grok: return 3
+                default: return 4
+                }
+            }
+            return rank(a) < rank(b)
+        }
+        for candidate in ordered.prefix(2) {
+            AgentEngine.shared.prewarm(backend: candidate, prefs: prefs)
+        }
+    }
+
+    /// Parks the currently active idle worker into `AgentEngine`'s warm pool
+    /// instead of killing it, so switching back to it takes 0 ms.
+    private func parkCurrentWorker() {
+        flushFlow()
+        generation = UUID()
+        replaying = false
+        asking = nil
+        owed = [:]
+        held = nil
+        fail(Failure(code: -1, message: "Switched backend"))
+
+        guard let livePipe = pipe, livePipe.isRunning, let liveSession = session, !prompting, phase == .ready else {
+            let dying = pipe
+            pipe = nil
+            dying?.stop()
+            session = nil
+            prompting = false
+            phase = .asleep
+            return
+        }
+        let worker = AgentEngine.WarmWorker(backend: backend, pipe: livePipe, program: program ?? URL(fileURLWithPath: "/usr/bin/env"))
+        worker.session = liveSession
+        worker.models = models
+        worker.model = model
+        worker.effort = effort
+        worker.modelConfigID = modelConfigID
+        worker.serviceTier = serviceTier
+        worker.commands = commands
+        worker.nextID = next
+        worker.ready = true
+        worker.lastUsed = Date()
+
+        // Detach before parking so the pool owns this pipe cleanly.
+        pipe = nil
+        session = nil
+        prompting = false
+        phase = .asleep
+        AgentEngine.shared.park(worker)
+    }
+
+    /// Attaches an already-warm worker from `AgentEngine` in 0 ms!
+    private func attach(warm worker: AgentEngine.WarmWorker) {
+        self.program = worker.program
+        self.pipe = worker.pipe
+        self.session = worker.session
+        self.next = max(self.next, worker.nextID)
+        self.serviceTier = worker.serviceTier
+        self.commands = worker.commands
+        self.modelConfigID = worker.modelConfigID
+        if !worker.models.isEmpty { self.models = worker.models }
+        if let m = worker.model { self.model = m }
+        if let e = worker.effort { self.effort = e }
+        self.phase = .ready
+        self.lastActive = Date()
+        self.introduced = false
+        watchIdle()
+
+        let livePipe = worker.pipe
+        livePipe.onMessage = { [weak self, weak livePipe] message in
+            guard let self, let livePipe, self.pipe === livePipe else { return }
+            self.take(message)
+        }
+        livePipe.onExit = { [weak self, weak livePipe] status, said in
+            guard let self, let livePipe, self.pipe === livePipe else { return }
+            self.ended(status: status, said: said)
+        }
+
+        // Apply remembered model/effort if they drifted while parked.
+        let savedModel = prefs.agentModel(for: backend.rawValue)
+        if !savedModel.isEmpty,
+           let match = models.first(where: { $0.id == savedModel || $0.acpValue == savedModel }),
+           match != self.model {
+            choose(match)
+        }
+        let wantedEffort = prefs.agentEffort
+        if let effort, !wantedEffort.isEmpty, wantedEffort != effort.current,
+           effort.levels.contains(where: { $0.value == wantedEffort }) {
+            choose(effort: wantedEffort)
+        }
+        if backend == .graff && models.isEmpty {
+            listModels()
+        }
+        if let blocks = held {
+            held = nil
+            prompt(blocks)
+        }
+    }
+
     /// Switch the active ACP agent backend (e.g. Codegraff → Antigravity →
-    /// OpenCode → Gemini CLI), carrying over any visible conversation context.
+    /// OpenCode → Gemini CLI → Grok → Devin), parking the old warm worker so
+    /// switching back is 0 ms instant and carrying over visible context.
     func choose(backend next: Backend) {
         guard next != backend else { return }
         prefs.agentBackend = next.rawValue
-        backend = next
         keep()
-        shutDown()
+        parkCurrentWorker()
+        backend = next
         model = nil
         models = []
         effort = nil
@@ -897,6 +1064,8 @@ final class Agent: ObservableObject {
         if !entries.isEmpty {
             entries.append(Entry(kind: .note, text: "Switched to \(next.title)"))
         }
+        // Populate model picker in <1 ms from persistent catalog cache.
+        hydrateCachedCatalog(for: next)
         start()
     }
 
@@ -1026,8 +1195,10 @@ final class Agent: ObservableObject {
         phase = .asleep
     }
 
-    /// A clean slate. graff owns one session for as long as it runs, so a
-    /// new conversation is a new graff.
+    /// A clean slate. Multi-session ACP backends (Antigravity, OpenCode,
+    /// Gemini, Grok, Devin, Hermes, Pi) open a fresh `session/new` over the
+    /// already-warm pipe (~10 ms vs ~1.4 s cold start); `graff` starts fresh
+    /// using cached binary/PATH resolution.
     func startOver() {
         keep()
         AgentTools.shared.dropPages()
@@ -1048,7 +1219,18 @@ final class Agent: ObservableObject {
         stumble = nil
         lost = nil
         resuming = nil
-        restart()
+        if backend.supportsMultiSession, let livePipe = pipe, livePipe.isRunning, !prompting, phase == .ready {
+            // Keep the warm process alive and just open a fresh session!
+            flushFlow()
+            asking = nil
+            owed = [:]
+            session = nil
+            introduced = false
+            phase = .starting
+            open()
+        } else {
+            restart()
+        }
         moveDraft(to: AgentTools.shared.browser?.active)
     }
 
@@ -1142,8 +1324,8 @@ final class Agent: ObservableObject {
         Store.settings.set(Array(recent.prefix(6)), forKey: "agent.recent")
         prefs.setAgentModel(model.id, for: backend.rawValue)
 
-        // Standard ACP backends (Antigravity, OpenCode, Gemini CLI, Pi) switch
-        // models live in-session without restarting the subprocess.
+        // Standard ACP backends (Antigravity, OpenCode, Gemini CLI, Grok,
+        // Devin, Hermes, Pi) switch models live in-session without restarting.
         if backend != .graff, let session {
             let previous = self.model
             self.model = model
@@ -1167,6 +1349,40 @@ final class Agent: ObservableObject {
                 call("session/set_config_option", ["sessionId": session, "configId": configId, "value": wire], then: finish)
             } else {
                 call("session/set_model", ["sessionId": session, "modelId": wire], then: finish)
+            }
+            return
+        }
+
+        // Codegraff live in-session `/model` switch (~6 ms vs ~2.2 s cold
+        // restart!) when idle and connected. Falls back to restart if busy.
+        if backend == .graff, let session, !prompting, phase == .ready {
+            let previous = self.model
+            self.model = model
+            var reordered = self.models
+            reordered.removeAll { $0 == model }
+            reordered.insert(model, at: 0)
+            self.models = reordered
+            suppressingControlOutput = true
+            let cmd = "/model \(model.provider)/\(model.name)"
+            call("session/prompt", ["sessionId": session, "prompt": [["type": "text", "text": cmd]]]) { [weak self] result in
+                guard let self else { return }
+                self.suppressingControlOutput = false
+                switch result {
+                case .success:
+                    if !self.entries.isEmpty {
+                        self.entries.append(Entry(kind: .note, text: "Now \(model.label)"))
+                    }
+                    self.listModels()
+                    if let wantedEffort { self.choose(effort: wantedEffort) }
+                case .failure:
+                    // Fallback to full restart if this graff build doesn't accept `/model`.
+                    self.model = previous
+                    let carried = self.session
+                    self.shutDown()
+                    self.resuming = carried
+                    self.entries.append(Entry(kind: .note, text: "Now \(model.label)"))
+                    self.start()
+                }
             }
             return
         }
@@ -1198,10 +1414,38 @@ final class Agent: ObservableObject {
 
     private func start() {
         guard prefs.usesAgent else { return }
+        let activeBackend = self.backend
+
+        // 0 ms fast path: attach an already-warm worker from AgentEngine's pool
+        // when we aren't resuming a specific older session ID.
+        if resuming == nil, let warm = AgentEngine.shared.checkout(activeBackend) {
+            attach(warm: warm)
+            return
+        }
+
+        // If a background pre-warm for this backend is already mid-handshake,
+        // wait for it to finish instead of spawning a duplicate subprocess!
+        if resuming == nil, let pending = AgentEngine.shared.pendingWorker(for: activeBackend) {
+            phase = .starting
+            let generation = self.generation
+            pending.waiters.append { [weak self] ok in
+                guard let self, self.generation == generation, self.backend == activeBackend, self.phase == .starting, self.pipe == nil else { return }
+                if ok, let warm = AgentEngine.shared.checkout(activeBackend) {
+                    self.attach(warm: warm)
+                } else {
+                    self.startCold(activeBackend: activeBackend, generation: generation)
+                }
+            }
+            return
+        }
+
         phase = .starting
         let generation = self.generation
+        startCold(activeBackend: activeBackend, generation: generation)
+    }
+
+    private func startCold(activeBackend: Backend, generation: UUID) {
         let custom = prefs.agentPath
-        let activeBackend = self.backend
         Task {
             // The browser's own tools first, so the file that tells the agent
             // where they are is there before it looks (see AgentTools.swift).
@@ -1210,16 +1454,16 @@ final class Agent: ObservableObject {
             }
             guard self.generation == generation, prefs.usesAgent else { return }
             if activeBackend == .graff { Agent.leaveKuriOut() }
-            let found = await Agent.locate(backend: activeBackend, customGraff: custom)
-            let discovered = await Agent.discoverBackends(customGraff: custom)
+            let resolved = await AgentEngine.shared.binary(for: activeBackend, customGraff: custom)
+            let discovered = await AgentEngine.shared.discoverAll(customGraff: custom)
             guard self.generation == generation, prefs.usesAgent else { return }
             if !discovered.isEmpty { self.availableBackends = discovered }
             guard phase == .starting, pipe == nil else { return }
-            guard let found else {
+            guard let resolved else {
                 phase = .missing
                 return
             }
-            launch(found.program, path: found.path, backend: activeBackend)
+            launch(resolved.program, path: resolved.shellPath, backend: activeBackend)
         }
     }
 
@@ -1328,54 +1572,65 @@ final class Agent: ObservableObject {
         }
     }
 
+    /// Shared parser for `graff/models` used by both live sessions and
+    /// `AgentEngine` background pre-warming.
+    static func parseGraffModels(_ reply: [String: Any]) -> (models: [Model], current: Model?, serviceTier: ServiceTier) {
+        let rows = reply["models"] as? [[String: Any]] ?? []
+        var seen = Set<String>()
+        var models: [Model] = rows.compactMap { row in
+            guard row["authenticated"] as? Bool == true,
+                  let provider = row["provider"] as? String, let name = row["name"] as? String,
+                  !provider.isEmpty, !name.isEmpty
+            else { return nil }
+            let rawMaker = (row["maker"] as? String).flatMap { $0.isEmpty ? nil : $0 }
+            let cost = (row["cost"] as? String).flatMap { $0.isEmpty ? nil : $0 }
+            let separate = row["separateQuota"] as? Bool == true
+            let billing = (cost == "plan" && separate) ? "plan*" : cost
+            let effortLevels = (row["effortLevels"] as? [Any] ?? []).compactMap { $0 as? String }
+            let fast = row["fastSupported"] as? Bool == true
+            let ultrafast = row["ultrafastSupported"] as? Bool == true
+            let serviceTiers = (row["serviceTiers"] as? [Any] ?? []).compactMap { $0 as? String }
+            let model = Model(
+                provider: provider,
+                name: name,
+                context: row["context"] as? Int ?? 0,
+                rawMaker: rawMaker,
+                billing: billing,
+                effortLevels: effortLevels,
+                fastSupported: fast,
+                ultrafastSupported: ultrafast,
+                serviceTiers: serviceTiers
+            )
+            guard model.talks else { return nil }
+            return seen.insert(model.id).inserted ? model : nil
+        }
+        var currentModel: Model?
+        var tier: ServiceTier = .standard
+        if let current = reply["current"] as? [String: Any],
+           let provider = current["provider"] as? String, let name = current["model"] as? String {
+            let now = models.first { $0.provider == provider && $0.name == name } ?? Model(provider: provider, name: name)
+            currentModel = now
+            if let rawTier = current["serviceTier"] as? String, let parsed = ServiceTier(rawValue: rawTier) {
+                tier = parsed
+            } else if current["fast"] as? Bool == true {
+                tier = .fast
+            }
+            models.removeAll { $0 == now }
+            models.insert(now, at: 0)
+        }
+        return (models, currentModel, tier)
+    }
+
     /// What graff can reach with the keys it has, for the picker, and which
     /// one it is on — graff's own `graff/models`, the catalog its `/models`
     /// prints.
     private func listModels() {
         call("graff/models", [:]) { [weak self] result in
             guard let self, case .success(let value) = result, let reply = value as? [String: Any] else { return }
-            let rows = reply["models"] as? [[String: Any]] ?? []
-            var seen = Set<String>()
-            var models: [Model] = rows.compactMap { row in
-                guard row["authenticated"] as? Bool == true,
-                      let provider = row["provider"] as? String, let name = row["name"] as? String,
-                      !provider.isEmpty, !name.isEmpty
-                else { return nil }
-                let rawMaker = (row["maker"] as? String).flatMap { $0.isEmpty ? nil : $0 }
-                let cost = (row["cost"] as? String).flatMap { $0.isEmpty ? nil : $0 }
-                let separate = row["separateQuota"] as? Bool == true
-                let billing = (cost == "plan" && separate) ? "plan*" : cost
-                let effortLevels = (row["effortLevels"] as? [Any] ?? []).compactMap { $0 as? String }
-                let fast = row["fastSupported"] as? Bool == true
-                let ultrafast = row["ultrafastSupported"] as? Bool == true
-                let serviceTiers = (row["serviceTiers"] as? [Any] ?? []).compactMap { $0 as? String }
-                let model = Model(
-                    provider: provider,
-                    name: name,
-                    context: row["context"] as? Int ?? 0,
-                    rawMaker: rawMaker,
-                    billing: billing,
-                    effortLevels: effortLevels,
-                    fastSupported: fast,
-                    ultrafastSupported: ultrafast,
-                    serviceTiers: serviceTiers
-                )
-                // Pictures, video, batch-only: nothing to have a chat with.
-                guard model.talks else { return nil }
-                return seen.insert(model.id).inserted ? model : nil
-            }
-            if let current = reply["current"] as? [String: Any],
-               let provider = current["provider"] as? String, let name = current["model"] as? String {
-                let now = models.first { $0.provider == provider && $0.name == name } ?? Model(provider: provider, name: name)
+            let parsed = Agent.parseGraffModels(reply)
+            if let now = parsed.current {
                 self.model = now
-                // Parse active service tier from graff's live state.
-                if let rawTier = current["serviceTier"] as? String, let parsed = ServiceTier(rawValue: rawTier) {
-                    self.serviceTier = parsed
-                } else if current["fast"] as? Bool == true {
-                    self.serviceTier = .fast
-                } else {
-                    self.serviceTier = .standard
-                }
+                self.serviceTier = parsed.serviceTier
                 // Apply remembered service tier preference if supported by this model.
                 let wantedRaw = self.prefs.agentServiceTier
                 if !wantedRaw.isEmpty,
@@ -1384,11 +1639,17 @@ final class Agent: ObservableObject {
                    wanted != self.serviceTier {
                     self.choose(serviceTier: wanted)
                 }
-                // The one it is on first, as Harness lists them.
-                models.removeAll { $0 == now }
-                models.insert(now, at: 0)
             }
-            self.models = models
+            if !parsed.models.isEmpty {
+                self.models = parsed.models
+                AgentEngine.shared.saveCatalog(
+                    for: .graff,
+                    models: parsed.models,
+                    current: parsed.current ?? self.model,
+                    effort: self.effort,
+                    modelConfigID: nil
+                )
+            }
         }
     }
 
@@ -1444,14 +1705,22 @@ final class Agent: ObservableObject {
         }
     }
 
-    /// Session options from opening a session or changing one: `thought_level`
-    /// for all ACP backends, plus standard ACP `model` configOptions /
-    /// `models.availableModels` for non-graff backends (Antigravity, OpenCode,
-    /// Gemini CLI, Pi).
-    private func adopt(_ reply: Any) {
-        guard let dict = reply as? [String: Any] else { return }
+    /// Shared parser for ACP `configOptions` (`thought_level` + `model`) and
+    /// `models.availableModels`, used by both live sessions and `AgentEngine`.
+    static func parseSessionOptions(_ reply: Any, backend: Backend) -> (
+        effort: Effort?,
+        hasConfigOptions: Bool,
+        models: [Model],
+        current: Model?,
+        modelConfigID: String?
+    ) {
+        guard let dict = reply as? [String: Any] else {
+            return (nil, false, [], nil, nil)
+        }
+        let hasConfig = dict["configOptions"] != nil
         let options = dict["configOptions"] as? [[String: Any]] ?? []
 
+        var parsedEffort: Effort?
         if let option = options.first(where: {
             ($0["category"] as? String == "thought_level" || $0["id"] as? String == "thought_level")
                 && ($0["type"] as? String ?? "select") == "select"
@@ -1460,13 +1729,14 @@ final class Agent: ObservableObject {
                 guard let value = choice["value"] as? String else { return nil }
                 return (value, choice["name"] as? String ?? value.capitalized)
             }
-            effort = levels.isEmpty ? nil : Effort(id: id, current: option["currentValue"] as? String ?? "", levels: levels)
-        } else if dict["configOptions"] != nil {
-            effort = nil
+            parsedEffort = levels.isEmpty ? nil : Effort(id: id, current: option["currentValue"] as? String ?? "", levels: levels)
         }
 
-        guard backend != .graff else { return }
-        let effortValues = effort?.levels.map(\.value) ?? []
+        guard backend != .graff else {
+            return (parsedEffort, hasConfig, [], nil, nil)
+        }
+
+        let effortValues = parsedEffort?.levels.map(\.value) ?? []
         let fallbackProvider = backend.providerKey
 
         func makeACPModel(rawID: String, rawName: String?) -> Model {
@@ -1500,45 +1770,77 @@ final class Agent: ObservableObject {
             )
         }
 
+        var parsedModels: [Model] = []
+        var parsedCurrent: Model?
+        var parsedConfigID: String?
+
         if let modelOpt = options.first(where: {
             ($0["category"] as? String == "model" || $0["id"] as? String == "model")
                 && ($0["type"] as? String ?? "select") == "select"
         }), let configID = modelOpt["id"] as? String {
-            modelConfigID = configID
+            parsedConfigID = configID
             let choices = modelOpt["options"] as? [[String: Any]] ?? []
             var seen = Set<String>()
-            var parsed: [Model] = choices.compactMap { choice in
+            parsedModels = choices.compactMap { choice in
                 guard let value = choice["value"] as? String, !value.isEmpty else { return nil }
                 let m = makeACPModel(rawID: value, rawName: choice["name"] as? String)
                 return seen.insert(m.id).inserted ? m : nil
             }
             if let currentValue = modelOpt["currentValue"] as? String, !currentValue.isEmpty {
-                let now = parsed.first { $0.acpValue == currentValue } ?? makeACPModel(rawID: currentValue, rawName: nil)
-                self.model = now
-                parsed.removeAll { $0 == now }
-                parsed.insert(now, at: 0)
-            } else if self.model == nil {
-                self.model = parsed.first
+                let now = parsedModels.first { $0.acpValue == currentValue } ?? makeACPModel(rawID: currentValue, rawName: nil)
+                parsedCurrent = now
+                parsedModels.removeAll { $0 == now }
+                parsedModels.insert(now, at: 0)
+            } else {
+                parsedCurrent = parsedModels.first
             }
-            if !parsed.isEmpty { self.models = parsed }
         } else if let modelsObj = dict["models"] as? [String: Any],
                   let available = modelsObj["availableModels"] as? [[String: Any]] {
-            modelConfigID = nil
             var seen = Set<String>()
-            var parsed: [Model] = available.compactMap { row in
+            parsedModels = available.compactMap { row in
                 guard let modelId = row["modelId"] as? String, !modelId.isEmpty else { return nil }
                 let m = makeACPModel(rawID: modelId, rawName: row["name"] as? String)
                 return seen.insert(m.id).inserted ? m : nil
             }
             if let currentID = modelsObj["currentModelId"] as? String, !currentID.isEmpty {
-                let now = parsed.first { $0.acpValue == currentID } ?? makeACPModel(rawID: currentID, rawName: nil)
-                self.model = now
-                parsed.removeAll { $0 == now }
-                parsed.insert(now, at: 0)
-            } else if self.model == nil {
-                self.model = parsed.first
+                let now = parsedModels.first { $0.acpValue == currentID } ?? makeACPModel(rawID: currentID, rawName: nil)
+                parsedCurrent = now
+                parsedModels.removeAll { $0 == now }
+                parsedModels.insert(now, at: 0)
+            } else {
+                parsedCurrent = parsedModels.first
             }
-            if !parsed.isEmpty { self.models = parsed }
+        }
+
+        return (parsedEffort, hasConfig, parsedModels, parsedCurrent, parsedConfigID)
+    }
+
+    /// Session options from opening a session or changing one: `thought_level`
+    /// for all ACP backends, plus standard ACP `model` configOptions /
+    /// `models.availableModels` for non-graff backends.
+    private func adopt(_ reply: Any) {
+        let parsed = Agent.parseSessionOptions(reply, backend: backend)
+        if let e = parsed.effort {
+            effort = e
+        } else if parsed.hasConfigOptions {
+            effort = nil
+        }
+        guard backend != .graff else { return }
+        if parsed.modelConfigID != nil || !parsed.models.isEmpty {
+            modelConfigID = parsed.modelConfigID
+        }
+        if let cur = parsed.current {
+            model = cur
+        }
+        if !parsed.models.isEmpty {
+            models = parsed.models
+            AgentEngine.shared.saveCatalog(
+                for: backend,
+                models: parsed.models,
+                current: parsed.current ?? model,
+                effort: effort,
+                modelConfigID: modelConfigID
+            )
         }
     }
 
@@ -1929,11 +2231,18 @@ final class Agent: ObservableObject {
         if let method, let id, !(id is NSNull) {
             asked(method, id: id, params: message["params"] as? [String: Any] ?? [:])
         } else if let method {
-            guard method == "session/update", !replaying, !applyingServiceTier,
+            guard method == "session/update", !replaying,
                   let params = message["params"] as? [String: Any],
                   let update = params["update"] as? [String: Any]
             else { return }
             if let session, let from = params["sessionId"] as? String, from != session { return }
+            if applyingServiceTier || suppressingControlOutput {
+                // Still adopt effort/config changes emitted by live `/model` or `/fast`.
+                if update["sessionUpdate"] as? String == "config_option_update" {
+                    updated(update)
+                }
+                return
+            }
             updated(update)
         } else if let id = Agent.number(id), let answer = waiting.removeValue(forKey: id) {
             if let error = message["error"] as? [String: Any] {
@@ -2267,7 +2576,7 @@ final class Agent: ObservableObject {
     }
 
     /// An id or a code, whether it came as a number or as a string.
-    private static func number(_ value: Any?) -> Int? {
+    static func number(_ value: Any?) -> Int? {
         if let value = value as? Int { return value }
         if let value = value as? String { return Int(value) }
         return nil
@@ -2414,7 +2723,7 @@ final class Agent: ObservableObject {
     /// own folder first. It stays in the folder it is given rather than
     /// making itself a worktree, and nothing Claude Code left in the
     /// environment makes it think it is running inside that.
-    nonisolated private static func environment(for program: URL, path: String?, lean: Bool) -> [String: String] {
+    nonisolated static func environment(for program: URL, path: String?, lean: Bool) -> [String: String] {
         var environment = ProcessInfo.processInfo.environment
         var folders: [String] = [program.deletingLastPathComponent().path]
         folders += (environment["PATH"] ?? "").split(separator: ":").map(String.init)
@@ -2500,6 +2809,44 @@ final class Agent: ObservableObject {
         }.value
     }
 
+    /// Synchronously resolves the executable for `backend` using a pre-probed
+    /// login-shell `PATH` (called once per launch by `AgentEngine`).
+    nonisolated static func resolveBinarySync(backend: Backend, customGraff: String, shellPath: String?) -> URL? {
+        let files = FileManager.default
+        let home = files.homeDirectoryForCurrentUser.path
+        if backend == .graff {
+            let named = (customGraff as NSString).expandingTildeInPath
+            if !named.isEmpty {
+                return files.isExecutableFile(atPath: named) ? URL(fileURLWithPath: named) : nil
+            }
+            var places = (shellPath ?? "").split(separator: ":").map { "\($0)/graff" }
+            places += [
+                "\(home)/.local/bin/graff",
+                "\(home)/bin/graff",
+                "/opt/homebrew/bin/graff",
+                "/usr/local/bin/graff",
+                "\(home)/.harness/bin/graff",
+                "/Applications/Harness.app/Contents/Resources/bin/graff",
+                "/Applications/Codegraff.app/Contents/Resources/graff",
+            ]
+            var seen = Set<String>()
+            var best: (url: URL, version: [Int])?
+            for place in places where files.isExecutableFile(atPath: place) {
+                let url = URL(fileURLWithPath: place)
+                guard seen.insert(url.resolvingSymlinksInPath().path).inserted else { continue }
+                let version = Agent.version(of: url)
+                if let current = best, !Agent.newer(version, than: current.version) { continue }
+                best = (url, version)
+            }
+            return best?.url
+        }
+        return findExecutable(for: backend, shellPath: shellPath)
+    }
+
+    nonisolated static func probeLoginPathOnce() -> String? {
+        loginPath()
+    }
+
     nonisolated private static func findExecutable(for backend: Backend, shellPath: String?) -> URL? {
         let files = FileManager.default
         let home = files.homeDirectoryForCurrentUser.path
@@ -2534,6 +2881,27 @@ final class Agent: ObservableObject {
                     places.append("\(home)/.nvm/versions/node/\(v)/bin/gemini")
                 }
             }
+        case .grok:
+            places = pathDirs.map { "\($0)/grok" } + [
+                "\(home)/.local/bin/grok",
+                "\(home)/bin/grok",
+                "/opt/homebrew/bin/grok",
+                "/usr/local/bin/grok",
+            ]
+        case .devin:
+            places = pathDirs.map { "\($0)/devin" } + [
+                "\(home)/.local/bin/devin",
+                "\(home)/bin/devin",
+                "/opt/homebrew/bin/devin",
+                "/usr/local/bin/devin",
+            ]
+        case .hermes:
+            places = pathDirs.map { "\($0)/hermes" } + [
+                "\(home)/.local/bin/hermes",
+                "\(home)/.hermes/bin/hermes",
+                "/opt/homebrew/bin/hermes",
+                "/usr/local/bin/hermes",
+            ]
         case .pi:
             places = pathDirs.map { "\($0)/pi-acp" } + [
                 "\(home)/.local/bin/pi-acp",
@@ -2653,6 +3021,13 @@ final class AcpPipe: @unchecked Sendable {
 
     var onMessage: (@MainActor ([String: Any]) -> Void)?
     var onExit: (@MainActor (Int32, String) -> Void)?
+
+    var isRunning: Bool {
+        lock.lock()
+        let ended = over
+        lock.unlock()
+        return !ended && process.isRunning
+    }
 
     /// graff reads a line into 64 KiB and stops listening at a longer one.
     static let longest = 65_000

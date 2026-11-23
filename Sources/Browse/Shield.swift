@@ -200,14 +200,14 @@ final class Shield: ObservableObject {
                 .trimmingCharacters(in: .whitespacesAndNewlines),
               !version.isEmpty
         else { return }
-        // v2 cosmetic list drops ~490 unindexed global attribute/combinator
-        // selectors ([class^=...], [data-testid^=...], [href^=...]) that force
-        // WebKit's StyleResolver to scan every mutated DOM node on heavy SPAs
-        // like X/Twitter while keeping all domain-scoped rules and fast O(1)
-        // hash-indexed #id/.class global rules.
+        // v3 cosmetic list drops ~490 unindexed global attribute/combinator
+        // selectors AND exempts ultra-heavy hashed-class SPAs (x.com / twitter.com)
+        // from the remaining 13,485 generic global blog cosmetic rules so WebKit's
+        // StyleResolver stays locked at 120 FPS while all network ad/tracker blocks
+        // remain active.
         let wanted = [
             ("network", "shield-network-\(version)"),
-            ("cosmetic", "shield-cosmetic-v2-\(version)"),
+            ("cosmetic", "shield-cosmetic-v3-\(version)"),
         ]
 
         store.getAvailableContentRuleListIdentifiers { kept in
@@ -251,17 +251,33 @@ final class Shield: ObservableObject {
 
     /// Drops global (non-`if-domain`) cosmetic CSS rules that use unindexed
     /// attribute selectors, combinators, or pseudo-selectors (`[`, ` `, `>`,
-    /// `+`, `~`, `:`). Keeps all domain-scoped rules and O(1) hash-indexed
-    /// global `#id`/`.class` rules so heavy SPAs like X/Twitter stay fast.
+    /// `+`, `~`, `:`), and exempts ultra-heavy hashed-class SPAs (`*x.com`,
+    /// `*twitter.com`) from generic global cosmetic rules (they match zero
+    /// EasyList global class names, while network ad blocking stays 100% on).
     private nonisolated static func pruneSlowGlobalCosmetics(_ data: Data) -> String? {
         guard let rules = try? JSONSerialization.jsonObject(with: data) as? [[String: Any]] else { return nil }
         let slowChars: Set<Character> = ["[", " ", ">", "+", "~", ":"]
-        let lean = rules.filter { rule in
-            let trigger = rule["trigger"] as? [String: Any]
-            if trigger?["if-domain"] != nil { return true }
-            guard let action = rule["action"] as? [String: Any],
-                  let selector = action["selector"] as? String else { return true }
-            return !selector.contains { slowChars.contains($0) }
+        let exemptGlobalHosts = ["*x.com", "*twitter.com"]
+        var lean: [[String: Any]] = []
+        lean.reserveCapacity(rules.count)
+        for var rule in rules {
+            var trigger = rule["trigger"] as? [String: Any] ?? [:]
+            if trigger["if-domain"] != nil {
+                lean.append(rule)
+                continue
+            }
+            if let action = rule["action"] as? [String: Any],
+               let selector = action["selector"] as? String,
+               selector.contains(where: { slowChars.contains($0) }) {
+                continue
+            }
+            var unless = trigger["unless-domain"] as? [String] ?? []
+            for host in exemptGlobalHosts where !unless.contains(host) {
+                unless.append(host)
+            }
+            trigger["unless-domain"] = unless
+            rule["trigger"] = trigger
+            lean.append(rule)
         }
         guard let encoded = try? JSONSerialization.data(withJSONObject: lean) else { return nil }
         return String(data: encoded, encoding: .utf8)
