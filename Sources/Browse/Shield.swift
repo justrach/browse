@@ -200,14 +200,16 @@ final class Shield: ObservableObject {
                 .trimmingCharacters(in: .whitespacesAndNewlines),
               !version.isEmpty
         else { return }
-        // v3 cosmetic list drops ~490 unindexed global attribute/combinator
-        // selectors AND exempts ultra-heavy hashed-class SPAs (x.com / twitter.com)
-        // from the remaining 13,485 generic global blog cosmetic rules so WebKit's
-        // StyleResolver stays locked at 120 FPS while all network ad/tracker blocks
-        // remain active.
+        // v4 cosmetic list drops ~490 unindexed global attribute/combinator
+        // selectors AND exempts Closure/hashed-class web apps (mail.google.com,
+        // x.com, twitter.com, docs/drive/calendar.google.com, etc.) from the
+        // 13,485 generic global cosmetic rules — fixing Gmail's `<div class="adn ads">`
+        // email body being hidden by EasyList's global `.ads` rule and keeping
+        // WebKit's StyleResolver at 120 FPS while all domain-scoped cosmetic and
+        // network ad/tracker rules stay active.
         let wanted = [
             ("network", "shield-network-\(version)"),
-            ("cosmetic", "shield-cosmetic-v3-\(version)"),
+            ("cosmetic", "shield-cosmetic-v4-\(version)"),
         ]
 
         store.getAvailableContentRuleListIdentifiers { kept in
@@ -251,13 +253,19 @@ final class Shield: ObservableObject {
 
     /// Drops global (non-`if-domain`) cosmetic CSS rules that use unindexed
     /// attribute selectors, combinators, or pseudo-selectors (`[`, ` `, `>`,
-    /// `+`, `~`, `:`), and exempts ultra-heavy hashed-class SPAs (`*x.com`,
-    /// `*twitter.com`) from generic global cosmetic rules (they match zero
-    /// EasyList global class names, while network ad blocking stays 100% on).
+    /// `+`, `~`, `:`), and exempts hashed/minified-class web apps (notably
+    /// `*mail.google.com`, where Gmail's own Closure-compiled `<div class="adn ads">`
+    /// email body collided with EasyList's global `.ads` rule, plus `*x.com` /
+    /// `*twitter.com` and productivity SPAs). Domain-scoped cosmetic rules and
+    /// all network ad/tracker blocking stay 100% active.
     private nonisolated static func pruneSlowGlobalCosmetics(_ data: Data) -> String? {
         guard let rules = try? JSONSerialization.jsonObject(with: data) as? [[String: Any]] else { return nil }
         let slowChars: Set<Character> = ["[", " ", ">", "+", "~", ":"]
-        let exemptGlobalHosts = ["*x.com", "*twitter.com"]
+        let exemptGlobalHosts = [
+            "*mail.google.com", "*docs.google.com", "*drive.google.com", "*calendar.google.com",
+            "*x.com", "*twitter.com",
+            "*github.com", "*linear.app", "*notion.so", "*figma.com", "*slack.com", "*discord.com",
+        ]
         var lean: [[String: Any]] = []
         lean.reserveCapacity(rules.count)
         for var rule in rules {
