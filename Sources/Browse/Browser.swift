@@ -2770,15 +2770,24 @@ final class Browser: NSObject, ObservableObject {
         tabSwitcherState.selectedActionID = nil
     }
 
-    /// Fallback website, bookmark, history, and web-search actions when no open
-    /// tab matches the `⌘K` query.
-    func switcherFallbackActions(for query: String) -> [SwitcherAction] {
+    /// Website, bookmark, history, and web-search actions for the `⌘K` palette
+    /// whenever the user has typed a query — shown both alongside matching open
+    /// tabs (deduplicated against their URLs) and as the full launcher when no
+    /// open tabs match.
+    func switcherFallbackActions(
+        for query: String,
+        excluding openItems: [SwitcherItem] = [],
+        limit: Int = 7
+    ) -> [SwitcherAction] {
         let q = query.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !q.isEmpty else { return [] }
 
         var actions: [SwitcherAction] = []
-        var seenURLs = Set<String>()
+        var seenURLs = Set<String>(
+            openItems.compactMap { $0.tab.address?.absoluteString.lowercased() }
+        )
         func add(_ action: SwitcherAction) {
+            guard actions.count < limit else { return }
             let key = action.url.absoluteString.lowercased()
             guard seenURLs.insert(key).inserted else { return }
             actions.append(action)
@@ -2802,7 +2811,7 @@ final class Browser: NSObject, ObservableObject {
 
         // If the user typed a single token (like "apple" or "x") that matches a
         // visited/bookmarked host label exactly (e.g. apple.com, x.com), surface
-        // that site first ahead of web search.
+        // that site ahead of web search.
         let lower = q.lowercased()
         let singleToken = !lower.contains(where: \.isWhitespace)
         var exactHostSites: [Suggestion] = []
@@ -2843,7 +2852,7 @@ final class Browser: NSObject, ObservableObject {
             ))
         }
 
-        for s in otherSites where actions.count < 7 {
+        for s in otherSites where actions.count < limit {
             add(siteAction(s))
         }
 
@@ -2947,29 +2956,44 @@ final class Browser: NSObject, ObservableObject {
     func stepTabSwitcher(_ delta: Int) {
         guard let mode = tabSwitcher else { return }
         let list = switcherItems(matching: tabSwitcherState.query, mode: mode)
-        guard !list.isEmpty else {
+        let actions = mode == .palette
+            ? switcherFallbackActions(
+                for: tabSwitcherState.query,
+                excluding: list,
+                limit: list.isEmpty ? 7 : 4
+            )
+            : []
+        let total = list.count + actions.count
+        guard total > 0 else {
             tabSwitcherState.selectedID = nil
-            let actions = switcherFallbackActions(for: tabSwitcherState.query)
-            guard !actions.isEmpty else {
-                tabSwitcherState.selectedActionID = nil
-                return
-            }
-            if let current = tabSwitcherState.selectedActionID,
-               let i = actions.firstIndex(where: { $0.id == current }) {
-                let next = (i + delta % actions.count + actions.count) % actions.count
-                tabSwitcherState.selectedActionID = actions[next].id
-            } else {
-                tabSwitcherState.selectedActionID = delta >= 0 ? actions.first?.id : actions.last?.id
-            }
+            tabSwitcherState.selectedActionID = nil
             return
         }
-        tabSwitcherState.selectedActionID = nil
-        if let current = tabSwitcherState.selectedID,
-           let i = list.firstIndex(where: { $0.id == current }) {
-            let next = (i + delta % list.count + list.count) % list.count
-            tabSwitcherState.selectedID = list[next].id
+
+        let currentIndex: Int?
+        if let actionID = tabSwitcherState.selectedActionID,
+           let ai = actions.firstIndex(where: { $0.id == actionID }) {
+            currentIndex = list.count + ai
+        } else if let tabID = tabSwitcherState.selectedID,
+                  let ti = list.firstIndex(where: { $0.id == tabID }) {
+            currentIndex = ti
         } else {
-            tabSwitcherState.selectedID = delta >= 0 ? list.first?.id : list.last?.id
+            currentIndex = nil
+        }
+
+        let nextIndex: Int
+        if let currentIndex {
+            nextIndex = (currentIndex + delta % total + total) % total
+        } else {
+            nextIndex = delta >= 0 ? 0 : total - 1
+        }
+
+        if nextIndex < list.count {
+            tabSwitcherState.selectedID = list[nextIndex].id
+            tabSwitcherState.selectedActionID = nil
+        } else {
+            tabSwitcherState.selectedID = nil
+            tabSwitcherState.selectedActionID = actions[nextIndex - list.count].id
         }
     }
 
@@ -2984,12 +3008,24 @@ final class Browser: NSObject, ObservableObject {
     func confirmTabSwitcher() {
         guard let mode = tabSwitcher else { return }
         let list = switcherItems(matching: tabSwitcherState.query, mode: mode)
+        let actions = mode == .palette
+            ? switcherFallbackActions(
+                for: tabSwitcherState.query,
+                excluding: list,
+                limit: list.isEmpty ? 7 : 4
+            )
+            : []
+
+        if let actionID = tabSwitcherState.selectedActionID,
+           let action = actions.first(where: { $0.id == actionID }) {
+            openActionFromSwitcher(action)
+            return
+        }
         if let target = list.first(where: { $0.id == tabSwitcherState.selectedID }) ?? list.first {
             selectFromSwitcher(target)
             return
         }
-        let actions = switcherFallbackActions(for: tabSwitcherState.query)
-        if let action = actions.first(where: { $0.id == tabSwitcherState.selectedActionID }) ?? actions.first {
+        if let action = actions.first {
             openActionFromSwitcher(action)
             return
         }
@@ -2999,6 +3035,19 @@ final class Browser: NSObject, ObservableObject {
     func splitSelectedTabFromSwitcher() {
         guard let mode = tabSwitcher else { return }
         let list = switcherItems(matching: tabSwitcherState.query, mode: mode)
+        let actions = mode == .palette
+            ? switcherFallbackActions(
+                for: tabSwitcherState.query,
+                excluding: list,
+                limit: list.isEmpty ? 7 : 4
+            )
+            : []
+
+        if let actionID = tabSwitcherState.selectedActionID,
+           let action = actions.first(where: { $0.id == actionID }) {
+            openActionFromSwitcher(action, split: true)
+            return
+        }
         if let target = list.first(where: { $0.id == tabSwitcherState.selectedID }) ?? list.first {
             if target.space != nil {
                 selectFromSwitcher(target)
@@ -3012,8 +3061,7 @@ final class Browser: NSObject, ObservableObject {
             }
             return
         }
-        let actions = switcherFallbackActions(for: tabSwitcherState.query)
-        if let action = actions.first(where: { $0.id == tabSwitcherState.selectedActionID }) ?? actions.first {
+        if let action = actions.first {
             openActionFromSwitcher(action, split: true)
         }
     }
