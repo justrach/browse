@@ -6,6 +6,8 @@ All notable changes to **browse** are documented here, newest first.
 
 ## Unreleased
 
+## 1.9.4 — 23 November 2026
+
 ### Fixed
 
 - **Engine-level GPU compositing, opaque blur occlusion, and zero-mid-scroll `ScrollRelay` (`FrameRate.swift`, `Stage.swift`, `Tab.swift`, `Prefs.swift`, `lean-proofs/Browse/ScrollFastPath.lean`)**:
