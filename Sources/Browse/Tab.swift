@@ -280,25 +280,35 @@ final class Tab: ObservableObject, Identifiable {
         if next != hue { hue = next }
     }
 
-    /// Leaving reading mode reloads rather than putting the old markup back:
-    /// restoring the HTML gives you a page that looks right and does nothing,
-    /// because every listener the page had was thrown away with it.
-    func toggleReader(_ done: @escaping (Bool) -> Void) {
+    /// Non-destructive Reading Mode: clones the extracted article into a styled
+    /// fixed overlay so exiting removes only `#office-reader-root` and leaves the
+    /// live page intact without reloading.
+    func toggleReader(
+        theme: Preferences.ReaderTheme = .auto,
+        font: Preferences.ReaderFont = .serif,
+        size: Int = 18,
+        _ done: @escaping (Bool) -> Void
+    ) {
         guard !isBlank else {
             done(false)
             return
         }
         guard !reader else {
             reader = false
-            web.reload()
+            built?.evaluateJavaScript(Reader.exitScript, completionHandler: nil)
             done(true)
             return
         }
-        web.evaluateJavaScript(Reader.script) { [weak self] answer, _ in
+        web.evaluateJavaScript(Reader.enterScript(theme: theme, font: font, size: size)) { [weak self] answer, _ in
             let worked = (answer as? String) == "read"
             if worked { self?.reader = true }
             done(worked)
         }
+    }
+
+    func updateReaderStyle(theme: Preferences.ReaderTheme, font: Preferences.ReaderFont, size: Int) {
+        guard reader else { return }
+        built?.evaluateJavaScript(Reader.updateStyleScript(theme: theme, font: font, size: size), completionHandler: nil)
     }
 
     /// The site's icon, for tabs set to wear one. From the cache the moment
@@ -1034,20 +1044,34 @@ final class Tab: ObservableObject, Identifiable {
     }
 
     /// Lightweight visual preview image for the Tab Switcher sneak-peek and
-    /// Tab Overview grid. Uses the existing `cover` if asleep; otherwise takes
-    /// a low-cost 1x WebKit snapshot without a JPEG round-trip.
+    /// Tab Overview grid. Uses the existing `cover` or compressed `picture`
+    /// if asleep; otherwise takes a low-cost 1x WebKit snapshot without a JPEG
+    /// round-trip.
     func capturePreview(width: CGFloat = 560, _ done: @escaping (NSImage?) -> Void) {
         if let cover { return done(cover) }
-        guard let built else { return done(nil) }
-        let shot = WKSnapshotConfiguration()
-        shot.afterScreenUpdates = false
-        let boundsW = built.bounds.width
-        if boundsW > 0 {
-            shot.snapshotWidth = NSNumber(value: min(Double(width), max(1, Double(boundsW))))
+        if let built {
+            let shot = WKSnapshotConfiguration()
+            shot.afterScreenUpdates = false
+            let boundsW = built.bounds.width
+            if boundsW > 0 {
+                shot.snapshotWidth = NSNumber(value: min(Double(width), max(1, Double(boundsW))))
+            }
+            built.takeSnapshot(with: shot) { image, _ in
+                done(image)
+            }
+            return
         }
-        built.takeSnapshot(with: shot) { image, _ in
-            done(image)
+        if let data = picture {
+            Task { @MainActor in
+                let cg: CGImage? = await Task.detached(priority: .utility) {
+                    guard let src = CGImageSourceCreateWithData(data as CFData, nil) else { return nil }
+                    return CGImageSourceCreateImageAtIndex(src, 0, nil)
+                }.value
+                done(cg.map { NSImage(cgImage: $0, size: NSSize(width: $0.width, height: $0.height)) })
+            }
+            return
         }
+        done(nil)
     }
 
     nonisolated private static func jpeg(_ image: CGImage) -> Data? {
@@ -1252,6 +1276,18 @@ final class Tab: ObservableObject, Identifiable {
     /// fetched again — nothing is kept behind to make that look otherwise.
     func back() { web.goBack() }
     func forward() { web.goForward() }
+
+    var backHistory: [WKBackForwardListItem] {
+        built?.backForwardList.backList.reversed() ?? []
+    }
+
+    var forwardHistory: [WKBackForwardListItem] {
+        built?.backForwardList.forwardList ?? []
+    }
+
+    func go(to item: WKBackForwardListItem) {
+        built?.go(to: item)
+    }
 
     /// Called when the tab is thrown away. Without it the view keeps running
     /// whatever the page left behind — timers, video, sockets.

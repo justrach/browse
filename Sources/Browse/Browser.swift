@@ -44,6 +44,7 @@ struct SwitcherAction: Identifiable, Equatable {
         case url
         case bookmark
         case history
+        case closed
         case search
         case ask
     }
@@ -53,6 +54,7 @@ struct SwitcherAction: Identifiable, Equatable {
     let subtitle: String
     let url: URL
     var prompt: String? = nil
+    var ghostID: UUID? = nil
 }
 
 /// Isolated observable state for the tab switcher / overview so search typing
@@ -434,7 +436,16 @@ final class Browser: NSObject, ObservableObject {
 
     let bookmarks = Bookmarks()
     /// The full list, for taking things out.
-    @Published var bookmarking = false { didSet { if bookmarking { dismissOverlays(keeping: .bookmarks) } } }
+    @Published var bookmarking = false {
+        didSet {
+            if bookmarking {
+                dismissOverlays(keeping: .bookmarks)
+            } else if !bookmarksHunt.isEmpty {
+                bookmarksHunt = ""
+            }
+        }
+    }
+    @Published var bookmarksHunt = ""
     /// The dropdown off the button.
     @Published var bookmarksOpen = false
 
@@ -1339,8 +1350,17 @@ final class Browser: NSObject, ObservableObject {
         get { recallMode != nil }
         set { recallMode = newValue ? .history : nil }
     }
-    @Published var hoarding = false { didSet { if hoarding { dismissOverlays(keeping: .downloads) } } }
+    @Published var hoarding = false {
+        didSet {
+            if hoarding {
+                dismissOverlays(keeping: .downloads)
+            } else if !downloadsHunt.isEmpty {
+                downloadsHunt = ""
+            }
+        }
+    }
     @Published var recallHunt = ""
+    @Published var downloadsHunt = ""
 
     /// Cookies, caches, local storage — everything a site left on this Mac,
     /// in every space. Clearing it signs you out of everything, which is
@@ -1411,16 +1431,24 @@ final class Browser: NSObject, ObservableObject {
             let others = tabs.filter { $0.id != activeID }.sorted { $0.touched > $1.touched }
             let order = active + others
             tabCycleOrder = order
-            // Prime live previews for the visible MRU cards via the shared cache.
-            for tab in order.prefix(7) where !tab.isBlank {
-                TabPreviewCache.shared.request(tab, width: 320)
-            }
             let nextIdx = (0 + direction + order.count) % order.count
             tabCycleSelectedID = order[nextIdx].id
+            primeMRUPreviews(around: nextIdx, in: order)
         } else {
             let cur = tabCycleOrder.firstIndex { $0.id == tabCycleSelectedID } ?? 0
             let nextIdx = (cur + direction + tabCycleOrder.count) % tabCycleOrder.count
             tabCycleSelectedID = tabCycleOrder[nextIdx].id
+            primeMRUPreviews(around: nextIdx, in: tabCycleOrder)
+        }
+    }
+
+    private func primeMRUPreviews(around index: Int, in order: [Tab]) {
+        guard !order.isEmpty else { return }
+        let maxVisible = 7
+        let start = max(0, min(index - maxVisible / 2, order.count - maxVisible))
+        let end = min(order.count, start + maxVisible)
+        for tab in order[start..<end] where !tab.isBlank {
+            TabPreviewCache.shared.request(tab, width: 320)
         }
     }
 
@@ -1677,8 +1705,8 @@ final class Browser: NSObject, ObservableObject {
     @Published private(set) var announcement: String?
 
     /// ⌘⇧C. The address, in the clipboard, and a line that says as much.
-    func copyAddress() {
-        guard let url = active?.address else { return }
+    func copyAddress(of tab: Tab? = nil) {
+        guard let target = tab ?? active, let url = target.address else { return }
         NSPasteboard.general.clearContents()
         NSPasteboard.general.setString(url.absoluteString, forType: .string)
         announce("Address copied")
@@ -1686,11 +1714,11 @@ final class Browser: NSObject, ObservableObject {
 
     /// For pasting into notes and messages that read Markdown: a title that
     /// links, not a bare address to explain in your own words.
-    func copyMarkdownLink() {
-        guard let tab = active, let url = tab.address else { return }
+    func copyMarkdownLink(of tab: Tab? = nil) {
+        guard let target = tab ?? active, let url = target.address else { return }
         // A backslash first, so the ones added next aren't doubled; then both
         // brackets, either of which would end or break the link's text.
-        let title = tab.label
+        let title = target.label
             .replacingOccurrences(of: "\\", with: "\\\\")
             .replacingOccurrences(of: "[", with: "\\[")
             .replacingOccurrences(of: "]", with: "\\]")
@@ -1728,6 +1756,9 @@ final class Browser: NSObject, ObservableObject {
     /// macOS saying memory is short. See Sleep.swift.
     var dozing: Timer?
     var pressure: DispatchSourceMemoryPressure?
+    var sleepingTabs: Set<Tab.ID> = []
+    var lastMemoryWarning: Date?
+    var lastMemoryCritical: Date?
     /// Downloads still under way. See `keep(_:)`.
     var downloading: [WKDownload] = [] {
         didSet { activeDownloadCount = downloading.count }
@@ -1847,17 +1878,41 @@ final class Browser: NSObject, ObservableObject {
             else { return }
             tab.web.evaluateInSearch(Isolate.skip(seconds))
         }
+        floater.onSeek = { [weak self] fraction in
+            guard let self, let id = self.floating,
+                  let tab = self.tabs.first(where: { $0.id == id })
+            else { return }
+            tab.web.evaluateInSearch(Isolate.seek(fraction))
+        }
+        floater.onToggleMute = { [weak self] answer in
+            guard let self, let id = self.floating,
+                  let tab = self.tabs.first(where: { $0.id == id })
+            else { return }
+            tab.web.evaluateInSearch(Isolate.toggleMute) { muted in
+                MainActor.assumeIsolated { answer((muted as? Bool) ?? false) }
+            }
+        }
+        floater.onCycleRate = { [weak self] answer in
+            guard let self, let id = self.floating,
+                  let tab = self.tabs.first(where: { $0.id == id })
+            else { return }
+            tab.web.evaluateInSearch(Isolate.cycleRate) { rate in
+                MainActor.assumeIsolated { answer((rate as? Double) ?? 1) }
+            }
+        }
         floater.onProgress = { [weak self] answer in
             guard let self, let id = self.floating,
                   let tab = self.tabs.first(where: { $0.id == id })
             else { return }
             tab.web.evaluateInSearch(Isolate.where_) { found in
                 MainActor.assumeIsolated {
-                    guard let pair = found as? [Any], pair.count == 2,
-                          let through = pair[0] as? Double,
-                          let playing = pair[1] as? Bool
+                    guard let parts = found as? [Any], parts.count >= 2,
+                          let through = parts[0] as? Double,
+                          let playing = parts[1] as? Bool
                     else { return }
-                    answer(through, playing)
+                    let muted = parts.count >= 3 ? (parts[2] as? Bool ?? false) : false
+                    let rate = parts.count >= 4 ? (parts[3] as? Double ?? 1) : 1
+                    answer(through, playing, muted, rate)
                 }
             }
         }
@@ -2627,19 +2682,51 @@ final class Browser: NSObject, ObservableObject {
 
     /// A bookmark picked from the button's list or the full one. Either
     /// goes as the page starts: the list off the button used to stay open
-    /// over the page it had just sent you to. A middle-click opens it in a
-    /// new tab behind this one and leaves the list open for the next; with
-    /// ⇧ it goes to the new tab, and the list closes.
+    /// over the page it had just sent you to. A middle-click or ⌘-click opens
+    /// it in a new tab behind this one (for middle-click) or in front (for
+    /// ⌘-click); ⇧ reverses foreground/background so ⌘⇧-click opens behind.
     func pickBookmark(_ url: URL, inNewTab: Bool = false) {
-        let foreground = !inNewTab || NSApp.currentEvent?.modifierFlags.contains(.shift) == true
+        let flags = NSApp.currentEvent?.modifierFlags ?? []
+        let cmdClick = flags.contains(.command)
+        let openNew = inNewTab || cmdClick
+        let foreground: Bool
+        if cmdClick {
+            foreground = !flags.contains(.shift)
+        } else if inNewTab {
+            foreground = flags.contains(.shift)
+        } else {
+            foreground = true
+        }
         if foreground {
             bookmarking = false
             bookmarksOpen = false
         }
-        if inNewTab {
+        if openNew {
             open(url, foreground: foreground, from: active)
         } else {
             visit(url)
+        }
+    }
+
+    func openAll(_ folder: Bookmark) {
+        let urls = Bookmarks.urls(folder.children ?? [])
+        guard !urls.isEmpty else { return }
+        let launchAll: () -> Void = { [weak self] in
+            guard let self else { return }
+            for url in urls {
+                self.open(url, foreground: false, atEnd: true, from: self.active)
+            }
+            self.announce("Opened \(urls.count) tabs")
+        }
+        if urls.count > 15 {
+            Ask.sure(
+                "Open \(urls.count) bookmarks?",
+                detail: "Every site in “\(folder.title)” will open as a background tab.",
+                confirm: "Open \(urls.count) Tabs",
+                then: launchAll
+            )
+        } else {
+            launchAll()
         }
     }
 
@@ -3028,17 +3115,48 @@ final class Browser: NSObject, ObservableObject {
         limit: Int = 7
     ) -> [SwitcherAction] {
         let q = query.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !q.isEmpty else { return [] }
-
-        var actions: [SwitcherAction] = []
         var seenURLs = Set<String>(
             openItems.compactMap { $0.tab.address?.absoluteString.lowercased() }
         )
+        if q.isEmpty {
+            var recent: [SwitcherAction] = []
+            for ghost in ghosts.reversed() {
+                guard recent.count < min(limit, 5) else { break }
+                let key = ghost.url.absoluteString.lowercased()
+                guard seenURLs.insert(key).inserted else { continue }
+                recent.append(SwitcherAction(
+                    id: "closed:\(ghost.id.uuidString)",
+                    kind: .closed,
+                    title: ghost.label,
+                    subtitle: Address.pretty(ghost.url),
+                    url: ghost.url,
+                    ghostID: ghost.id
+                ))
+            }
+            return recent
+        }
+
+        var actions: [SwitcherAction] = []
         func add(_ action: SwitcherAction) {
             guard actions.count < limit else { return }
             let key = action.url.absoluteString.lowercased()
             guard seenURLs.insert(key).inserted else { return }
             actions.append(action)
+        }
+
+        for ghost in ghosts.reversed() {
+            if ghost.label.localizedCaseInsensitiveContains(q)
+                || Address.pretty(ghost.url).localizedCaseInsensitiveContains(q) {
+                add(SwitcherAction(
+                    id: "closed:\(ghost.id.uuidString)",
+                    kind: .closed,
+                    title: ghost.label,
+                    subtitle: Address.pretty(ghost.url),
+                    url: ghost.url,
+                    ghostID: ghost.id
+                ))
+                if actions.count >= 3 { break }
+            }
         }
 
         let directURL = Address.url(from: q)
@@ -3153,6 +3271,22 @@ final class Browser: NSObject, ObservableObject {
         closeTabSwitcher()
         if action.kind == .ask {
             ask(action.prompt ?? action.title)
+            return
+        }
+        if action.kind == .closed {
+            if split, let current = active, !current.isBlank {
+                if let ghostID = action.ghostID {
+                    ghosts.removeAll { $0.id == ghostID }
+                }
+                let created = open(action.url, foreground: false)
+                open(created, on: .right)
+                return
+            }
+            if let ghostID = action.ghostID, let ghost = ghosts.first(where: { $0.id == ghostID }) {
+                reopen(ghost)
+            } else {
+                _ = open(action.url, foreground: true)
+            }
             return
         }
         if split, let current = active, !current.isBlank {
@@ -3611,11 +3745,11 @@ final class Browser: NSObject, ObservableObject {
     }
 
     /// Navigate either a newly created tab (when raised via Arc-style `⌘T` /
-    /// `+ New Tab`) or the current active tab (`⌘L`).
-    private func navigateSubmitted(_ url: URL, searched: String?) {
-        if openingNewTab {
+    /// `+ New Tab` or `⌥↩` from `⌘L`) or the current active tab (`⌘L`).
+    private func navigateSubmitted(_ url: URL, searched: String?, forceNewTab: Bool = false) {
+        if openingNewTab || forceNewTab {
             openingNewTab = false
-            let tab = Tab()
+            let tab = Tab(shy: active?.shy == true)
             adopt(tab)
             leaving()
             activeID = tab.id
@@ -3708,7 +3842,7 @@ final class Browser: NSObject, ObservableObject {
     /// Return. A row picked from the list wins; otherwise what the field was
     /// finishing for you wins; otherwise what you actually typed. If none of
     /// those is a place, nothing happens and the field says so.
-    func submit() {
+    func submit(inNewTab: Bool = false) {
         if let picked, offers.indices.contains(picked), offers[picked].kind == .ask {
             openingNewTab = false
             ask(offers[picked].key)
@@ -3758,7 +3892,7 @@ final class Browser: NSObject, ObservableObject {
             refusals += 1
             return
         }
-        navigateSubmitted(url, searched: searched)
+        navigateSubmitted(url, searched: searched, forceNewTab: inNewTab)
         // Somewhere typed with ⌘L over the talk: the page is what was asked for.
         leaveStage()
         editing = false
@@ -3773,9 +3907,15 @@ final class Browser: NSObject, ObservableObject {
     /// ⌘⇧R. The article, and nothing that was arranged around it.
     func toggleReader() {
         guard let tab = active else { return }
-        tab.toggleReader { [weak self] worked in
+        tab.toggleReader(theme: prefs.readerTheme, font: prefs.readerFont, size: prefs.readerSize) { [weak self] worked in
             guard !worked else { return }
             self?.announce("Nothing to read on this page")
+        }
+    }
+
+    func applyReaderStyle() {
+        for tab in tabs where tab.reader {
+            tab.updateReaderStyle(theme: prefs.readerTheme, font: prefs.readerFont, size: prefs.readerSize)
         }
     }
 
@@ -4103,7 +4243,9 @@ extension Browser: WKNavigationDelegate, WKUIDelegate {
         downloading.append(download)
         // Noted now, while its page is still there to ask: a private tab's
         // download is saved where you say, and left out of the list.
-        if let web = download.webView, tab(for: web)?.shy == true { unlisted.insert(ObjectIdentifier(download)) }
+        let shy = download.webView.flatMap { tab(for: $0)?.shy } == true
+        if shy { unlisted.insert(ObjectIdentifier(download)) }
+        loot.track(download, webView: download.webView, unlisted: shy)
     }
 
     /// Without this WebKit refuses every request out of hand, and a page that
@@ -4314,11 +4456,22 @@ extension Browser: WKDownloadDelegate {
         let asked = response.url.flatMap { namedDownloads.removeValue(forKey: $0) }
         let file = whereToSave(asked ?? suggestedFilename)
         completionHandler(file)
-        if let file { announce("Downloading \(file.lastPathComponent)") }
+        if let file {
+            if let entry = loot.entry(for: download) {
+                entry.name = file.lastPathComponent
+                entry.destination = file
+            }
+            announce("Downloading \(file.lastPathComponent)")
+        } else {
+            downloading.removeAll { $0 === download }
+            unlisted.remove(ObjectIdentifier(download))
+            loot.finish(download)
+        }
     }
 
     func downloadDidFinish(_ download: WKDownload) {
         downloading.removeAll { $0 === download }
+        loot.finish(download)
         let listed = unlisted.remove(ObjectIdentifier(download)) == nil
         guard let file = download.progress.fileURL else {
             announce("Download finished")
@@ -4373,7 +4526,8 @@ extension Browser: WKDownloadDelegate {
     }
 
     private func saved(_ file: URL, from source: URL?) {
-        loot.add(Keep(name: file.lastPathComponent, from: source?.host() ?? "", path: file.path, date: Date()))
+        let bytes = (try? FileManager.default.attributesOfItem(atPath: file.path)[.size] as? Int64)
+        loot.add(Keep(name: file.lastPathComponent, from: source?.host() ?? "", path: file.path, date: Date(), size: bytes))
         announce("Saved \(file.lastPathComponent)")
     }
 
@@ -4384,7 +4538,51 @@ extension Browser: WKDownloadDelegate {
     ) {
         downloading.removeAll { $0 === download }
         unlisted.remove(ObjectIdentifier(download))
+        let nsError = error as NSError
+        if nsError.domain == NSURLErrorDomain, nsError.code == NSURLErrorCancelled {
+            loot.finish(download)
+            return
+        }
+        loot.fail(download, error: error, resumeData: resumeData)
         announce("Download failed")
+    }
+
+    func cancelDownload(_ entry: ActiveDownload) {
+        let target = entry.download
+        entry.cancel()
+        if let target {
+            downloading.removeAll { $0 === target }
+            unlisted.remove(ObjectIdentifier(target))
+        }
+        loot.dismiss(entry)
+    }
+
+    func resumeDownload(_ entry: ActiveDownload) {
+        guard let resumeData = entry.resumeData, let web = entry.webView ?? active?.web else {
+            retryDownload(entry)
+            return
+        }
+        entry.resumeData = nil
+        web.resumeDownload(fromResumeData: resumeData) { [weak self] download in
+            Task { @MainActor in
+                guard let self else { return }
+                download.delegate = self
+                self.downloading.append(download)
+                entry.attach(download)
+            }
+        }
+    }
+
+    func retryDownload(_ entry: ActiveDownload) {
+        guard let request = entry.request, let web = entry.webView ?? active?.web else { return }
+        web.startDownload(using: request) { [weak self] download in
+            Task { @MainActor in
+                guard let self else { return }
+                download.delegate = self
+                self.downloading.append(download)
+                entry.attach(download)
+            }
+        }
     }
 
     /// WebKit refuses to write over a file that is already there, so the name

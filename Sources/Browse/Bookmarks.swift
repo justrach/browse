@@ -29,6 +29,12 @@ struct Bookmark: Codable, Identifiable, Hashable {
     }
 }
 
+struct BookmarkMatch: Identifiable {
+    let id: Bookmark.ID
+    let bookmark: Bookmark
+    let folderPath: String
+}
+
 @MainActor
 final class Bookmarks: ObservableObject {
     @Published private(set) var roots: [Bookmark] = [] {
@@ -212,6 +218,31 @@ final class Bookmarks: ObservableObject {
             if best.count > limit { best.removeLast() }
         }
         return best.map { Suggestion(key: $0.item.pretty, title: $0.item.title, url: $0.item.url, kind: .bookmark) }
+    }
+
+    /// Flat search across all saved bookmarks with folder breadcrumb paths
+    /// for BookmarksPanel and BookmarksDropdown filtering.
+    func search(_ query: String) -> [BookmarkMatch] {
+        let needle = query.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !needle.isEmpty else { return [] }
+        var out: [BookmarkMatch] = []
+        func walk(_ nodes: [Bookmark], path: [String]) {
+            for node in nodes {
+                if node.isFolder {
+                    walk(node.children ?? [], path: path + [node.title])
+                    continue
+                }
+                let raw = node.url ?? ""
+                let pretty = URL(string: raw).map(Address.pretty) ?? raw
+                if node.title.localizedCaseInsensitiveContains(needle)
+                    || pretty.localizedCaseInsensitiveContains(needle)
+                    || raw.localizedCaseInsensitiveContains(needle) {
+                    out.append(BookmarkMatch(id: node.id, bookmark: node, folderPath: path.joined(separator: " / ")))
+                }
+            }
+        }
+        walk(roots, path: [])
+        return out
     }
 
     func remove(_ id: Bookmark.ID) {
@@ -653,14 +684,74 @@ struct BookmarkOutline: View {
 struct BookmarksDropdown: View {
     @ObservedObject var browser: Browser
     @ObservedObject var bookmarks: Bookmarks
+    @State private var query = ""
 
     var body: some View {
+        let needle = query.trimmingCharacters(in: .whitespacesAndNewlines)
+        let matches = needle.isEmpty ? [] : bookmarks.search(needle)
+
         VStack(alignment: .leading, spacing: 0) {
+            if bookmarks.count > 8 {
+                HStack(spacing: 6) {
+                    Image(systemName: "magnifyingglass")
+                        .font(.system(size: 10.5, weight: .medium))
+                        .foregroundStyle(Palette.muted)
+                    TextField("Search bookmarks", text: $query)
+                        .textFieldStyle(.plain)
+                        .font(.system(size: 12))
+                        .foregroundStyle(Palette.ink)
+                    if !query.isEmpty {
+                        Button { query = "" } label: {
+                            Image(systemName: "xmark.circle.fill")
+                                .font(.system(size: 10.5))
+                                .foregroundStyle(Palette.faint)
+                        }
+                        .buttonStyle(.plain)
+                    }
+                }
+                .padding(.horizontal, 10)
+                .padding(.vertical, 6)
+                .background(Palette.wash, in: RoundedRectangle(cornerRadius: 8, style: .continuous))
+                .padding(8)
+                Divider().overlay(Palette.hairline)
+            }
+
             if bookmarks.isEmpty {
                 Text("No bookmarks yet")
                     .font(.system(size: 12.5))
                     .foregroundStyle(Palette.muted)
                     .padding(14)
+            } else if !needle.isEmpty {
+                if matches.isEmpty {
+                    Text("No matching bookmarks")
+                        .font(.system(size: 12.5))
+                        .foregroundStyle(Palette.muted)
+                        .padding(14)
+                } else {
+                    ScrollView {
+                        VStack(alignment: .leading, spacing: 1) {
+                            ForEach(matches) { match in
+                                SearchRow(match: match, showPath: true) {
+                                    if let text = match.bookmark.url, let url = URL(string: text) {
+                                        browser.pickBookmark(url)
+                                    }
+                                } openInNewTab: {
+                                    if let text = match.bookmark.url, let url = URL(string: text) {
+                                        browser.pickBookmark(url, inNewTab: true)
+                                    }
+                                } rename: {
+                                    Ask.name("Rename Bookmark", placeholder: match.bookmark.title, initial: match.bookmark.title, confirm: "Rename") {
+                                        bookmarks.update(match.bookmark.id, title: $0, url: nil)
+                                    }
+                                } remove: {
+                                    bookmarks.askRemove(match.bookmark)
+                                }
+                            }
+                        }
+                        .padding(6)
+                    }
+                    .frame(maxHeight: 340)
+                }
             } else {
                 ScrollView {
                     BookmarkOutline(bookmarks: bookmarks) { url in
@@ -717,29 +808,126 @@ struct BookmarksDropdown: View {
     }
 }
 
+/// Flat row used when searching bookmarks in `BookmarksPanel` / `BookmarksDropdown`.
+private struct SearchRow: View {
+    let match: BookmarkMatch
+    let showPath: Bool
+    let open: () -> Void
+    let openInNewTab: () -> Void
+    let rename: () -> Void
+    let remove: () -> Void
+    @State private var hovering = false
+
+    var body: some View {
+        let host = match.bookmark.host ?? ""
+        let subtitle: String = {
+            let cleanHost = host.hasPrefix("www.") ? String(host.dropFirst(4)) : host
+            if showPath && !match.folderPath.isEmpty {
+                return cleanHost.isEmpty ? match.folderPath : "\(cleanHost) · \(match.folderPath)"
+            }
+            return cleanHost
+        }()
+
+        HStack(spacing: 8) {
+            Mark(icon: Favicons.shared.cached(host), letter: String(host.replacingOccurrences(of: "www.", with: "").prefix(1)).uppercased(), size: 15)
+            VStack(alignment: .leading, spacing: 1) {
+                Text(match.bookmark.title)
+                    .font(.system(size: 12.5))
+                    .foregroundStyle(Palette.ink)
+                    .lineLimit(1)
+                if !subtitle.isEmpty {
+                    Text(subtitle)
+                        .font(.system(size: 11))
+                        .foregroundStyle(Palette.muted)
+                        .lineLimit(1)
+                        .truncationMode(.middle)
+                }
+            }
+            Spacer(minLength: 8)
+        }
+        .padding(.horizontal, 10)
+        .padding(.vertical, 6)
+        .background(RoundedRectangle(cornerRadius: 8, style: .continuous).fill(hovering ? Palette.wash : .clear))
+        .contentShape(Rectangle())
+        .overlay { MiddleClick(act: openInNewTab) }
+        .onTapGesture(perform: open)
+        .onHover { hovering = $0 }
+        .contextMenu {
+            Button("Open", action: open)
+            Button("Open in New Tab", action: openInNewTab)
+            Divider()
+            Button("Rename…", action: rename)
+            Button("Remove", role: .destructive, action: remove)
+        }
+        .animation(Motion.quick, value: hovering)
+    }
+}
+
 /// The full list, for taking things out of it or bringing more in.
 struct BookmarksPanel: View {
     @ObservedObject var browser: Browser
     @ObservedObject var bookmarks: Bookmarks
+    @FocusState private var hunting: Bool
 
     var body: some View {
+        let needle = browser.bookmarksHunt.trimmingCharacters(in: .whitespacesAndNewlines)
+        let matches = needle.isEmpty ? [] : bookmarks.search(needle)
+
         Plate("Bookmarks", width: 600, close: { browser.bookmarking = false }) {
-            if bookmarks.isEmpty {
-                Card { Nothing("Nothing kept yet. Add this page with ⇧⌘B, or bring yours in below.") }
-            } else {
-                ScrollView(showsIndicators: false) {
-                    Card {
-                        BookmarkOutline(bookmarks: bookmarks) { url in
-                            browser.pickBookmark(url)
-                        } openInNewTab: { url in
-                            browser.pickBookmark(url, inNewTab: true)
-                        }
-                        .padding(.horizontal, 6)
-                        .padding(.vertical, 6)
-                    }
-                    .padding(.bottom, 2)
+            VStack(alignment: .leading, spacing: 14) {
+                if !bookmarks.isEmpty {
+                    Hunt(text: $browser.bookmarksHunt, prompt: "Search bookmarks", focus: $hunting)
                 }
-                .frame(maxHeight: 440)
+
+                if bookmarks.isEmpty {
+                    Card { Nothing("Nothing kept yet. Add this page with ⇧⌘B, or bring yours in below.") }
+                } else if !needle.isEmpty {
+                    if matches.isEmpty {
+                        Card { Nothing("Nothing matches.") }
+                    } else {
+                        ScrollView(showsIndicators: false) {
+                            Card {
+                                VStack(alignment: .leading, spacing: 1) {
+                                    ForEach(matches) { match in
+                                        SearchRow(match: match, showPath: true) {
+                                            if let text = match.bookmark.url, let url = URL(string: text) {
+                                                browser.pickBookmark(url)
+                                            }
+                                        } openInNewTab: {
+                                            if let text = match.bookmark.url, let url = URL(string: text) {
+                                                browser.pickBookmark(url, inNewTab: true)
+                                            }
+                                        } rename: {
+                                            Ask.name("Rename Bookmark", placeholder: match.bookmark.title, initial: match.bookmark.title, confirm: "Rename") {
+                                                bookmarks.update(match.bookmark.id, title: $0, url: nil)
+                                            }
+                                        } remove: {
+                                            bookmarks.askRemove(match.bookmark)
+                                        }
+                                    }
+                                }
+                                .padding(.horizontal, 6)
+                                .padding(.vertical, 6)
+                            }
+                            .padding(.bottom, 2)
+                        }
+                        .frame(maxHeight: 400)
+                    }
+                } else {
+                    ScrollView(showsIndicators: false) {
+                        Card {
+                            BookmarkOutline(bookmarks: bookmarks) { url in
+                                browser.pickBookmark(url)
+                            } openInNewTab: { url in
+                                browser.pickBookmark(url, inNewTab: true)
+                            }
+                            .padding(.horizontal, 6)
+                            .padding(.vertical, 6)
+                        }
+                        .padding(.bottom, 2)
+                    }
+                    .frame(maxHeight: 400)
+                }
             }
         } foot: {
             HStack(spacing: 8) {
@@ -754,6 +942,9 @@ struct BookmarksPanel: View {
                     .font(.system(size: 12))
                     .foregroundStyle(Palette.muted)
             }
+        }
+        .onAppear {
+            if !bookmarks.isEmpty { hunting = true }
         }
     }
 }
@@ -833,8 +1024,12 @@ final class BookmarkMenu: NSObject, NSMenuDelegate {
     /// A folder of the bookmarks bar, opened as a menu at the pointer: the
     /// same items as the menu bar's, folders opening as they are reached.
     func popUp(_ folder: Bookmark) {
-        let menu = NSMenu(title: folder.title)
-        let made = items(for: folder.children ?? [])
+        popUp(folder.children ?? [], title: folder.title)
+    }
+
+    func popUp(_ nodes: [Bookmark], title: String) {
+        let menu = NSMenu(title: title)
+        let made = items(for: nodes)
         if made.isEmpty {
             let empty = NSMenuItem(title: "Empty", action: nil, keyEquivalent: "")
             empty.isEnabled = false

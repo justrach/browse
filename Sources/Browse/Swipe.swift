@@ -53,6 +53,10 @@ enum Swipe {
         let dir = dx > 0 ? 1 : -1
         return """
         (function () {
+          // A page setting `overscroll-behavior-x: none` or `contain` (like Google Sheets)
+          // opts out of swipe-back navigation even when a canvas swallows wheel events.
+          var rootOX = getComputedStyle(document.documentElement).overscrollBehaviorX;
+          if (rootOX === 'none' || rootOX === 'contain') return true;
           function rootCanScroll() {
             var html = getComputedStyle(document.documentElement).overflowX;
             var body = document.body ? getComputedStyle(document.body).overflowX : 'visible';

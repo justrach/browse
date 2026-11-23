@@ -163,6 +163,7 @@ struct SiteCard: View {
     let browser: Browser
     @ObservedObject var tab: Tab
     let close: () -> Void
+    @ObservedObject private var shield = Shield.shared
 
     /// One step in: the connection, said in full.
     @State private var deeper: Bool
@@ -205,6 +206,13 @@ struct SiteCard: View {
 
     // MARK: - the card, drawn as the system draws a menu
 
+    private var shieldHost: String? {
+        guard let url = tab.pageAddress,
+              let scheme = url.scheme?.lowercased(), scheme == "https" || scheme == "http",
+              let host = url.host()?.lowercased(), !host.isEmpty else { return nil }
+        return host.hasPrefix("www.") ? String(host.dropFirst(4)) : host
+    }
+
     private var front: some View {
         VStack(alignment: .leading, spacing: 0) {
             if let url = tab.pageAddress {
@@ -212,6 +220,15 @@ struct SiteCard: View {
             }
             if let safety {
                 Row(safety.title, submenu: true) { deeper = true }
+            }
+            if browser.prefs.shielded && shield.trouble == nil, let host = shieldHost {
+                let paused = shield.isPaused(on: host)
+                Row(paused ? "Resume Ad Blocker on Site" : "Pause Ad Blocker on Site") {
+                    after {
+                        shield.pause(host, !paused)
+                        browser.reload()
+                    }
+                }
             }
             Row("Copy Address", keys: "⇧⌘C") { after { browser.copyAddress() } }
             Separator()

@@ -84,6 +84,14 @@ extension Browser {
         menu.addItem(ImageMenuItem("Open Image in New Tab") { [weak self] in
             self?.open(url, foreground: true, from: tab)
         })
+        if ["http", "https"].contains(url.scheme?.lowercased() ?? ""),
+           tabs.contains(where: { $0.id == tab.id }) {
+            menu.addItem(ImageMenuItem("Open Image in Split View") { [weak self] in
+                guard let self else { return }
+                let opened = self.open(url, foreground: false, from: tab)
+                self.open(opened, on: .right)
+            })
+        }
         menu.addItem(.separator())
         menu.addItem(ImageMenuItem("Copy Image") { [weak self] in
             self?.copyImage(at: url)

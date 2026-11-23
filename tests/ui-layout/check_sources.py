@@ -306,6 +306,66 @@ check(
     "OnboardingFlow: Esc persists welcomed=true, draggable window band, async source scan, retryable partial import, single Continue CTA, live default-browser refresh",
 )
 
+# 19. Calmer MemoryPolicy & UX pass invariants (matches Browse.MemoryPolicy).
+sleep_src = read("Sources/Browse/Sleep.swift")
+aside_src = read("Sources/Browse/AsideBar.swift")
+sitecard_src = read("Sources/Browse/SiteCard.swift")
+tabbar_src = read("Sources/Browse/TabBar.swift")
+side_src = read("Sources/Browse/Side.swift")
+tabcycle_src = read("Sources/Browse/TabCycleHUD.swift")
+check(
+    "case relaxed" in prefs_src
+    and "case balanced" in prefs_src
+    and "case low" in prefs_src
+    and "case .balanced: return 6" in sleep_src
+    and "case .balanced: return 5 * 60" in sleep_src
+    and "case .balanced: return 30 * 60" in sleep_src
+    and "pinned to graff" in sleep_src
+    and "attached to graff" in sleep_src
+    and "lastMemoryWarning" in sleep_src
+    and "TabPreviewCache.shared.trim()" in sleep_src
+    and "sleepingTabs" in sleep_src,
+    "MemoryPolicy: Relaxed/Balanced/Low RAM thresholds, agent-attached protection, pressure debouncing, and bitmap cache trimming",
+)
+check(
+    ".opacity(showCopy ? 1 : 0)" in aside_src
+    and "shield.isPaused" in sitecard_src
+    and "copyAddress(of: tab)" in tabbar_src
+    and "setResizeCursor(false)" in side_src
+    and "setResizeCursor(false)" in agent_col
+    and "hiddenBefore" in tabcycle_src
+    and "submit(inNewTab:" in omnibox_src,
+    "UX pass: zero-reflow AsideBar hover, SiteCard shield toggle, non-switching tab copy, balanced resize cursors, sliding Ctrl-Tab window, Option+Return new tab",
+)
+
+# 20. UX Tiers 1-3 + Search UX ports invariants.
+reader_src = read("Sources/Browse/Reader.swift")
+loot_src = read("Sources/Browse/Loot.swift")
+bookmarks_src = read("Sources/Browse/Bookmarks.swift")
+bookmarks_bar_src = read("Sources/Browse/BookmarksBar.swift")
+float_src = read("Sources/Browse/Float.swift")
+spaces_src = read("Sources/Browse/Spaces.swift")
+imagemenu_src = read("Sources/Browse/ImageMenu.swift")
+check(
+    "final class ActiveDownload" in loot_src
+    and "static func isFileWriteError" in loot_src
+    and "prefers-color-scheme:dark" in reader_src
+    and "office-reader-root" in reader_src
+    and "PageProgressBar" in stage_src
+    and "struct HistoryNavDoor" in tabbar_src
+    and "func search(" in bookmarks_src
+    and "static func fit(" in bookmarks_bar_src
+    and "func moveTab(" in spaces_src
+    and "AsideBackgroundAudioButton" in aside_src
+    and "static let toggleMute" in float_src
+    and "func resend(" in agent_src
+    and "overscrollBehaviorX" in swipe_src
+    and "addEventListener('wheel'" not in swipe_src
+    and "Open Image in Split View" in imagemenu_src
+    and "static let tabRowHold: CGFloat = 40" in design_src,
+    "UX Tiers 1-3 & Search ports: live downloads + file-error retry, dark/non-destructive Reader, page progress bar, nav history menus, bookmark search + overflow, recently closed in ⌘K/History, Move to Space + colours, folded audio pill, PiP scrub/mute/speed, Agent retry/edit, overscrollBehaviorX + Image split + tabRowHold",
+)
+
 if failures:
     print(f"\n{len(failures)} source guardrail check(s) failed.", file=sys.stderr)
     sys.exit(1)

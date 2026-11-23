@@ -19,6 +19,7 @@ struct SideBar: View {
     /// The width the column had when the edge was picked up.
     @State private var grabbed: CGFloat?
     @State private var onEdge = false
+    @State private var cursorPushed = false
     @State private var headerHover = false
     @State private var clearHover = false
     @State private var agentHeaderHover = false
@@ -175,6 +176,16 @@ struct SideBar: View {
         return scheme == .dark ? Color.white.opacity(0.08) : Color.black.opacity(0.065)
     }
 
+    private func setResizeCursor(_ active: Bool) {
+        if active && !cursorPushed {
+            cursorPushed = true
+            NSCursor.resizeLeftRight.push()
+        } else if !active && cursorPushed {
+            cursorPushed = false
+            NSCursor.pop()
+        }
+    }
+
     /// The column's edge: pull it to make the column wider or narrower,
     /// double-click it to put it back. The hairline darkens under the pointer
     /// so the edge says it can be taken before it is.
@@ -186,8 +197,9 @@ struct SideBar: View {
             .contentShape(Rectangle())
             .onHover { over in
                 onEdge = over
-                if over { NSCursor.resizeLeftRight.push() } else { NSCursor.pop() }
+                setResizeCursor(over)
             }
+            .onDisappear { setResizeCursor(false) }
             .gesture(
                 DragGesture(minimumDistance: 1, coordinateSpace: .global)
                     .onChanged { value in
@@ -750,11 +762,11 @@ struct SideBar: View {
         HStack(spacing: 2) {
             if browser.prefs.usesSpaces { SpaceDot(browser: browser) }
             ExtensionSlot(edge: .trailing)
-            Door(icon: "bookmark", help: "Bookmarks") { browser.bookmarksOpen.toggle() }
+            Door(icon: "bookmark", on: browser.bookmarksOpen || browser.bookmarking, help: "Bookmarks   ⌥⌘B") { browser.bookmarksOpen.toggle() }
                 .popover(isPresented: $browser.bookmarksOpen, arrowEdge: .trailing) {
                     BookmarksDropdown(browser: browser, bookmarks: browser.bookmarks)
                 }
-            Door(icon: "clock", help: "History   ⌘Y") { browser.recalling = true }
+            Door(icon: "clock", on: browser.recalling, help: "History   ⌘Y") { browser.recalling = true }
             if browser.activeDownloadCount > 0 || !browser.loot.kept.isEmpty {
                 ZStack(alignment: .topTrailing) {
                     Door(
@@ -773,7 +785,7 @@ struct SideBar: View {
                 .transition(.opacity.combined(with: .scale(scale: 0.9)))
             }
             Spacer(minLength: 0)
-            Door(icon: "gearshape", help: "Settings   ⌘,") { browser.tuning = true }
+            Door(icon: "gearshape", on: browser.tuning, help: "Settings   ⌘,") { browser.tuning = true }
         }
         .padding(.horizontal, 10)
         .padding(.bottom, 10)
@@ -946,7 +958,7 @@ private struct SideRow: View {
                     .frame(height: 16)
             } else {
                 if prefs.glyph == .icons, !tab.isBlank {
-                    Mark(icon: tab.icon, letter: tab.monogram, size: 16)
+                    Mark(icon: tab.icon, letter: tab.monogram, size: 16, dim: tab.asleep)
                 }
                 if tab.bench {
                     // A script's tab, not yours.
@@ -1044,6 +1056,7 @@ private struct SideRow: View {
         .overlay { MiddleClick(act: close) }
         .onHover { hovering = $0 }
         .contextMenu { TabMenu(browser: browser, tab: tab, close: close) }
+        .help(rowHelp)
         .animation(Motion.quick, value: hovering)
         .animation(Motion.glide, value: editing)
         .onChange(of: browser.refusals) { _, _ in
@@ -1084,11 +1097,17 @@ private struct SideRow: View {
     /// The other half of the pair on screen.
     private var paired: Bool { !live && browser.showing(inSplit: tab) }
 
+    private var rowHelp: String {
+        let host = tab.address.map { Address.pretty($0) }
+        let base = (host != nil && !tab.title.isEmpty && host != tab.label) ? "\(tab.label) — \(host!)" : tab.label
+        return tab.asleep ? "\(base) (Sleeping)" : base
+    }
+
     /// Every title in ink, as a list you read rather than a list of
     /// what's switched off; the one you're on is only a shade stronger.
     private var colour: Color {
         if live || hovering || paired { return Palette.ink }
-        return Palette.ink.opacity(0.78)
+        return Palette.ink.opacity(tab.asleep ? 0.62 : 0.78)
     }
 }
 

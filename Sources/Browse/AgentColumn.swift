@@ -39,6 +39,7 @@ struct AgentColumn: View {
     /// The width the column had when the edge was picked up.
     @State private var grabbed: CGFloat?
     @State private var onEdge = false
+    @State private var cursorPushed = false
 
     @Environment(\.colorScheme) private var scheme
 
@@ -374,6 +375,7 @@ struct AgentColumn: View {
                                     }
                                     let turns = Turn.split(agent.entries)
                                     let seed = agent.chatID?.uuidString ?? "draft"
+                                    let busy = agent.phase == .working || agent.phase == .starting
                                     ForEach(turns) { turn in
                                         TurnView(
                                             turn: turn,
@@ -382,10 +384,16 @@ struct AgentColumn: View {
                                             live: turn.id == turns.last?.id && (agent.phase == .working
                                                 || (agent.phase == .starting && turn.you != nil && turn.answer.isEmpty)),
                                             full: full,
+                                            busy: busy,
                                             lastUpdate: agent.lastStreamAt,
                                             chatSeed: seed,
                                             waiting: agent.asking.map { $0.isQuestion ? "Waiting for your answer…" : "Waiting for your approval…" },
                                             visit: { url in browser.open(url, foreground: true, agentGroup: "Agent") },
+                                            onRetry: turn.you.map { prompt in { agent.resend(prompt.text, page: browser.active) } },
+                                            onEditPrompt: { prompt in
+                                                agent.draft = prompt
+                                                browser.focusAgent()
+                                            },
                                             feedback: { browser.reportAgentProblem(kind: .answer) }
                                         )
                                     }
@@ -503,6 +511,16 @@ struct AgentColumn: View {
             .frame(maxWidth: .infinity)
     }
 
+    private func setResizeCursor(_ active: Bool) {
+        if active && !cursorPushed {
+            cursorPushed = true
+            NSCursor.resizeLeftRight.push()
+        } else if !active && cursorPushed {
+            cursorPushed = false
+            NSCursor.pop()
+        }
+    }
+
     /// The column's edge: pulled left to widen it, double-clicked to put it
     /// back, as the sidebar's is. Clean frosted gutter at rest; reveals a
     /// crisp Split-View-style resize guide + grip pill only on hover or drag.
@@ -527,8 +545,9 @@ struct AgentColumn: View {
         .contentShape(Rectangle())
         .onHover { over in
             onEdge = over
-            if over { NSCursor.resizeLeftRight.push() } else { NSCursor.pop() }
+            setResizeCursor(over)
         }
+        .onDisappear { setResizeCursor(false) }
         .gesture(
             DragGesture(minimumDistance: 1, coordinateSpace: .global)
                 .onChanged { value in
@@ -1404,10 +1423,13 @@ private struct TurnView: View {
     let turn: Turn
     let live: Bool
     let full: Bool
+    var busy: Bool = false
     let lastUpdate: Date
     let chatSeed: String
     let waiting: String?
     let visit: (URL) -> Void
+    var onRetry: (() -> Void)? = nil
+    var onEditPrompt: ((String) -> Void)? = nil
 
     @State private var copied = false
     let feedback: () -> Void
@@ -1415,7 +1437,7 @@ private struct TurnView: View {
     var body: some View {
         VStack(alignment: .leading, spacing: full ? 12 : 10) {
             if let you = turn.you {
-                EntryRow(entry: you, full: full, visit: visit)
+                EntryRow(entry: you, full: full, visit: visit, onEditPrompt: onEditPrompt)
             }
             if turn.work.contains(where: { $0.kind != .thought }) || live {
                 AgentActivity(entries: turn.work, started: turn.started, ended: turn.ended,
@@ -1432,7 +1454,7 @@ private struct TurnView: View {
         .animation(Motion.settle, value: live)
     }
 
-    /// Copy, and when it was said.
+    /// Copy, retry, report, and when it was said.
     private func foot(_ reply: Agent.Entry) -> some View {
         HStack(spacing: 12) {
             Button {
@@ -1449,6 +1471,17 @@ private struct TurnView: View {
             }
             .buttonStyle(.plain)
             .help("Copy")
+            if let onRetry, !busy {
+                Button(action: onRetry) {
+                    Image(systemName: "arrow.clockwise")
+                        .font(.system(size: 11, weight: .medium))
+                        .frame(width: 18, height: 18)
+                        .contentShape(Rectangle())
+                }
+                .buttonStyle(.plain)
+                .help("Ask again")
+                .accessibilityLabel("Ask again")
+            }
             Button(action: feedback) {
                 Image(systemName: "flag")
                     .font(.system(size: 11))
@@ -1477,12 +1510,17 @@ struct EntryRow: View {
     var full = false
     var live = false
     let visit: (URL) -> Void
+    var onEditPrompt: ((String) -> Void)? = nil
 
-    init(entry: Agent.Entry, full: Bool = false, live: Bool = false, visit: @escaping (URL) -> Void) {
+    @State private var hoveringPrompt = false
+    @State private var copiedPrompt = false
+
+    init(entry: Agent.Entry, full: Bool = false, live: Bool = false, visit: @escaping (URL) -> Void, onEditPrompt: ((String) -> Void)? = nil) {
         self.entry = entry
         self.full = full
         self.live = live
         self.visit = visit
+        self.onEditPrompt = onEditPrompt
     }
 
     var body: some View {
@@ -1518,13 +1556,50 @@ struct EntryRow: View {
                     }
                 }
                 if !entry.text.isEmpty {
-                    Text(entry.text)
-                        .font(.system(size: full ? 14.5 : 13))
-                        .foregroundStyle(Palette.ink)
-                        .textSelection(.enabled)
-                        .padding(.horizontal, full ? 15 : 11)
-                        .padding(.vertical, full ? 9 : 7)
-                        .background(full ? Palette.wash : Palette.ink.opacity(0.035), in: RoundedRectangle(cornerRadius: full ? 18 : 14, style: .continuous))
+                    VStack(alignment: .trailing, spacing: 3) {
+                        Text(entry.text)
+                            .font(.system(size: full ? 14.5 : 13))
+                            .foregroundStyle(Palette.ink)
+                            .textSelection(.enabled)
+                            .padding(.horizontal, full ? 15 : 11)
+                            .padding(.vertical, full ? 9 : 7)
+                            .background(full ? Palette.wash : Palette.ink.opacity(0.035), in: RoundedRectangle(cornerRadius: full ? 18 : 14, style: .continuous))
+
+                        let showPromptActions = hoveringPrompt || copiedPrompt
+                        HStack(spacing: 8) {
+                            Button {
+                                NSPasteboard.general.clearContents()
+                                NSPasteboard.general.setString(entry.text, forType: .string)
+                                copiedPrompt = true
+                                DispatchQueue.main.asyncAfter(deadline: .now() + 1.2) { copiedPrompt = false }
+                            } label: {
+                                Image(systemName: copiedPrompt ? "checkmark" : "square.on.square")
+                                    .font(.system(size: 10, weight: .medium))
+                                    .frame(width: 16, height: 16)
+                                    .contentShape(Rectangle())
+                            }
+                            .buttonStyle(.plain)
+                            .help("Copy prompt")
+
+                            if let onEditPrompt {
+                                Button {
+                                    onEditPrompt(entry.text)
+                                } label: {
+                                    Image(systemName: "pencil")
+                                        .font(.system(size: 10.5, weight: .medium))
+                                        .frame(width: 16, height: 16)
+                                        .contentShape(Rectangle())
+                                }
+                                .buttonStyle(.plain)
+                                .help("Edit in composer")
+                            }
+                        }
+                        .foregroundStyle(Palette.muted)
+                        .opacity(showPromptActions ? 1 : 0)
+                        .allowsHitTesting(showPromptActions)
+                        .animation(Motion.quick, value: showPromptActions)
+                    }
+                    .onHover { hoveringPrompt = $0 }
                 }
             }
             .frame(maxWidth: .infinity, alignment: .trailing)

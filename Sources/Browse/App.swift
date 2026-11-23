@@ -442,7 +442,7 @@ struct ContentView: View {
 
             // The bookmarks bar, under the strip or beside the column's top.
             if barShown {
-                BookmarksBar(browser: browser, bookmarks: browser.bookmarks)
+                BookmarksBar(browser: browser, bookmarks: browser.bookmarks, framed: arcFrame, darkCanvas: darkCanvas)
                     .padding(.leading, chrome.width)
                     .padding(.trailing, agentTrailing)
                     .padding(.top, band)
@@ -609,6 +609,7 @@ struct ContentView: View {
                 SelectionBar(
                     selection: selection,
                     viewport: tab.built?.bounds.size ?? .zero,
+                    usesAgent: browser.prefs.usesAgent,
                     onAsk: { browser.runSelectionAction(.ask) },
                     onExplain: { browser.runSelectionAction(.explain) },
                     onRewrite: { browser.runSelectionAction(.rewrite) },
@@ -1436,7 +1437,11 @@ struct ContentView: View {
                 return true
             }
             if browser.bookmarking {
-                browser.bookmarking = false
+                if !browser.bookmarksHunt.isEmpty {
+                    browser.bookmarksHunt = ""
+                } else {
+                    browser.bookmarking = false
+                }
                 return true
             }
             if browser.managing {
@@ -1456,7 +1461,11 @@ struct ContentView: View {
                 return true
             }
             if browser.hoarding {
-                browser.hoarding = false
+                if !browser.downloadsHunt.isEmpty {
+                    browser.downloadsHunt = ""
+                } else {
+                    browser.hoarding = false
+                }
                 return true
             }
             if browser.suggesting != nil {

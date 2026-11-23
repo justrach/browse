@@ -904,7 +904,7 @@ final class Agent: ObservableObject {
     /// graff and its pages hold ~40 MB and more for as long as it runs. With
     /// nothing to do for this long it goes, and the next message brings the
     /// same conversation back with `session/load`.
-    private static let idleLimit: TimeInterval = 10 * 60
+    private static let idleLimit: TimeInterval = 20 * 60
 
     init(prefs: Preferences) {
         self.prefs = prefs
@@ -2013,6 +2013,14 @@ final class Agent: ObservableObject {
         }
         queueHeld = false
         submit(text, page: tab, passage: excerpt, mentioned: extras, history: hist, images: images)
+    }
+
+    /// Re-sends an earlier user prompt without discarding anything the user
+    /// currently has typed in the composer.
+    func resend(_ text: String, page tab: Tab?) {
+        let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty, prefs.usesAgent, phase != .working, !prompting else { return }
+        submit(trimmed, page: pinned ?? tab)
     }
 
     /// NanoHarness ⌘↩ shortcut:

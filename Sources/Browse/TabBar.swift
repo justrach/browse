@@ -1,4 +1,5 @@
 import SwiftUI
+import WebKit
 
 /// The only chrome there is. Titles, one of them in a grey pill, and the pill
 /// slides from the tab you left to the tab you picked rather than blinking out
@@ -359,7 +360,7 @@ struct TabBar: View {
     /// the three of the helm and the bookmarks stand in for them.
     private func room(in strip: CGFloat) -> CGFloat {
         let far = doors > 0 ? doors : Metrics.helm + 26
-        return max(0, strip - Metrics.lights - dot - 12 - Metrics.plusWidth - far - 3 * Metrics.tabGap)
+        return max(0, strip - Metrics.lights - dot - 12 - Metrics.plusWidth - Metrics.tabRowHold - far - 3 * Metrics.tabGap)
     }
 
     /// What goes before the tabs: the space's dot, when there are spaces,
@@ -537,15 +538,35 @@ struct Helm: View {
             let back = !tab.isBlank && tab.canGoBack
             let forward = !tab.isBlank && tab.canGoForward
             if !tab.isBlank {
-                HStack(spacing: 4) {
-                    if back {
-                        Door(icon: "chevron.left", help: "Back   ⌘[") { browser.back() }
-                            .transition(.opacity.combined(with: .scale(scale: 0.85)))
-                    }
-                    if forward {
-                        Door(icon: "chevron.right", help: "Forward   ⌘]") { browser.forward() }
-                            .transition(.opacity.combined(with: .scale(scale: 0.85)))
-                    }
+                HStack(spacing: 2) {
+                    HistoryNavDoor(
+                        icon: "chevron.left",
+                        enabled: back,
+                        help: "Back (hold or right-click for history)   ⌘[",
+                        action: { browser.back() },
+                        historyItems: { tab.backHistory },
+                        onPick: { item, inNewTab, foreground in
+                            if inNewTab {
+                                browser.open(item.url, foreground: foreground, from: tab)
+                            } else {
+                                tab.go(to: item)
+                            }
+                        }
+                    )
+                    HistoryNavDoor(
+                        icon: "chevron.right",
+                        enabled: forward,
+                        help: "Forward (hold or right-click for history)   ⌘]",
+                        action: { browser.forward() },
+                        historyItems: { tab.forwardHistory },
+                        onPick: { item, inNewTab, foreground in
+                            if inNewTab {
+                                browser.open(item.url, foreground: foreground, from: tab)
+                            } else {
+                                tab.go(to: item)
+                            }
+                        }
+                    )
                     // Reload, or stop while it is still coming.
                     Door(
                         icon: tab.loading ? "xmark" : "arrow.clockwise",
@@ -559,6 +580,137 @@ struct Helm: View {
                 .animation(Motion.quick, value: forward)
                 .animation(Motion.quick, value: tab.loading)
             }
+        }
+    }
+}
+
+/// Stable navigation door (`<` / `>`) supporting normal click, right-click, and
+/// press-and-hold (≥ 0.32s) to open a menu of recent back/forward history entries.
+private struct HistoryNavDoor: View {
+    let icon: String
+    let enabled: Bool
+    let help: String
+    let action: () -> Void
+    let historyItems: () -> [WKBackForwardListItem]
+    let onPick: (WKBackForwardListItem, Bool, Bool) -> Void
+
+    @State private var hovering = false
+
+    var body: some View {
+        ZStack {
+            RoundedRectangle(cornerRadius: 7.5, style: .continuous)
+                .fill(enabled && hovering ? Palette.hover : .clear)
+            Image(systemName: icon)
+                .font(.system(size: 12, weight: .regular))
+                .foregroundStyle(
+                    enabled
+                        ? (hovering ? Palette.ink.opacity(0.86) : Palette.muted.opacity(0.9))
+                        : Palette.muted.opacity(0.30)
+                )
+        }
+        .frame(width: 26, height: 26)
+        .overlay {
+            if enabled {
+                Trigger(action: action, historyItems: historyItems, onPick: onPick)
+            }
+        }
+        .onHover { hovering = $0 }
+        .help(help)
+        .allowsHitTesting(enabled)
+        .animation(Motion.quick, value: hovering)
+    }
+
+    private struct Trigger: NSViewRepresentable {
+        let action: () -> Void
+        let historyItems: () -> [WKBackForwardListItem]
+        let onPick: (WKBackForwardListItem, Bool, Bool) -> Void
+
+        func makeNSView(context: Context) -> NavView { NavView() }
+
+        func updateNSView(_ view: NavView, context: Context) {
+            view.action = action
+            view.historyItems = historyItems
+            view.onPick = onPick
+        }
+
+        final class NavView: NSView {
+            var action: () -> Void = {}
+            var historyItems: () -> [WKBackForwardListItem] = { [] }
+            var onPick: (WKBackForwardListItem, Bool, Bool) -> Void = { _, _, _ in }
+
+            private var holdTimer: Timer?
+            private var openedMenu = false
+            private var pressedInside = false
+
+            deinit {
+                holdTimer?.invalidate()
+            }
+
+            override func mouseDown(with event: NSEvent) {
+                pressedInside = true
+                openedMenu = false
+                holdTimer?.invalidate()
+                holdTimer = Timer.scheduledTimer(withTimeInterval: 0.32, repeats: false) { [weak self] _ in
+                    DispatchQueue.main.async { self?.popMenu() }
+                }
+            }
+
+            override func mouseUp(with event: NSEvent) {
+                holdTimer?.invalidate()
+                holdTimer = nil
+                let wasInside = pressedInside
+                pressedInside = false
+                guard wasInside, !openedMenu else { return }
+                let local = convert(event.locationInWindow, from: nil)
+                if bounds.contains(local) { action() }
+            }
+
+            override func rightMouseDown(with event: NSEvent) {
+                holdTimer?.invalidate()
+                holdTimer = nil
+                popMenu()
+            }
+
+            private func popMenu() {
+                let items = Array(historyItems().prefix(15))
+                guard !items.isEmpty else { return }
+                openedMenu = true
+                pressedInside = false
+                let menu = NSMenu()
+                menu.autoenablesItems = false
+                for item in items {
+                    let rawTitle = (item.title ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
+                    let title = rawTitle.isEmpty ? Address.pretty(item.url) : rawTitle
+                    let entry = NavMenuItem(title) { [weak self] in
+                        let flags = NSApp.currentEvent?.modifierFlags ?? []
+                        let newTab = flags.contains(.command)
+                        let foreground = !flags.contains(.shift)
+                        self?.onPick(item, newTab, foreground)
+                    }
+                    if let host = item.url.host()?.lowercased(),
+                       let favicon = Favicons.shared.cached(host) {
+                        let copy = NSImage(size: NSSize(width: 14, height: 14))
+                        copy.lockFocus()
+                        favicon.draw(in: NSRect(x: 0, y: 0, width: 14, height: 14))
+                        copy.unlockFocus()
+                        entry.image = copy
+                    }
+                    menu.addItem(entry)
+                }
+                let anchor = NSPoint(x: 0, y: 0)
+                menu.popUp(positioning: nil, at: anchor, in: self)
+            }
+        }
+
+        private final class NavMenuItem: NSMenuItem {
+            private let fire: () -> Void
+            init(_ title: String, fire: @escaping () -> Void) {
+                self.fire = fire
+                super.init(title: title, action: #selector(run), keyEquivalent: "")
+                target = self
+            }
+            required init(coder: NSCoder) { fatalError() }
+            @objc private func run() { fire() }
         }
     }
 }
@@ -644,7 +796,7 @@ private struct TabPill: View {
         .overlay { MiddleClick(act: close) }
         .onHover { hovering = $0 }
         .contextMenu { TabMenu(browser: browser, tab: tab, close: close) }
-        .help(pinned || compact ? tab.label : "")
+        .help(tab.asleep ? "\(tab.label) — Sleeping" : (pinned || compact ? tab.label : ""))
         .animation(Motion.quick, value: hovering)
         .animation(Motion.glide, value: editing)
         .animation(Motion.glide, value: tab.pin)
@@ -682,7 +834,7 @@ private struct TabPill: View {
                     .frame(height: 16)
             } else {
                 if prefs.glyph == .icons, !tab.isBlank {
-                    Mark(icon: tab.icon, letter: tab.monogram, size: 15)
+                    Mark(icon: tab.icon, letter: tab.monogram, size: 15, dim: tab.asleep)
                 }
                 if tab.bench {
                     // A script's tab, not yours.
@@ -1011,16 +1163,27 @@ struct TabMenu: View {
         }
         .disabled(tab.isBlank || tab.address == nil || tab.pin != nil)
         Button("Copy Address") {
-            browser.select(tab)
-            browser.copyAddress()
+            browser.copyAddress(of: tab)
         }
         .disabled(tab.isBlank)
         Button("Copy as Markdown Link") {
-            browser.select(tab)
-            browser.copyMarkdownLink()
+            browser.copyMarkdownLink(of: tab)
         }
         .disabled(tab.isBlank)
         Button(tab.muted ? "Unmute Tab" : "Mute Tab") { tab.toggleMute() }
+        if tab.asleep {
+            Button("Wake Tab") { tab.wake() }
+        } else if !tab.isBlank && tab.id != browser.activeID && !browser.showing(inSplit: tab) {
+            Button("Sleep Tab") {
+                browser.sleep(tab) { reason in
+                    if reason == "asleep" {
+                        browser.announce("Put \(tab.label) to sleep")
+                    } else {
+                        browser.announce("Kept awake: \(reason)")
+                    }
+                }
+            }
+        }
         Divider()
         // Side by side with the tab in front (Split.swift).
         if browser.split?.has(tab.id) == true {
@@ -1047,6 +1210,18 @@ struct TabMenu: View {
         // look for it: here too, where tabs are closed.
         Button("Reopen Closed Tab") { browser.reopen() }
             .disabled(browser.ghosts.isEmpty)
+        if browser.prefs.usesSpaces && browser.spaces.count > 1 {
+            Divider()
+            Menu("Move to Space") {
+                ForEach(browser.spaces.filter { $0.id != browser.spaceID }) { space in
+                    Button {
+                        browser.moveTab(tab, toSpace: space.id)
+                    } label: {
+                        Label(space.name, systemImage: space.symbol)
+                    }
+                }
+            }
+        }
     }
 }
 

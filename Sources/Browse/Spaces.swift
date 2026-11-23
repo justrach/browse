@@ -266,10 +266,93 @@ extension Browser {
         Spaces.write(spaces)
     }
 
+    func setSpaceColour(_ id: UUID, to index: Int) {
+        guard let at = spaces.firstIndex(where: { $0.id == id }) else { return }
+        spaces[at].colour = max(0, index % Spaces.colours.count)
+        Spaces.write(spaces)
+    }
+
     func setSpaceDownloads(_ id: UUID, to folder: URL?) {
         guard let at = spaces.firstIndex(where: { $0.id == id }) else { return }
         spaces[at].downloads = folder?.path
         Spaces.write(spaces)
+    }
+
+    /// Move an open tab (and its session entry) into another Space.
+    func moveTab(_ tab: Tab, toSpace targetID: UUID) {
+        guard prefs.usesSpaces, targetID != spaceID,
+              let targetSpace = spaces.first(where: { $0.id == targetID }),
+              let fromIdx = tabs.firstIndex(where: { $0.id == tab.id })
+        else { return }
+
+        if split?.has(tab.id) == true { unsplit() }
+        if floating == tab.id { land() }
+
+        if parked[targetID] == nil {
+            parked[targetID] = loadRow(targetID)
+        }
+        var destination = parked[targetID] ?? Parked(tabs: [], active: nil)
+
+        let sharedStore = Spaces.store(for: spaceID) === Spaces.store(for: targetID)
+        let moved: Tab
+        if sharedStore {
+            moved = tab
+            moved.agentGroup = nil
+        } else {
+            moved = Tab(configuration: Web.configuration(space: targetID))
+            prepare(moved)
+            moved.pin = tab.pin
+            moved.name = tab.name
+            if let url = tab.pending ?? tab.address {
+                moved.restore(url: url, title: tab.title, name: tab.name)
+            }
+            tab.close()
+        }
+
+        if moved.pin != nil {
+            let pinInsert = destination.tabs.prefix(while: { $0.pin != nil }).count
+            destination.tabs.insert(moved, at: pinInsert)
+        } else {
+            destination.tabs.append(moved)
+        }
+        if destination.active == nil { destination.active = moved.id }
+        parked[targetID] = destination
+
+        var remaining = tabs
+        remaining.remove(at: fromIdx)
+        if remaining.isEmpty {
+            let blank = Tab()
+            prepare(blank)
+            showRow([blank], active: blank.id)
+            editing = true
+        } else {
+            let nextActive = activeID == tab.id ? remaining[min(fromIdx, remaining.count - 1)].id : activeID
+            showRow(remaining, active: nextActive)
+        }
+
+        writeSession(now: true)
+        writeParkedSession(space: targetID, row: destination)
+        announce("Moved to \(targetSpace.name)")
+    }
+
+    private func writeParkedSession(space: UUID, row: Parked) {
+        var entries: [Session.Entry] = []
+        var activeIndex = 0
+        for tab in row.tabs {
+            guard !tab.shy, !tab.bench,
+                  let url = tab.pending ?? tab.address,
+                  url.scheme?.hasPrefix("http") == true
+            else { continue }
+            if tab.id == row.active { activeIndex = entries.count }
+            entries.append(Session.Entry(
+                url: url.absoluteString,
+                title: tab.title,
+                pin: tab.pin,
+                name: tab.name,
+                agentGroup: tab.isAgentTab ? tab.agentGroup : nil
+            ))
+        }
+        Session.write(now: true, space: space, .init(tabs: entries, active: activeIndex, split: nil, share: nil))
     }
 
     /// A space, its tabs, and its cookies and sign-ins, gone. The first one
@@ -316,11 +399,13 @@ struct SpaceDot: View {
     private var key: String { browser.makingSpace ? "new" : "\(browser.spaceID.uuidString)-\(browser.space.symbol)" }
 
     var body: some View {
+        let tinted = !browser.makingSpace && browser.space.colour != 0
+        let restColor = tinted ? Spaces.colours[browser.space.colour % Spaces.colours.count] : Palette.muted
         Button { SpaceMenu.show(for: browser) } label: {
             ZStack {
                 Image(systemName: shown?.symbol ?? symbol)
                     .font(.system(size: 12, weight: .medium))
-                    .foregroundStyle(hovering ? Palette.ink : Palette.muted)
+                    .foregroundStyle(hovering ? Palette.ink : restColor)
                     .id(shown?.key ?? key)
                     // The way the tabs go: sideways in the column; in the bar
                     // across the top, up for the next space, down going back.
@@ -397,6 +482,19 @@ enum SpaceMenu {
         let icon = NSMenuItem(title: "Icon", action: nil, keyEquivalent: "")
         icon.submenu = icons
         menu.addItem(icon)
+        let colours = NSMenu()
+        for (idx, name) in Spaces.colourNames.enumerated() {
+            let choice = item(name, checked: here.colour == idx) { browser.setSpaceColour(here.id, to: idx) }
+            let tint = NSColor(Spaces.colours[idx])
+            if let img = NSImage(systemSymbolName: "circle.fill", accessibilityDescription: name)?
+                .withSymbolConfiguration(.init(paletteColors: [tint])) {
+                choice.image = img
+            }
+            colours.addItem(choice)
+        }
+        let colour = NSMenuItem(title: "Colour", action: nil, keyEquivalent: "")
+        colour.submenu = colours
+        menu.addItem(colour)
         // The order is the swipe's, and ⌃1–⌃9's.
         if let at = browser.spaces.firstIndex(where: { $0.id == here.id }) {
             if at > 0 { menu.addItem(item("Move Left") { browser.moveSpace(here.id, to: at - 1) }) }

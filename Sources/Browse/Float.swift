@@ -31,9 +31,14 @@ final class Float {
     var onPlayPause: ((@escaping (Bool) -> Void) -> Void)?
     /// Step over the bit you missed, or back to it.
     var onSkip: ((Double) -> Void)?
-    /// Asked every half second while the window is up, for the line along the
-    /// bottom edge.
-    var onProgress: ((@escaping (Double, Bool) -> Void) -> Void)?
+    /// Jump to a fraction (`0...1`) along the scrubbed timeline.
+    var onSeek: ((Double) -> Void)?
+    /// Toggle mute state; answers with whether the video is muted now.
+    var onToggleMute: ((@escaping (Bool) -> Void) -> Void)?
+    /// Step playback rate through `1x -> 1.25x -> 1.5x -> 2x`; answers with new rate.
+    var onCycleRate: ((@escaping (Double) -> Void) -> Void)?
+    /// Asked every half second while the window is up: `(progress, playing, muted, rate)`.
+    var onProgress: ((@escaping (Double, Bool, Bool, Double) -> Void) -> Void)?
 
     private var ticker: Timer?
 
@@ -136,6 +141,17 @@ final class Float {
             }
         }
         controls.onSkip = { [weak self] seconds in self?.onSkip?(seconds) }
+        controls.onSeek = { [weak self] fraction in self?.onSeek?(fraction) }
+        controls.onToggleMute = { [weak self] in
+            self?.onToggleMute? { muted in
+                self?.controls?.muted = muted
+            }
+        }
+        controls.onCycleRate = { [weak self] in
+            self?.onCycleRate? { rate in
+                self?.controls?.rate = rate
+            }
+        }
         ground.addSubview(controls)
         self.controls = controls
 
@@ -157,9 +173,11 @@ final class Float {
                     return
                 }
 
-                self.onProgress? { through, playing in
-                    self.controls?.progress = through
+                self.onProgress? { through, playing, muted, rate in
+                    self.controls?.syncProgress(through)
                     self.controls?.playing = playing
+                    self.controls?.muted = muted
+                    self.controls?.rate = rate
                 }
             }
         }
@@ -210,9 +228,26 @@ final class Float {
         var onReturn: (() -> Void)?
         var onPlayPause: (() -> Void)?
         var onSkip: ((Double) -> Void)?
+        var onSeek: ((Double) -> Void)?
+        var onToggleMute: (() -> Void)?
+        var onCycleRate: (() -> Void)?
 
         var playing = true {
             didSet { pause.image = glyph(playing ? "pause.fill" : "play.fill", 17) }
+        }
+
+        var muted = false {
+            didSet {
+                guard muted != oldValue else { return }
+                mute.image = glyph(muted ? "speaker.slash.fill" : "speaker.wave.2.fill", 11)
+            }
+        }
+
+        var rate: Double = 1 {
+            didSet {
+                guard abs(rate - oldValue) > 0.01 else { return }
+                updateRateTitle()
+            }
         }
 
         /// Nought to one. Drawn as a hairline along the bottom edge.
@@ -220,14 +255,23 @@ final class Float {
             didSet { line.through = progress }
         }
 
+        func syncProgress(_ through: Double) {
+            guard !scrubbing else { return }
+            progress = through
+        }
+
         private let close = NSButton()
         private let back = NSButton()
         private let pause = NSButton()
         private let rewind = NSButton()
         private let forward = NSButton()
+        private let mute = NSButton()
+        private let rateButton = NSButton()
         private let scrim = CAGradientLayer()
         private let line = Line()
         private var near = false
+        private var scrubbing = false
+        private var lastSeekAt: CFTimeInterval = 0
 
         override init(frame: NSRect) {
             super.init(frame: frame)
@@ -250,6 +294,17 @@ final class Float {
             dress(rewind, "gobackward.15", 15, round: 19, action: #selector(pressedRewind))
             dress(pause, "pause.fill", 17, round: 25, action: #selector(pressedPause))
             dress(forward, "goforward.15", 15, round: 19, action: #selector(pressedForward))
+            dress(mute, "speaker.wave.2.fill", 11, round: 14, action: #selector(pressedMute))
+
+            rateButton.isBordered = false
+            rateButton.bezelStyle = .regularSquare
+            rateButton.target = self
+            rateButton.action = #selector(pressedRate)
+            rateButton.wantsLayer = true
+            rateButton.layer?.backgroundColor = NSColor(white: 0.1, alpha: 0.55).cgColor
+            rateButton.layer?.cornerRadius = 12
+            updateRateTitle()
+            addSubview(rateButton)
 
             line.alphaValue = 0
             addSubview(line)
@@ -259,7 +314,21 @@ final class Float {
         @available(*, unavailable)
         required init?(coder: NSCoder) { fatalError() }
 
-        private var buttons: [NSButton] { [close, back, rewind, pause, forward] }
+        private var buttons: [NSButton] { [close, back, rewind, pause, forward, mute, rateButton] }
+
+        private func updateRateTitle() {
+            let label: String
+            if abs(rate.rounded() - rate) < 0.05 {
+                label = "\(Int(rate.rounded()))×"
+            } else {
+                label = String(format: "%.2g×", rate)
+            }
+            let attrs: [NSAttributedString.Key: Any] = [
+                .font: NSFont.monospacedDigitSystemFont(ofSize: 11, weight: .semibold),
+                .foregroundColor: NSColor.white,
+            ]
+            rateButton.attributedTitle = NSAttributedString(string: label, attributes: attrs)
+        }
 
         private func dress(
             _ button: NSButton,
@@ -302,7 +371,10 @@ final class Float {
             rewind.frame = NSRect(x: bounds.midX - 25 - 54, y: middle + 6, width: 38, height: 38)
             forward.frame = NSRect(x: bounds.midX + 25 + 16, y: middle + 6, width: 38, height: 38)
 
-            line.frame = NSRect(x: 0, y: 0, width: bounds.width, height: 3)
+            mute.frame = NSRect(x: 14, y: 18, width: 28, height: 28)
+            rateButton.frame = NSRect(x: 48, y: 20, width: 42, height: 24)
+
+            line.frame = NSRect(x: 0, y: 0, width: max(0, bounds.width - 24), height: 14)
         }
 
         override func updateTrackingAreas() {
@@ -311,7 +383,7 @@ final class Float {
             addTrackingArea(
                 NSTrackingArea(
                     rect: bounds,
-                    options: [.mouseEnteredAndExited, .activeAlways, .inVisibleRect],
+                    options: [.mouseEnteredAndExited, .mouseMoved, .activeAlways, .inVisibleRect],
                     owner: self
                 )
             )
@@ -322,6 +394,7 @@ final class Float {
 
         private func fade(to value: CGFloat) {
             near = value > 0
+            if !near && !scrubbing { line.expanded = false }
             NSAnimationContext.runAnimationGroup { context in
                 context.duration = 0.16
                 buttons.forEach { $0.animator().alphaValue = value }
@@ -360,23 +433,69 @@ final class Float {
             point.x > bounds.maxX - 22 && point.y < bounds.minY + 22
         }
 
+        private func atScrubber(_ point: NSPoint) -> Bool {
+            near && line.frame.contains(point)
+        }
+
+        private func fraction(for point: NSPoint) -> Double {
+            guard line.bounds.width > 0 else { return 0 }
+            let local = line.convert(point, from: self)
+            return max(0, min(1, Double(local.x / line.bounds.width)))
+        }
+
         override func resetCursorRects() {
+            let resizeCursor: NSCursor
+            if #available(macOS 15.0, *) {
+                resizeCursor = .frameResize(position: .bottomRight, directions: .all)
+            } else {
+                resizeCursor = .crosshair
+            }
             addCursorRect(
                 NSRect(x: bounds.maxX - 22, y: bounds.minY, width: 22, height: 22),
-                cursor: .crosshair
+                cursor: resizeCursor
             )
+        }
+
+        override func mouseMoved(with event: NSEvent) {
+            let pt = convert(event.locationInWindow, from: nil)
+            line.expanded = near && line.frame.contains(pt)
         }
 
         override func mouseDown(with event: NSEvent) {
             guard let window else { return }
             stopGlide()
+            let pt = convert(event.locationInWindow, from: nil)
+            if atScrubber(pt) {
+                scrubbing = true
+                line.expanded = true
+                let frac = fraction(for: pt)
+                progress = frac
+                onSeek?(frac)
+                lastSeekAt = CACurrentMediaTime()
+                return
+            }
+            if !atCorner(pt), event.clickCount == 2 {
+                onReturn?()
+                return
+            }
             grab = NSEvent.mouseLocation
             origin = window.frame
-            stretching = atCorner(convert(event.locationInWindow, from: nil))
+            stretching = atCorner(pt)
         }
 
         override func mouseDragged(with event: NSEvent) {
             guard let window else { return }
+            if scrubbing {
+                let pt = convert(event.locationInWindow, from: nil)
+                let frac = fraction(for: pt)
+                progress = frac
+                let now = CACurrentMediaTime()
+                if now - lastSeekAt > 0.05 {
+                    lastSeekAt = now
+                    onSeek?(frac)
+                }
+                return
+            }
             let now = NSEvent.mouseLocation
             let dx = now.x - grab.x
             let dy = now.y - grab.y
@@ -386,6 +505,17 @@ final class Float {
                 return
             }
             resize(to: origin.width + dx, from: origin)
+        }
+
+        override func mouseUp(with event: NSEvent) {
+            if scrubbing {
+                let pt = convert(event.locationInWindow, from: nil)
+                let frac = fraction(for: pt)
+                progress = frac
+                onSeek?(frac)
+                scrubbing = false
+                line.expanded = near && line.frame.contains(pt)
+            }
         }
 
         /// Two fingers on the trackpad move the window. There is nothing to
@@ -573,22 +703,44 @@ final class Float {
         @objc private func pressedReturn() { onReturn?() }
         @objc private func pressedRewind() { onSkip?(-15) }
         @objc private func pressedForward() { onSkip?(15) }
+        @objc private func pressedMute() {
+            muted.toggle()
+            onToggleMute?()
+        }
+        @objc private func pressedRate() {
+            onCycleRate?()
+        }
         @objc private func pressedPause() {
             playing.toggle()
             onPlayPause?()
         }
 
-        /// How far through, along the bottom edge. Quiet enough to ignore.
+        /// How far through, along the bottom edge. Clickable & draggable to scrub.
         final class Line: NSView {
             var through: Double = 0 {
                 didSet { needsDisplay = true }
             }
+            var expanded = false {
+                didSet {
+                    if expanded != oldValue { needsDisplay = true }
+                }
+            }
 
             override func draw(_ dirty: NSRect) {
-                NSColor(white: 1, alpha: 0.22).setFill()
-                bounds.fill()
-                NSColor(white: 1, alpha: 0.85).setFill()
-                NSRect(x: 0, y: 0, width: bounds.width * through, height: bounds.height).fill()
+                let trackHeight: CGFloat = expanded ? 5 : 3
+                let track = NSRect(x: 0, y: 0, width: bounds.width, height: trackHeight)
+                NSColor(white: 1, alpha: 0.24).setFill()
+                track.fill()
+                let fillWidth = max(0, min(bounds.width, bounds.width * CGFloat(through)))
+                NSColor(white: 1, alpha: 0.90).setFill()
+                NSRect(x: 0, y: 0, width: fillWidth, height: trackHeight).fill()
+                if expanded {
+                    let thumbSize: CGFloat = 10
+                    let x = max(thumbSize / 2, min(bounds.width - thumbSize / 2, fillWidth)) - thumbSize / 2
+                    let thumbRect = NSRect(x: x, y: trackHeight / 2 - thumbSize / 2 + 2, width: thumbSize, height: thumbSize)
+                    NSColor.white.setFill()
+                    NSBezierPath(ovalIn: thumbRect).fill()
+                }
             }
 
             override func hitTest(_ point: NSPoint) -> NSView? { nil }
@@ -739,13 +891,55 @@ enum Isolate {
         """
     }
 
-    /// How far through, and whether it is running.
+    /// Jump directly to a fraction (`0...1`) of the video duration.
+    static func seek(_ fraction: Double) -> String {
+        let clamped = max(0, min(1, fraction))
+        return """
+        (function () {
+          var video = document.querySelector('[data-office-float]')
+            || document.querySelector('video');
+          if (!video || !video.duration || !isFinite(video.duration)) return false;
+          video.currentTime = \(clamped) * video.duration;
+          return true;
+        })();
+        """
+    }
+
+    static let toggleMute = """
+    (function () {
+      var video = document.querySelector('[data-office-float]')
+        || document.querySelector('video');
+      if (!video) return false;
+      video.muted = !video.muted;
+      return !!video.muted;
+    })();
+    """
+
+    static let cycleRate = """
+    (function () {
+      var video = document.querySelector('[data-office-float]')
+        || document.querySelector('video');
+      if (!video) return 1;
+      var rates = [1, 1.25, 1.5, 2];
+      var cur = video.playbackRate || 1;
+      var idx = 0;
+      for (var i = 0; i < rates.length; i++) {
+        if (Math.abs(rates[i] - cur) < 0.08) { idx = (i + 1) % rates.length; break; }
+      }
+      video.playbackRate = rates[idx];
+      return rates[idx];
+    })();
+    """
+
+    /// How far through, whether it is running, muted, and its playback rate.
     static let where_ = """
     (function () {
       var video = document.querySelector('[data-office-float]')
         || document.querySelector('video');
-      if (!video || !video.duration || !isFinite(video.duration)) return [0, true];
-      return [video.currentTime / video.duration, !video.paused];
+      if (!video || !video.duration || !isFinite(video.duration)) {
+        return [0, true, video ? !!video.muted : false, video ? (video.playbackRate || 1) : 1];
+      }
+      return [video.currentTime / video.duration, !video.paused, !!video.muted, video.playbackRate || 1];
     })();
     """
 

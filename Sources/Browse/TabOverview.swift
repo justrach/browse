@@ -50,6 +50,10 @@ final class TabPreviewCache: ObservableObject {
         capture(tab, width: width)
     }
 
+    func trim() {
+        cache.removeAllObjects()
+    }
+
     private func capture(_ tab: Tab, width: CGFloat) {
         guard !inFlight.contains(tab.id) else { return }
         inFlight.insert(tab.id)
@@ -221,6 +225,13 @@ private struct TabPaletteView: View {
         state.selectedActionID = actions.first?.id
     }
 
+    private var filteringBadge: String {
+        let filtering = !state.query.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+        guard filtering else { return "\(items.count) open" }
+        let total = browser.switcherItems(matching: "", mode: .palette).count
+        return "\(items.count) of \(total)"
+    }
+
     private func searchHeader(dark: Bool) -> some View {
         HStack(spacing: 10) {
             Image(systemName: "magnifyingglass")
@@ -246,8 +257,9 @@ private struct TabPaletteView: View {
                 .help("Clear search")
             }
 
-            Text("\(items.count) open")
+            Text(filteringBadge)
                 .font(.system(size: 11, weight: .medium))
+                .monospacedDigit()
                 .foregroundStyle(Palette.muted)
                 .padding(.horizontal, 7)
                 .padding(.vertical, 3)
@@ -324,8 +336,9 @@ private struct TabPaletteView: View {
                     }
 
                     if !actions.isEmpty {
+                        let onlyClosed = actions.allSatisfy { $0.kind == .closed }
                         HStack {
-                            Text("Sites & Web")
+                            Text(onlyClosed ? "Recently Closed" : "Sites & Web")
                                 .font(.system(size: 10.5, weight: .semibold))
                                 .foregroundStyle(Palette.muted)
                             Spacer()
@@ -420,6 +433,18 @@ private struct TabPaletteView: View {
                             .lineLimit(1)
                             .truncationMode(.tail)
                         Spacer(minLength: 4)
+                        if tab.asleep {
+                            HStack(spacing: 3) {
+                                Image(systemName: "moon.zzz")
+                                    .font(.system(size: 9, weight: .medium))
+                                Text("Asleep")
+                                    .font(.system(size: 10, weight: .medium))
+                            }
+                            .foregroundStyle(Palette.muted)
+                            .padding(.horizontal, 6)
+                            .padding(.vertical, 2)
+                            .background(Capsule().fill(Palette.ink.opacity(dark ? 0.09 : 0.06)))
+                        }
                         if let space = item.space {
                             SpaceChip(space: space, dark: dark)
                         } else if isActive {
@@ -446,7 +471,7 @@ private struct TabPaletteView: View {
                         browser.selectFromSwitcher(item)
                     } label: {
                         HStack(spacing: 5) {
-                            Text(isActive ? "Focus Tab" : "Switch to Tab")
+                            Text(tab.asleep ? "Wake Tab" : (isActive ? "Focus Tab" : "Switch to Tab"))
                                 .font(.system(size: 12, weight: .medium))
                             Text("↩")
                                 .font(.system(size: 11, weight: .medium))
@@ -508,6 +533,7 @@ private struct TabPaletteView: View {
         case .url: "globe"
         case .bookmark: "star.fill"
         case .history: "clock"
+        case .closed: "arrow.uturn.backward.circle"
         case .search: "magnifyingglass"
         case .ask: "sparkles"
         }
@@ -515,8 +541,15 @@ private struct TabPaletteView: View {
         case .url: "Website"
         case .bookmark: "Bookmark"
         case .history: "Visited Site"
+        case .closed: "Recently Closed"
         case .search: "Web Search"
         case .ask: "Ask \(browser.agent.backend.shortName)"
+        }
+        let primaryLabel: String = switch action.kind {
+        case .ask: "Ask \(browser.agent.backend.shortName)"
+        case .search: "Search Web"
+        case .closed: "Reopen Tab"
+        default: "Open Website"
         }
 
         return VStack(alignment: .leading, spacing: 14) {
@@ -569,7 +602,7 @@ private struct TabPaletteView: View {
                     browser.openActionFromSwitcher(action)
                 } label: {
                     HStack(spacing: 5) {
-                        Text(action.kind == .search ? "Search Web" : "Open Website")
+                        Text(primaryLabel)
                             .font(.system(size: 12, weight: .medium))
                         Text("↩")
                             .font(.system(size: 11, weight: .medium))
@@ -582,26 +615,28 @@ private struct TabPaletteView: View {
                 }
                 .buttonStyle(TactilePress())
 
-                Button {
-                    browser.openActionFromSwitcher(action, split: true)
-                } label: {
-                    HStack(spacing: 5) {
-                        Image(systemName: "rectangle.split.2x1")
-                            .font(.system(size: 10.5, weight: .medium))
-                        Text("Split")
-                            .font(.system(size: 12, weight: .medium))
-                        Text("⌘D")
-                            .font(.system(size: 10.5))
-                            .foregroundStyle(Palette.muted)
+                if action.kind != .ask {
+                    Button {
+                        browser.openActionFromSwitcher(action, split: true)
+                    } label: {
+                        HStack(spacing: 5) {
+                            Image(systemName: "rectangle.split.2x1")
+                                .font(.system(size: 10.5, weight: .medium))
+                            Text("Split")
+                                .font(.system(size: 12, weight: .medium))
+                            Text("⌘D")
+                                .font(.system(size: 10.5))
+                                .foregroundStyle(Palette.muted)
+                        }
+                        .foregroundStyle(Palette.ink)
+                        .padding(.horizontal, 10)
+                        .padding(.vertical, 6)
+                        .background(
+                            Capsule().fill(Palette.ink.opacity(dark ? 0.10 : 0.065))
+                        )
                     }
-                    .foregroundStyle(Palette.ink)
-                    .padding(.horizontal, 10)
-                    .padding(.vertical, 6)
-                    .background(
-                        Capsule().fill(Palette.ink.opacity(dark ? 0.10 : 0.065))
-                    )
+                    .buttonStyle(TactilePress())
                 }
-                .buttonStyle(TactilePress())
 
                 Spacer(minLength: 0)
             }
@@ -672,10 +707,18 @@ private struct TabPaletteView: View {
 
     private func footerBar(dark: Bool) -> some View {
         let onAction = selectedAction != nil
+        let actionVerb: String = switch selectedAction?.kind {
+        case .ask: "Ask"
+        case .search: "Search"
+        case .closed: "Reopen"
+        default: "Open"
+        }
         return HStack(spacing: 14) {
             KeyHint(keys: "↑↓", label: items.isEmpty ? "Select" : "Preview")
-            KeyHint(keys: "↩", label: onAction ? (selectedAction?.kind == .search ? "Search" : "Open") : "Switch")
-            KeyHint(keys: "⌘D", label: "Split")
+            KeyHint(keys: "↩", label: onAction ? actionVerb : "Switch")
+            if selectedAction?.kind != .ask {
+                KeyHint(keys: "⌘D", label: "Split")
+            }
             if !onAction {
                 KeyHint(keys: "⌘⌫", label: "Close")
             }
@@ -702,6 +745,7 @@ private struct SwitcherActionRow: View {
         case .url: return "globe"
         case .bookmark: return "star.fill"
         case .history: return "clock"
+        case .closed: return "arrow.uturn.backward.circle"
         case .search: return "magnifyingglass"
         case .ask: return "sparkles"
         }
@@ -712,8 +756,18 @@ private struct SwitcherActionRow: View {
         case .url: return "Website"
         case .bookmark: return "Bookmark"
         case .history: return "Visited"
+        case .closed: return "Closed"
         case .search: return "Search"
         case .ask: return "Ask"
+        }
+    }
+
+    private var actionButtonLabel: String {
+        switch action.kind {
+        case .ask: return "Ask"
+        case .search: return "Search"
+        case .closed: return "Reopen"
+        default: return "Open"
         }
     }
 
@@ -746,7 +800,7 @@ private struct SwitcherActionRow: View {
             if !compact {
                 if selected {
                     HStack(spacing: 4) {
-                        Text(action.kind == .search ? "Search" : "Open")
+                        Text(actionButtonLabel)
                             .font(.system(size: 11, weight: .medium))
                         Text("↩")
                             .font(.system(size: 10.5, weight: .medium))

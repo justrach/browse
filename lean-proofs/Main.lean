@@ -15,3 +15,4 @@ def main : IO Unit := do
   IO.println "  [PASS] Browse.LinkModifiers : ⌘+click foreground & ⌘⇧+click background consistency across normal + target=_blank links"
   IO.println "  [PASS] Browse.UpdatePolicy  : 2h cadence, monotonic upgrade-only, SHA+TeamID signing gate, snooze invalidation on newer build"
   IO.println "  [PASS] Browse.OnboardingFlow: step bounds, Esc persists welcomed (no re-show loop), 0 unsolicited prompts, retryable partial import"
+  IO.println "  [PASS] Browse.MemoryPolicy  : Relaxed/Balanced/Low RAM monotonicity, active/agent/pinned/media protection, pressure cooldown & 60s critical floor"

@@ -51,8 +51,8 @@ final class AgentTools: ObservableObject {
     /// Pages kept at once. The oldest goes when another is wanted. Each is a
     /// WebKit process of its own, tens of MB; pages only read close as soon
     /// as they are read, so these are the ones graff/MCP is acting on.
-    private static let most = 4
-    nonisolated private static let idleSheetTTL: TimeInterval = 180
+    private static let most = 6
+    nonisolated private static let idleSheetTTL: TimeInterval = 300
     private var idleReaper: Timer?
 
     // MARK: - the server

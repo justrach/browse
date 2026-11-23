@@ -318,7 +318,7 @@ struct SettingsPanel: View {
         SearchEntry(.tabs, "Show the bookmarks bar", "Bookmarks row above the page", keywords: "favorites bar folders"),
         SearchEntry(.tabs, "Show how far you've read", "Reading progress fill on the active tab", keywords: "scroll progress indicator"),
         SearchEntry(.tabs, "Sleep tabs you aren't using", "Suspend background tabs to save RAM and battery", keywords: "memory saver suspend hibernate ram"),
-        SearchEntry(.tabs, "Memory profile", "Low RAM vs Balanced tab sleeping schedule", keywords: "ram memory low balanced sleep now"),
+        SearchEntry(.tabs, "Memory profile", "Relaxed, Balanced, or Low RAM tab sleeping schedule", keywords: "ram memory relaxed low balanced sleep now"),
         SearchEntry(.tabs, "Spaces", "Separate sets of tabs and profiles switched with ⌃1–⌃9", keywords: "workspaces profiles containers arc"),
 
         // Extensions
@@ -675,16 +675,34 @@ struct SettingsPanel: View {
                 Switch(on: $prefs.sleepsTabs)
             }
             if prefs.sleepsTabs {
+                let realTabs = (browser.tabs + browser.parkedTabs).filter { !$0.isBlank && !$0.bench }
+                let asleepCount = realTabs.filter(\.asleep).count
+                let awakeCount = realTabs.count - asleepCount
+                let profileDetail: String = {
+                    switch prefs.memoryMode {
+                    case .relaxed:
+                        return "Relaxed: keeps 12 background tabs awake, sleeps extras after 15 min, idle after 2 h"
+                    case .balanced:
+                        return "Balanced: keeps 6 background tabs awake, sleeps extras after 5 min, idle after 30 min"
+                    case .low:
+                        return "Low RAM: keeps 3 background tabs awake, sleeps extras after 2 min, idle after 10 min"
+                    }
+                }()
                 Rule(inset: 28)
                 Line(
                     "Memory profile",
-                    prefs.memoryMode == .low
-                        ? "Low RAM: keeps 1 background tab awake, sleeps extras after 20 s, idle tabs after 3 min, and idle pinned tabs after 20 min"
-                        : "Balanced: keeps 2 background tabs awake, sleeps extras after 45 s, and idle tabs after 10 min"
+                    profileDetail
                 ) {
                     VStack(alignment: .trailing, spacing: 6) {
                         Segmented(options: Preferences.MemoryMode.allCases.map { ($0, $0.title) }, selection: $prefs.memoryMode)
-                        Pill("Sleep now") { browser.sleepInactiveNow() }
+                        HStack(spacing: 8) {
+                            Text(asleepCount > 0 ? "\(awakeCount) awake · \(asleepCount) asleep" : "\(awakeCount) awake")
+                                .font(.system(size: 11))
+                                .foregroundStyle(Palette.muted)
+                                .monospacedDigit()
+                                .lineLimit(1)
+                            Pill("Sleep now") { browser.sleepInactiveNow() }
+                        }
                     }
                 }
                 .padding(.leading, 14)

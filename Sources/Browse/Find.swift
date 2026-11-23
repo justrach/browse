@@ -46,14 +46,22 @@ struct FindBar: View {
                         .padding(.horizontal, 4)
                         .transition(.opacity)
                 }
+                Button { browser.needle = "" } label: {
+                    Image(systemName: "xmark.circle.fill")
+                        .font(.system(size: 11))
+                        .foregroundStyle(Palette.muted.opacity(0.75))
+                }
+                .buttonStyle(.plain)
+                .help("Clear")
             }
 
             Rectangle()
                 .fill(Palette.hairline)
                 .frame(width: 1, height: 14)
 
-            step("chevron.up", help: "Previous match   ⇧↩") { browser.look(forward: false) }
-            step("chevron.down", help: "Next match   ↩") { browser.look(forward: true) }
+            let cantStep = browser.needle.isEmpty || browser.missed
+            step("chevron.up", help: "Previous match   ⇧↩", disabled: cantStep) { browser.look(forward: false) }
+            step("chevron.down", help: "Next match   ↩", disabled: cantStep) { browser.look(forward: true) }
             step("xmark", help: "Close   esc") { browser.closeFind() }
         }
         .padding(.leading, 12)
@@ -82,13 +90,14 @@ struct FindBar: View {
         .onChange(of: browser.findFocus) { _, _ in focused = true }
     }
 
-    private func step(_ icon: String, help: String, action: @escaping () -> Void) -> some View {
-        StepButton(icon: icon, help: help, action: action)
+    private func step(_ icon: String, help: String, disabled: Bool = false, action: @escaping () -> Void) -> some View {
+        StepButton(icon: icon, help: help, disabled: disabled, action: action)
     }
 
     private struct StepButton: View {
         let icon: String
         let help: String
+        var disabled: Bool = false
         let action: () -> Void
         @State private var hovering = false
 
@@ -96,12 +105,13 @@ struct FindBar: View {
             Button(action: action) {
                 Image(systemName: icon)
                     .font(.system(size: 9.5, weight: .semibold))
-                    .foregroundStyle(hovering ? Palette.ink : Palette.muted)
+                    .foregroundStyle(disabled ? Palette.faint : (hovering ? Palette.ink : Palette.muted))
                     .frame(width: 24, height: 24)
-                    .background(hovering ? Palette.hover : .clear, in: Circle())
+                    .background(hovering && !disabled ? Palette.hover : .clear, in: Circle())
                     .contentShape(Circle())
             }
             .buttonStyle(.plain)
+            .disabled(disabled)
             .help(help)
             .onHover { hovering = $0 }
             .animation(Motion.quick, value: hovering)

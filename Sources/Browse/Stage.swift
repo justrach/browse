@@ -160,7 +160,12 @@ struct PageOverlays: View {
             }
 
             if let failure = tab.failure {
-                Trouble(message: failure) { tab.reload() }
+                Trouble(message: failure, url: tab.address) { tab.reload() }
+                    .transition(.opacity)
+            }
+
+            if tab.loading && !tab.isBlank {
+                PageProgressBar(progress: tab.progress)
                     .transition(.opacity)
             }
 
@@ -180,6 +185,25 @@ struct PageOverlays: View {
         .animation(Motion.quick, value: tab.floating)
         .animation(.easeOut(duration: 0.2), value: tab.cover == nil)
         .animation(.easeOut(duration: 0.16), value: tab.pull == nil)
+        .animation(.easeOut(duration: 0.18), value: tab.loading)
+    }
+}
+
+/// Hairline top progress bar shown while a page is loading.
+private struct PageProgressBar: View {
+    let progress: Double
+
+    var body: some View {
+        GeometryReader { geo in
+            let fraction = CGFloat(max(0.08, min(1.0, progress)))
+            Rectangle()
+                .fill(Palette.accent.opacity(0.85))
+                .frame(width: geo.size.width * fraction, height: 2)
+                .animation(.easeOut(duration: 0.16), value: progress)
+        }
+        .frame(height: 2)
+        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+        .allowsHitTesting(false)
     }
 }
 
@@ -486,22 +510,35 @@ final class StageView: NSView {
     }
 }
 
-/// What there is to say when the page never came. One line, and the only thing
-/// worth offering — another go.
+/// What there is to say when the page never came. Quiet surface with host
+/// context and a single action to try again.
 private struct Trouble: View {
     let message: String
+    var url: URL? = nil
     let retry: () -> Void
 
     var body: some View {
-        VStack(spacing: 10) {
-            Text(message)
-                .font(.system(size: 14))
-                .foregroundStyle(Palette.ink)
-            Button("Try again", action: retry)
-                .buttonStyle(.plain)
-                .font(.system(size: 12))
-                .foregroundStyle(Palette.muted)
+        VStack(spacing: 12) {
+            Image(systemName: "wifi.slash")
+                .font(.system(size: 24, weight: .light))
+                .foregroundStyle(Palette.faint)
+            VStack(spacing: 4) {
+                Text(message)
+                    .font(.system(size: 14, weight: .medium))
+                    .foregroundStyle(Palette.ink)
+                    .multilineTextAlignment(.center)
+                if let url {
+                    Text(Address.pretty(url))
+                        .font(.system(size: 12))
+                        .foregroundStyle(Palette.muted)
+                        .lineLimit(1)
+                        .truncationMode(.middle)
+                }
+            }
+            Pill("Try again", action: retry)
+                .help("Reload Page   ⌘R")
         }
+        .padding(.horizontal, 32)
         .frame(maxWidth: .infinity, maxHeight: .infinity)
         .background(Palette.ground)
     }

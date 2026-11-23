@@ -111,15 +111,19 @@ struct UILayoutChecks {
         //    must stay compact and never crush the Sleep now pill.
         let memoryRow = Line(
             "Memory profile",
-            "Balanced: keeps 2 background tabs awake, sleeps extras after 45 s, and idle tabs after 10 min"
+            "Balanced: keeps 6 background tabs awake, sleeps extras after 5 min, idle after 30 min"
         ) {
             VStack(alignment: .trailing, spacing: 6) {
                 HStack(spacing: 2) {
+                    Text("Relaxed").font(.system(size: 11.5)).padding(.horizontal, 10).padding(.vertical, 5)
                     Text("Balanced").font(.system(size: 11.5)).padding(.horizontal, 10).padding(.vertical, 5)
                     Text("Low RAM").font(.system(size: 11.5)).padding(.horizontal, 10).padding(.vertical, 5)
                 }
                 .fixedSize()
-                TestPill(title: "Sleep now")
+                HStack(spacing: 8) {
+                    Text("6 awake · 2 asleep").font(.system(size: 11)).lineLimit(1)
+                    TestPill(title: "Sleep now")
+                }
             }
         }
         .padding(.leading, 14)

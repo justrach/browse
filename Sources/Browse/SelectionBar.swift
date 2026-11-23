@@ -145,6 +145,7 @@ final class SelectionRelay: NSObject, WKScriptMessageHandler {
 struct SelectionBar: View {
     let selection: PageSelection
     let viewport: CGSize
+    var usesAgent: Bool = true
     let onAsk: () -> Void
     let onExplain: () -> Void
     let onRewrite: () -> Void
@@ -153,7 +154,7 @@ struct SelectionBar: View {
     @Environment(\.colorScheme) private var scheme
 
     var body: some View {
-        let pillWidth: CGFloat = selection.editable ? 268 : 200
+        let pillWidth: CGFloat = !usesAgent ? 44 : (selection.editable ? 268 : 200)
         let pillHeight: CGFloat = 32
         let viewW = viewport.width > 0 ? viewport.width : 900
         let viewH = viewport.height > 0 ? viewport.height : 600
@@ -164,14 +165,16 @@ struct SelectionBar: View {
         let chosenY = aboveY >= 8 ? aboveY : min(max(8, viewH - pillHeight - 8), belowY)
 
         HStack(spacing: 2) {
-            pillButton(icon: "sparkles", label: "Ask", accent: true, action: onAsk)
-            pillDivider
-            pillButton(icon: "lightbulb", label: "Explain", action: onExplain)
-            if selection.editable {
+            if usesAgent {
+                pillButton(icon: "sparkles", label: "Ask", accent: true, action: onAsk)
                 pillDivider
-                pillButton(icon: "wand.and.stars", label: "Rewrite", action: onRewrite)
+                pillButton(icon: "lightbulb", label: "Explain", action: onExplain)
+                if selection.editable {
+                    pillDivider
+                    pillButton(icon: "wand.and.stars", label: "Rewrite", action: onRewrite)
+                }
+                pillDivider
             }
-            pillDivider
             pillButton(icon: "doc.on.doc", label: nil, help: "Copy selection", action: onCopy)
         }
         .padding(.horizontal, 5)
@@ -196,24 +199,40 @@ struct SelectionBar: View {
     }
 
     private func pillButton(icon: String, label: String?, help: String? = nil, accent: Bool = false, action: @escaping () -> Void) -> some View {
-        Button(action: action) {
-            HStack(spacing: 4) {
-                Image(systemName: icon)
-                    .font(.system(size: 10.5, weight: .semibold))
-                    .foregroundStyle(accent ? Palette.accent : Palette.ink.opacity(0.82))
-                if let label {
-                    Text(label)
-                        .font(.system(size: 11.5, weight: accent ? .semibold : .medium))
-                        .foregroundStyle(Palette.ink)
-                        .lineLimit(1)
-                        .fixedSize()
+        PillButton(icon: icon, label: label, help: help, accent: accent, action: action)
+    }
+
+    private struct PillButton: View {
+        let icon: String
+        let label: String?
+        let help: String?
+        let accent: Bool
+        let action: () -> Void
+        @State private var hovering = false
+
+        var body: some View {
+            Button(action: action) {
+                HStack(spacing: 4) {
+                    Image(systemName: icon)
+                        .font(.system(size: 10.5, weight: .semibold))
+                        .foregroundStyle(accent ? Palette.accent : Palette.ink.opacity(0.82))
+                    if let label {
+                        Text(label)
+                            .font(.system(size: 11.5, weight: accent ? .semibold : .medium))
+                            .foregroundStyle(Palette.ink)
+                            .lineLimit(1)
+                            .fixedSize()
+                    }
                 }
+                .padding(.horizontal, label == nil ? 7 : 8)
+                .frame(height: 24)
+                .background(Capsule().fill(hovering ? Palette.hover : .clear))
+                .contentShape(Capsule())
             }
-            .padding(.horizontal, label == nil ? 7 : 8)
-            .frame(height: 24)
-            .contentShape(Capsule())
+            .buttonStyle(TactilePress())
+            .onHover { hovering = $0 }
+            .animation(Motion.quick, value: hovering)
+            .help(help ?? label ?? "")
         }
-        .buttonStyle(TactilePress())
-        .help(help ?? label ?? "")
     }
 }
