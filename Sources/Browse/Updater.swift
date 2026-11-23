@@ -2,6 +2,7 @@ import AppKit
 import Combine
 import CryptoKit
 import Security
+import SwiftUI
 
 // Knowing when there is a newer one, and having it ready.
 //
@@ -96,6 +97,12 @@ final class Updater: ObservableObject {
     @Published private(set) var checking = false
     /// When the file was last read, for the line in Settings.
     @Published private(set) var lastChecked: Date?
+    /// If the user snoozes the sidebar/toolbar update pill for a build, hide
+    /// it until a newer build ships or the app restarts.
+    @Published var snoozedBuild: Int?
+
+    /// Automatic background check cadence (every 2 hours).
+    static let checkInterval: TimeInterval = 60 * 60 * 2
 
     /// What this app is: the version people read, and the build that
     /// decides whether another is newer.
@@ -115,22 +122,28 @@ final class Updater: ObservableObject {
     private var say: ((String) -> Void)?
 
     private init() {
+        lastChecked = Store.settings.object(forKey: lastKey) as? Date
         // The bundle a swap set aside goes once this process is done with
         // it — see Swap.sweep for why not sooner.
         NotificationCenter.default.addObserver(
             forName: NSApplication.willTerminateNotification, object: nil, queue: .main
         ) { _ in Swap.sweep() }
+        // Also check when returning to browse after Mac sleep if >= 2 hours elapsed.
+        NotificationCenter.default.addObserver(
+            forName: NSApplication.didBecomeActiveNotification, object: nil, queue: .main
+        ) { [weak self] _ in
+            MainActor.assumeIsolated { self?.checkIfDue() }
+        }
     }
 
-    /// At launch: once a day, quietly. A test run, pointed at its own feed,
-    /// checks every time.
+    /// At launch and every 2 hours while running, quietly. A test run, pointed
+    /// at its own feed, checks every time.
     func checkIfDue(then say: @escaping (String) -> Void) {
         self.say = say
         Swap.sweep()
-        // And again every hour for as long as the app is up — a browser that
-        // is left open for a week would otherwise never look.
+        // Wake every 30 minutes and check whenever >= 2 hours have elapsed.
         if clock == nil {
-            clock = Timer.scheduledTimer(withTimeInterval: 60 * 60, repeats: true) { [weak self] _ in
+            clock = Timer.scheduledTimer(withTimeInterval: 60 * 30, repeats: true) { [weak self] _ in
                 MainActor.assumeIsolated { self?.checkIfDue() }
             }
             clock?.tolerance = 60 * 5
@@ -142,8 +155,18 @@ final class Updater: ObservableObject {
 
     private func checkIfDue() {
         let last = Store.settings.object(forKey: lastKey) as? Date ?? .distantPast
-        guard Updater.overridden || Date().timeIntervalSince(last) > 60 * 60 * 20 else { return }
+        guard Updater.overridden || Date().timeIntervalSince(last) >= Updater.checkInterval else { return }
         check { _ in }
+    }
+
+    /// Snooze the in-chrome update pill for the current release build.
+    func snoozeBanner() {
+        switch stage {
+        case .ready(let r), .waiting(let r), .offered(let r), .fetching(let r):
+            snoozedBuild = r.build
+        case .none:
+            break
+        }
     }
 
     /// Now, because somebody asked. `done` gets the newer build the feed
@@ -464,5 +487,168 @@ private enum Swap {
               info["CFBundleIdentifier"] as? String == Bundle.main.bundleIdentifier
         else { return }
         try? FileManager.default.removeItem(at: aside)
+    }
+}
+
+// MARK: - Quiet In-Chrome Update Controls
+
+/// Sleek frosted update card shown above the sidebar footer only when a newer
+/// build is downloading, ready to relaunch, or awaiting one-click install.
+struct UpdateBanner: View {
+    @ObservedObject var browser: Browser
+    @ObservedObject private var updater = Updater.shared
+    @State private var hoverAction = false
+
+    var body: some View {
+        switch updater.stage {
+        case .ready(let release) where updater.snoozedBuild != release.build:
+            card(
+                title: "browse \(release.version) ready",
+                subtitle: "Relaunch to apply update",
+                button: "Relaunch",
+                action: { updater.relaunch() }
+            )
+        case .waiting(let release) where updater.snoozedBuild != release.build:
+            card(
+                title: "browse \(release.version) available",
+                subtitle: "Ready to download & install",
+                button: "Install",
+                action: { updater.install() }
+            )
+        case .offered(let release) where updater.snoozedBuild != release.build:
+            card(
+                title: "browse \(release.version) available",
+                subtitle: "Download disk image",
+                button: "Download",
+                action: { browser.open(release.dmg, foreground: true) }
+            )
+        case .fetching(let release) where updater.snoozedBuild != release.build:
+            HStack(spacing: 8) {
+                Ring(size: 11)
+                Text("Updating to \(release.version)…")
+                    .font(.system(size: 11.5, weight: .medium))
+                    .foregroundStyle(Palette.muted)
+                    .lineLimit(1)
+                Spacer(minLength: 0)
+            }
+            .padding(.horizontal, 10)
+            .padding(.vertical, 8)
+            .background(
+                RoundedRectangle(cornerRadius: 10, style: .continuous)
+                    .fill(Palette.accent.opacity(0.08))
+            )
+            .overlay(
+                RoundedRectangle(cornerRadius: 10, style: .continuous)
+                    .strokeBorder(Palette.accent.opacity(0.20), lineWidth: 0.75)
+            )
+            .padding(.horizontal, 10)
+            .padding(.bottom, 6)
+        default:
+            EmptyView()
+        }
+    }
+
+    private func card(title: String, subtitle: String, button: String, action: @escaping () -> Void) -> some View {
+        VStack(alignment: .leading, spacing: 7) {
+            HStack(alignment: .top, spacing: 6) {
+                Image(systemName: "arrow.up.circle.fill")
+                    .font(.system(size: 12.5, weight: .semibold))
+                    .foregroundStyle(Palette.accent)
+                    .padding(.top, 1)
+                VStack(alignment: .leading, spacing: 1.5) {
+                    Text(title)
+                        .font(.system(size: 11.5, weight: .semibold))
+                        .foregroundStyle(Palette.ink)
+                        .lineLimit(1)
+                    Text(subtitle)
+                        .font(.system(size: 10.5))
+                        .foregroundStyle(Palette.muted)
+                        .lineLimit(1)
+                }
+                Spacer(minLength: 2)
+                Button {
+                    withAnimation(Motion.quick) { updater.snoozeBanner() }
+                } label: {
+                    Image(systemName: "xmark")
+                        .font(.system(size: 8.5, weight: .semibold))
+                        .foregroundStyle(Palette.muted)
+                        .frame(width: 16, height: 16)
+                        .contentShape(Rectangle())
+                }
+                .buttonStyle(.plain)
+                .help("Dismiss for now")
+            }
+
+            Button(action: action) {
+                Text(button)
+                    .font(.system(size: 11, weight: .semibold))
+                    .foregroundStyle(.white)
+                    .frame(maxWidth: .infinity)
+                    .frame(height: 24)
+                    .background(
+                        RoundedRectangle(cornerRadius: 7, style: .continuous)
+                            .fill(Palette.accent.opacity(hoverAction ? 0.90 : 1.0))
+                    )
+            }
+            .buttonStyle(.plain)
+            .onHover { hoverAction = $0 }
+        }
+        .padding(9)
+        .background(
+            RoundedRectangle(cornerRadius: 11, style: .continuous)
+                .fill(Palette.accent.opacity(0.08))
+        )
+        .overlay(
+            RoundedRectangle(cornerRadius: 11, style: .continuous)
+                .strokeBorder(Palette.accent.opacity(0.24), lineWidth: 0.75)
+        )
+        .padding(.horizontal, 10)
+        .padding(.bottom, 6)
+        .transition(.opacity.combined(with: .move(edge: .bottom)))
+    }
+}
+
+/// Compact update capsule for Top Tabs mode.
+struct UpdateChip: View {
+    @ObservedObject var browser: Browser
+    @ObservedObject private var updater = Updater.shared
+
+    var body: some View {
+        switch updater.stage {
+        case .ready(let release) where updater.snoozedBuild != release.build:
+            pill(label: "Update \(release.version)", help: "Relaunch to apply browse \(release.version)") {
+                updater.relaunch()
+            }
+        case .waiting(let release) where updater.snoozedBuild != release.build:
+            pill(label: "Update \(release.version)", help: "Install browse \(release.version)") {
+                updater.install()
+            }
+        case .offered(let release) where updater.snoozedBuild != release.build:
+            pill(label: "Update \(release.version)", help: "Download browse \(release.version)") {
+                browser.open(release.dmg, foreground: true)
+            }
+        default:
+            EmptyView()
+        }
+    }
+
+    private func pill(label: String, help: String, action: @escaping () -> Void) -> some View {
+        Button(action: action) {
+            HStack(spacing: 4) {
+                Image(systemName: "arrow.up.circle.fill")
+                    .font(.system(size: 10, weight: .semibold))
+                Text(label)
+                    .font(.system(size: 11, weight: .semibold))
+                    .lineLimit(1)
+                    .fixedSize()
+            }
+            .foregroundStyle(Palette.accent)
+            .padding(.horizontal, 8)
+            .frame(height: 22)
+            .background(Capsule().fill(Palette.accent.opacity(0.13)))
+            .overlay(Capsule().strokeBorder(Palette.accent.opacity(0.32), lineWidth: 0.75))
+        }
+        .buttonStyle(.plain)
+        .help(help)
     }
 }

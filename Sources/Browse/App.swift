@@ -256,6 +256,16 @@ struct BrowseApp: App {
             CommandGroup(after: .appSettings) {
                 Button("Settings…") { browser.tuning = true }
                     .shortcut(shortcuts.key(for: .settings))
+                Button("Check for Updates…") {
+                    Updater.shared.snoozedBuild = nil
+                    Updater.shared.check { found in
+                        if let found {
+                            browser.announce("browse \(found.version) is available")
+                        } else {
+                            browser.announce("You're up to date — browse \(Updater.version)")
+                        }
+                    }
+                }
                 Button("Welcome…") { browser.welcoming = true }
                     .shortcut(shortcuts.key(for: .welcome))
                 Button("Passwords…") { browser.managing = true }
@@ -925,7 +935,7 @@ struct ContentView: View {
             .onChange(of: browser.tabSwitcher) { _, mode in
                 if mode == nil { handBack() }
             }
-            .animation(Motion.settle, value: browser.tabSwitcher)
+            .animation(Motion.quick, value: browser.tabSwitcher)
             .animation(Motion.settle, value: browser.recalling)
             .animation(Motion.settle, value: browser.hoarding)
             .animation(Motion.settle, value: browser.tuning)

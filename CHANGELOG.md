@@ -6,6 +6,14 @@ All notable changes to **browse** are documented here, newest first.
 
 ## Unreleased
 
+### Added
+
+- **2-hour automatic update checks & quiet in-chrome Update Banner (`Updater.swift`, `Side.swift`, `TabBar.swift`, `Settings.swift`, `App.swift`)**: `browse` now checks for updates every 2 hours (and on wake/app activation when >= 2 hours have elapsed), adds **Check for Updates…** to the app menu, and shows a sleek frosted **Relaunch** / **Install** card in the sidebar (and compact capsule in Top Tabs) whenever a new version is ready, with one-click snooze.
+
+### Fixed
+
+- **Eliminated `⌘K` Command Switcher hover/scroll shaking (`TabOverview.swift`, `Browser.swift`, `App.swift`)**: decoupled keyboard scrolling (`keyboardScrollTick`) from mouse hover so hovering rows never triggers a `ScrollViewReader.scrollTo(anchor: .center)` feedback loop, reserved fixed space for the row close button, and removed preview card teardown (`.id(tab.id)`) so switching rows is completely steady and instantaneous.
+
 ## 1.9.1 — 23 November 2026
 
 ### Added
