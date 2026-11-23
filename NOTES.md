@@ -1,3 +1,5 @@
+Calmer Relaxed/Balanced/Low RAM memory policy with formal Lean 4 proofs, live Downloads progress and retry, Dark/Sepia non-destructive Reading Mode, top page progress hairline, Back/Forward history menus, bookmark search and overflow menu, Recently Closed in Cmd+K and History, Move to Space and shared live pins, Add Image to Photos, Privacy site permissions management, opt-in in-window video full screen, native Web Inspector dock toggle, interactive PiP controls, Agent prompt retry/edit, and full-screen Escape routing.
+
 Zero-delay single-reflow 120 FPS ⌘; Agent & Sidebar slides on heavy pages like X/Twitter, polished 5-step onboarding UX, and 13 kernel-verified Lean 4 proofs.
 
 Silky 120 FPS Agent & Sidebar edge-drag resizing and open/close sliding: wired real WebKit async live-resize (viewWillStartLiveResize + backPage), deferred UserDefaults writes until drag end, disabled spring/timer churn and mid-drag drawer flips during drags, replaced blocking window.setFrame with non-blocking CoreAnimation window.animator().setFrame, and proved balanced single-write live-resize in Lean 4.

@@ -6,6 +6,8 @@ All notable changes to **browse** are documented here, newest first.
 
 ## Unreleased
 
+## 1.10.0 — 24 November 2026
+
 ### Added
 
 - **Add Image to Photos (`ImageMenu.swift`, `build.sh`, `Browse*.entitlements`)**: Right-click image menus now include **Add Image to Photos** under **Download Image** using `PHAssetCreationRequest` with add-only library permission (`NSPhotoLibraryAddUsageDescription` and `com.apple.security.personal-information.photos-library`), supporting `http:`/`https:`/`data:` and live `blob:` URLs.
