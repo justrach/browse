@@ -6,6 +6,8 @@ All notable changes to **browse** are documented here, newest first.
 
 ## Unreleased
 
+## 1.8.8 — 23 November 2026
+
 ### Added
 
 - **Zero-warm-time Swift Warm Agent Engine & full ACP lineup (`AgentEngine.swift`, `Agent.swift`, `AgentColumn.swift`, `AgentComposer.swift`, `ProviderMark.swift`, `Prefs.swift`)**:

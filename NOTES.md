@@ -1,3 +1,5 @@
+Zero-warm-time multi-agent ACP engine (Antigravity, Codegraff, OpenCode, Gemini, Grok, Devin, Hermes, Pi), universal Shield cosmetic safety fixing blank Gmail emails, smoother 120 FPS X.com scrolling, and symmetric Full Screen Agent card alignment with desktop viewport preservation.
+
 Auto-hiding Full Screen top panel with a seamless pure-black bezel canvas and centered reveal handle, plus a unified ⌘K Command Switcher that surfaces websites, bookmarks, history, and web search alongside open tabs.
 
 Fix Apple Developer and Apple Account passkey sign-in via WebAuthn largeBlob support, and eliminate bright corner bleed artifacts on rounded page cards.
