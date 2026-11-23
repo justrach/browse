@@ -46,7 +46,12 @@ struct AgentColumn: View {
         let card = RoundedRectangle(cornerRadius: Split.corner, style: .continuous)
         let floatingCard = (fullHeight || overlayDrawer) && !full
         let darkRim = darkCanvas || scheme == .dark
-        let cardWidth: CGFloat? = full ? nil : max(200, prefs.agentWidth - (floatingCard ? Split.gap * 2 : 0))
+        // When docked beside the framed page card, the page already owns the
+        // 6pt center gutter (`Split.gap`), so leadingGap is 0 — keeping the
+        // gap between both cards identically 6.0pt on every frame of slide/drag.
+        let leadingGap: CGFloat = overlayDrawer ? Split.gap : 0
+        let trailingGap: CGFloat = floatingCard ? Split.gap : 0
+        let cardWidth: CGFloat? = full ? nil : max(200, prefs.agentWidth - leadingGap - trailingGap)
         VStack(spacing: 0) {
             if agent.writeMode {
                 if full || !fullHeight { head }
@@ -95,9 +100,9 @@ struct AgentColumn: View {
             y: overlayDrawer ? 6 : 1.5
         )
         .padding(.top, 0)
-        .padding(.trailing, floatingCard ? Split.gap : 0)
+        .padding(.trailing, trailingGap)
         .padding(.bottom, floatingCard ? Split.gap : 0)
-        .padding(.leading, floatingCard ? Split.gap : 0)
+        .padding(.leading, leadingGap)
         .frame(width: full ? nil : prefs.agentWidth)
         .frame(maxWidth: full ? .infinity : nil, maxHeight: .infinity)
         .overlay(alignment: .leading) {
@@ -511,7 +516,7 @@ struct AgentColumn: View {
         .animation(Motion.quick, value: dragging)
         .frame(maxHeight: .infinity)
         .frame(width: 14)
-        .offset(x: -4)
+        .offset(x: (fullHeight && !overlayDrawer) ? -10 : -4)
         .contentShape(Rectangle())
         .onHover { over in
             onEdge = over

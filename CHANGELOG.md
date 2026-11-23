@@ -6,6 +6,12 @@ All notable changes to **browse** are documented here, newest first.
 
 ## Unreleased
 
+### Fixed
+
+- **Zero-delay lockstep Agent & Sidebar slide and edge-drag (`App.swift`, `AgentColumn.swift`, `lean-proofs/Browse/ScrollFastPath.lean`)**:
+  - Removed the deferred 240ms/260ms `@State` room snap (`room`/`agentRoom`) and bound `stage` and `BookmarksBar` directly to `chrome` and `agentTrailing` so the webpage card and sidebars move together from frame 0 with zero post-slide jump and zero 1-frame drag lag.
+  - Moved `AgentColumn`'s `.transition(.move(edge: .trailing))` out of a full-window-width `HStack` into a `.topTrailing` `ZStack` (translating by `prefs.agentWidth` instead of `windowWidth`) and gave docked `AgentColumn` zero redundant leading gap so the 6pt gutter between the page card and `graff` stays rock-solid on every single frame — formally verified in `Browse.ScrollFastPath`.
+
 ## 1.9.5 — 23 November 2026
 
 ### Fixed
