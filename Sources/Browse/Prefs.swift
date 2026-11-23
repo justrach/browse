@@ -310,6 +310,10 @@ final class Preferences: ObservableObject {
     @Published var agentDrafts: Bool {
         didSet { store.set(agentDrafts, forKey: "agent.drafts") }
     }
+    /// Selected ACP agent backend (`graff`, `antigravity`, `opencode`, `gemini`, `pi`).
+    @Published var agentBackend: String {
+        didSet { store.set(agentBackend, forKey: "agent.backend") }
+    }
     /// Where `graff` is, when it isn't anywhere Search already looks.
     @Published var agentPath: String {
         didSet { store.set(agentPath, forKey: "agent.path") }
@@ -318,6 +322,18 @@ final class Preferences: ObservableObject {
     /// The model it runs, as `provider/name`. Empty leaves it to graff.
     @Published var agentModel: String {
         didSet { store.set(agentModel, forKey: "agent.model") }
+    }
+
+    func agentModel(for backend: String) -> String {
+        backend == "graff" ? agentModel : (store.string(forKey: "agent.model.\(backend)") ?? "")
+    }
+
+    func setAgentModel(_ model: String, for backend: String) {
+        if backend == "graff" {
+            agentModel = model
+        } else {
+            store.set(model, forKey: "agent.model.\(backend)")
+        }
     }
     /// How hard it thinks, as graff names the level. Empty leaves it to graff.
     @Published var agentEffort: String {
@@ -416,6 +432,7 @@ final class Preferences: ObservableObject {
         agentDrafts = store.bool(forKey: "agent.drafts")
         sync = store.bool(forKey: "sync.on")
         syncPasswords = store.bool(forKey: "sync.passwords")
+        agentBackend = store.string(forKey: "agent.backend") ?? "graff"
         agentPath = store.string(forKey: "agent.path") ?? ""
         agentModel = store.string(forKey: "agent.model") ?? ""
         agentEffort = store.string(forKey: "agent.effort") ?? ""
