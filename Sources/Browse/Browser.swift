@@ -239,6 +239,7 @@ final class Browser: NSObject, ObservableObject {
     /// it if it is already open (beside the page or on the full stage).
     func toggleAgent() {
         if !prefs.usesAgent { prefs.usesAgent = true }
+        prepareActivePagesForLiveResize()
         if consulting {
             withAnimation(Motion.glide) {
                 agentFull = false
@@ -246,6 +247,19 @@ final class Browser: NSObject, ObservableObject {
             }
         } else {
             talkToColumn()
+        }
+    }
+
+    /// Put visible WKWebView instances into async live-resize synchronously
+    /// BEFORE `withAnimation(Motion.glide)` starts so Frame 0 never stalls on
+    /// WebKit's synchronous geometry wait on heavy pages like X/Twitter.
+    private func prepareActivePagesForLiveResize() {
+        guard !Motion.reduced else { return }
+        if let pair = shownSplit {
+            pair.left.built?.beginLiveResize()
+            pair.right.built?.beginLiveResize()
+        } else {
+            active?.built?.beginLiveResize()
         }
     }
 
