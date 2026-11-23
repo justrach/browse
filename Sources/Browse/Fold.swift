@@ -45,7 +45,8 @@ extension Browser {
     /// ⌘S. The column, or the strip across the top, out of the way, or back.
     func toggleFold() {
         peeking = false
-        withAnimation(Motion.glide) { folded.toggle() }
+        prepareActivePagesForLiveResize()
+        withAnimation(Motion.panelSlide) { folded.toggle() }
     }
 
     /// The folded column out over the page, or back in.

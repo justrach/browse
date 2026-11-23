@@ -279,6 +279,8 @@ check(
     and "agentWarm" in app_src
     and "narrowForAgent" in app_src
     and "animatingWindowForAgent" in app_src
+    and "Motion.panelSlide" in app_src
+    and "panelSlideDuration" in design_src
     and "commitAgentWidth()" in agent_col
     and "isDraggingAgentWidth" in prefs_src
     and "window.animator().setFrame(" in app_src
@@ -287,7 +289,7 @@ check(
     and "roomedAgent" not in app_src
     and "agentRoom" not in app_src
     and "ZStack(alignment: .topTrailing)" in app_src,
-    "120 FPS lockstep single-reflow sidebar & Agent slide/resize: pinnedSlideWidth (1 reflow), warm AgentColumn + O(1) BackdropShadowView, threshold-only narrowForAgent, direct chrome/agentTrailing binding",
+    "120 FPS lockstep single-reflow sidebar & Agent slide/resize: 0.36s zero-overshoot Motion.panelSlide, pinnedSlideWidth (1 reflow), warm AgentColumn + O(1) BackdropShadowView, threshold-only narrowForAgent",
 )
 
 # 18. Onboarding flow invariants (matches Browse.OnboardingFlow).

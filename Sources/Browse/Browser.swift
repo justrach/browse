@@ -241,7 +241,7 @@ final class Browser: NSObject, ObservableObject {
         if !prefs.usesAgent { prefs.usesAgent = true }
         prepareActivePagesForLiveResize()
         if consulting {
-            withAnimation(Motion.glide) {
+            withAnimation(Motion.panelSlide) {
                 agentFull = false
                 consulting = false
             }
@@ -251,9 +251,9 @@ final class Browser: NSObject, ObservableObject {
     }
 
     /// Put visible WKWebView instances into async live-resize synchronously
-    /// BEFORE `withAnimation(Motion.glide)` starts so Frame 0 never stalls on
+    /// BEFORE `withAnimation(Motion.panelSlide)` starts so Frame 0 never stalls on
     /// WebKit's synchronous geometry wait on heavy pages like X/Twitter.
-    private func prepareActivePagesForLiveResize() {
+    func prepareActivePagesForLiveResize() {
         guard !Motion.reduced else { return }
         if let pair = shownSplit {
             pair.left.built?.beginLiveResize()
@@ -325,7 +325,8 @@ final class Browser: NSObject, ObservableObject {
     func talkToColumn() {
         if !prefs.usesAgent { prefs.usesAgent = true }
         editing = false
-        withAnimation(Motion.glide) {
+        prepareActivePagesForLiveResize()
+        withAnimation(Motion.panelSlide) {
             consulting = true
             agentFull = false
         }

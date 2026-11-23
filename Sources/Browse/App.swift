@@ -478,11 +478,11 @@ struct ContentView: View {
             .clipped()
         }
         .ignoresSafeArea()
-        .animation(Motion.glide, value: browser.prefs.sidebar)
-        .animation(Motion.glide, value: browser.folded)
+        .animation(Motion.panelSlide, value: browser.prefs.sidebar)
+        .animation(Motion.panelSlide, value: browser.folded)
         .animation(Motion.glide, value: browser.fullScreen)
-        .animation(Motion.glide, value: consulting)
-        .animation(Motion.glide, value: floatingAgentDrawer)
+        .animation(Motion.panelSlide, value: consulting)
+        .animation(Motion.panelSlide, value: floatingAgentDrawer)
         .animation(Motion.glide, value: browser.agentFull)
         .animation(.easeOut(duration: 0.12), value: browser.active?.immersed)
         .onChange(of: chrome) { old, new in
@@ -658,7 +658,7 @@ struct ContentView: View {
         } else {
             pageViews.forEach { $0.beginSlide(deltaWidth: deltaWidth) }
         }
-        DispatchQueue.main.asyncAfter(deadline: .now() + 0.28) {
+        DispatchQueue.main.asyncAfter(deadline: .now() + Motion.panelSlideDuration + 0.04) {
             guard ticket == panelSlideTicket,
                   !browser.prefs.isDraggingAgentWidth,
                   !browser.prefs.isDraggingSideWidth else { return }
@@ -1163,8 +1163,8 @@ struct ContentView: View {
         }
         animatingWindowForAgent = true
         NSAnimationContext.runAnimationGroup({ ctx in
-            ctx.duration = 0.22
-            ctx.timingFunction = CAMediaTimingFunction(name: .easeOut)
+            ctx.duration = Motion.panelSlideDuration
+            ctx.timingFunction = CAMediaTimingFunction(controlPoints: 0.22, 1.0, 0.36, 1.0)
             window.animator().setFrame(target, display: true)
         }, completionHandler: {
             DispatchQueue.main.async {
