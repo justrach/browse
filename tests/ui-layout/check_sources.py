@@ -165,11 +165,14 @@ check(
     "graff composer supports image pasting (⌘V) and Standard / Fast / Ultra Fast speed modes",
 )
 
-# 13. Repo-wide heavy SPA (X/Twitter) performance guardrails.
+# 13. Universal 120 FPS scroll fast-path guardrails (matches Browse.ScrollFastPath).
 forms_src = read("Sources/Browse/Forms.swift")
 swipe_src = read("Sources/Browse/Swipe.swift")
 shield_src = read("Sources/Browse/Shield.swift")
 status_src = read("Sources/Browse/StatusLine.swift")
+autoscroll_src = read("Sources/Browse/AutoScroll.swift")
+selection_src = read("Sources/Browse/SelectionBar.swift")
+stage_src = read("Sources/Browse/Stage.swift")
 check(
     "function hasPasswordInput()" in forms_src
     and 'querySelectorAll(\'input[type="password"]\')' not in all_swift,
@@ -186,9 +189,14 @@ check(
 check(
     "pruneSlowGlobalCosmetics" in shield_src
     and '"[id^=' not in shield_src
-    and "if (can) {" in swipe_src
-    and "requestAnimationFrame" in status_src,
-    "Shield prunes unindexed global selectors, Swipe guards layout reads, and StatusLine coalesces mouseover via rAF",
+    and "addEventListener('wheel'" not in swipe_src
+    and "addEventListener('scroll'" not in swipe_src
+    and "removeEventListener('wheel', stop" in autoscroll_src
+    and "removeEventListener('scroll', hide" in selection_src
+    and "removeEventListener('scroll', moved" in forms_src
+    and "event.clientX === lastX && event.clientY === lastY" in status_src
+    and "layer?.shadowPath" in stage_src,
+    "Universal 120 FPS scroll fast path: zero permanent wheel/capture-scroll listeners, stationary-cursor hover filter, explicit CALayer.shadowPath",
 )
 
 # 14. Strict modal overlay mutual exclusion (⌘K + ⌘Y can never stack; matches Browse.OverlayMutex).

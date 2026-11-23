@@ -729,11 +729,6 @@ final class Tab: ObservableObject, Identifiable {
         }
         // Google's sign-in card without a white box round it (Frames.swift).
         controller.addUserScript(Frames.userScript)
-        // Every frame: a swipe over an embedded map is the map's, and only the
-        // map's own document can say so.
-        controller.addUserScript(
-            WKUserScript(source: Swipe.watch, injectionTime: .atDocumentStart, forMainFrameOnly: false, in: Web.world)
-        )
         controller.addUserScript(
             WKUserScript(source: ImageRelay.watch, injectionTime: .atDocumentStart, forMainFrameOnly: false, in: Web.world)
         )
@@ -1794,6 +1789,20 @@ final class PageView: WKWebView {
                     return
                 }
                 asked = Date()
+                // One-shot horizontal overflow probe ONLY on a sideways swipe —
+                // zero wheel/scroll JS listeners exist during vertical scrolling.
+                let pt = convert(event.locationInWindow, from: nil)
+                let zoom = max(0.25, pageZoom)
+                let px = pt.x / zoom
+                let py = (isFlipped ? pt.y : (bounds.height - pt.y)) / zoom
+                let gesture = pulls
+                evaluateInSearch(Swipe.probe(x: px, y: py, dx: -sideways)) { [weak self] result in
+                    MainActor.assumeIsolated {
+                        guard let self, self.pulls == gesture else { return }
+                        let taken = (result as? Bool) ?? false
+                        self.answer(free: !taken)
+                    }
+                }
                 tell()
                 return
             }
@@ -1908,9 +1917,9 @@ final class ScrollRelay: NSObject, WKScriptMessageHandler {
         MainActor.assumeIsolated { tab?.scrolled(to: y, of: ceiling) }
     }
 
-    /// Reports passively and throttled, only posting IPC when the integer
-    /// scroll percentage actually changes — keeping WebKit's 120 Hz scrolling
-    /// completely free of per-frame layout reads and main-thread IPC traffic.
+    /// Reports passively and throttled, only posting IPC when the reading
+    /// percentage shifts by >= 2% (or reaches top/bottom) — keeping WebKit's
+    /// 120 Hz scrolling free of per-frame layout reads and IPC churn.
     static let script = """
     (function () {
       var timer = null;
@@ -1921,13 +1930,13 @@ final class ScrollRelay: NSObject, WKScriptMessageHandler {
         var y = window.scrollY || root.scrollTop || 0;
         var ceiling = Math.max(1, (root.scrollHeight || 0) - window.innerHeight);
         var pct = Math.round(Math.min(1, Math.max(0, y / ceiling)) * 100);
-        if (pct === lastPct) return;
+        if (lastPct >= 0 && pct !== 0 && pct !== 100 && Math.abs(pct - lastPct) < 2) return;
         lastPct = pct;
         window.webkit.messageHandlers.\(name).postMessage({ y: y, max: ceiling });
       }
       window.addEventListener('scroll', function () {
         if (timer !== null) return;
-        timer = setTimeout(tell, 100);
+        timer = setTimeout(tell, 240);
       }, { passive: true });
       tell();
     })();
