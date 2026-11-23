@@ -47,22 +47,64 @@ struct FramedPageBackdrop: View {
 
     var body: some View {
         let livePage = !tab.isBlank && !tab.asleep && !tab.floating
-        let shape = RoundedRectangle(
-            cornerRadius: livePage ? max(0, Split.corner - 1) : Split.corner,
-            style: .continuous
-        )
+        let corner = livePage ? max(0, Split.corner - 1) : Split.corner
         let fill = livePage
-            ? Color(nsColor: Themes.color(\.ground, dark: darkCanvas))
-            : Palette.ground
-        shape
-            .fill(fill)
-            .padding(livePage ? 1 : 0)
-            .shadow(
-                color: .black.opacity(darkCanvas ? 0.26 : 0.06),
-                radius: darkCanvas ? 8 : 5,
-                y: 1.5
-            )
-            .allowsHitTesting(false)
+            ? Themes.color(\.ground, dark: darkCanvas)
+            : Palette.NS.ground
+        // Uses an explicit CALayer.shadowPath instead of SwiftUI .shadow so
+        // CoreAnimation renders the backdrop shadow in O(1) on the GPU without
+        // recomputing an offscreen alpha-mask blur during 120 Hz WKWebView scrolls.
+        BackdropShadowView(
+            corner: corner,
+            fill: fill,
+            shadowOpacity: darkCanvas ? 0.26 : 0.06,
+            shadowRadius: darkCanvas ? 8 : 5
+        )
+        .padding(livePage ? 1 : 0)
+        .allowsHitTesting(false)
+    }
+}
+
+private struct BackdropShadowView: NSViewRepresentable {
+    let corner: CGFloat
+    let fill: NSColor
+    let shadowOpacity: Swift.Float
+    let shadowRadius: CGFloat
+
+    final class LayerView: NSView {
+        var corner: CGFloat = 0
+        override func layout() {
+            super.layout()
+            updateShadowPath()
+        }
+        func updateShadowPath() {
+            guard bounds.width > 0, bounds.height > 0 else {
+                layer?.shadowPath = nil
+                return
+            }
+            let r = min(corner, min(bounds.width, bounds.height) / 2)
+            layer?.shadowPath = CGPath(roundedRect: bounds, cornerWidth: r, cornerHeight: r, transform: nil)
+        }
+    }
+
+    func makeNSView(context: Context) -> LayerView {
+        let view = LayerView()
+        view.wantsLayer = true
+        view.layer?.cornerCurve = .continuous
+        view.layer?.masksToBounds = false
+        view.layer?.shadowColor = NSColor.black.cgColor
+        view.layer?.shadowOffset = CGSize(width: 0, height: -1.5)
+        updateNSView(view, context: context)
+        return view
+    }
+
+    func updateNSView(_ view: LayerView, context: Context) {
+        view.corner = corner
+        view.layer?.cornerRadius = corner
+        view.layer?.backgroundColor = fill.cgColor
+        view.layer?.shadowOpacity = shadowOpacity
+        view.layer?.shadowRadius = shadowRadius
+        view.updateShadowPath()
     }
 }
 

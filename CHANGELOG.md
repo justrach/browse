@@ -6,6 +6,13 @@ All notable changes to **browse** are documented here, newest first.
 
 ## Unreleased
 
+### Fixed
+
+- **Universal 120 FPS scrolling across GitHub and every website (`StatusLine.swift`, `Swipe.swift`, `AutoScroll.swift`, `SelectionBar.swift`, `Forms.swift`, `Tab.swift`, `Stage.swift`, `lean-proofs/Browse/ScrollFastPath.lean`)**:
+  - Filtered synthetic scroll-induced `mouseover` events in `HoveredLink` when the pointer coordinates `(clientX, clientY)` have not moved — eliminating per-frame `LinkBubble` IPC & SwiftUI redraws while scrolling past links on GitHub, HN, Reddit, and X.
+  - Eliminated ALL permanent `wheel` listeners and idle capture `scroll` listeners across `Swipe` (replaced per-frame JS listeners with an on-demand `Swipe.probe` invoked only on horizontal swipes), `AutoScroll` (dynamic attach/detach), `SelectionBar` (attached only while a selection pill is shown), and `Forms` (attached only while an autofill popup is anchored), keeping WebKit's GPU `ScrollingThread` completely off the main thread.
+  - Throttled `ScrollRelay` reading-progress IPC to 240 ms / >= 2% delta and switched `FramedPageBackdrop` to an explicit `CALayer.shadowPath` for O(1) GPU shadow compositing — formally verified in Lean 4 (`Browse.ScrollFastPath`).
+
 ## 1.9.2 — 23 November 2026
 
 ### Added

@@ -6,3 +6,4 @@ import Browse.PageTintDark
 import Browse.OverlayMutex
 import Browse.HoverStability
 import Browse.EscapeTermination
+import Browse.ScrollFastPath

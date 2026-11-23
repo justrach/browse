@@ -343,7 +343,17 @@ final class FormRelay: NSObject, WKScriptMessageHandler {
           var r = el.getBoundingClientRect();
           if (r.width > 0 && r.height > 0) rect = { x: r.left, y: r.top, w: r.width, h: r.height };
         }
-        trackingRect = rect !== null;
+        var nextTrack = rect !== null;
+        if (nextTrack !== trackingRect) {
+          trackingRect = nextTrack;
+          if (nextTrack) {
+            window.addEventListener('scroll', moved, { passive: true, capture: true });
+            window.addEventListener('resize', moved, { passive: true });
+          } else {
+            window.removeEventListener('scroll', moved, true);
+            window.removeEventListener('resize', moved);
+          }
+        }
         var typing = editable(el);
         var now = typing + (rect ? ' ' + passwords + ' ' + rect.x + ' ' + rect.y + ' ' + rect.w + ' ' + rect.h : '');
         if (scrolled === true && now === said) return;
@@ -356,16 +366,14 @@ final class FormRelay: NSObject, WKScriptMessageHandler {
         });
       }
 
-      // Only track scroll frames while a sign-in or passkey input popup is
-      // actively anchored — zero work per frame during normal 120 Hz scrolling.
+      // Only attach scroll/resize listeners while a sign-in or passkey popup
+      // is actively anchored — zero idle scroll listeners during 120 Hz scrolling.
       var moving = false;
       function moved() {
         if (!trackingRect || moving) return;
         moving = true;
         requestAnimationFrame(function () { moving = false; caret(true); });
       }
-      window.addEventListener('scroll', moved, { passive: true, capture: true });
-      window.addEventListener('resize', moved, { passive: true });
 
       // Going full screen, announced before it happens rather than after.
       //
