@@ -351,12 +351,18 @@ struct ContentView: View {
     /// Brief frosted edge shimmer while the webpage card settles after a
     /// sidebar or Agent panel slide.
     @State private var pageSettling = false
+    /// Live window width so narrow windows float the Agent sidebar as an
+    /// overlay drawer instead of crushing webpages down to mobile breakpoints.
+    @State private var windowWidth: CGFloat = 1440
+    /// Horizontal window expansion applied when opening the Agent sidebar in
+    /// windowed mode so webpages keep their desktop width; restored on close.
+    @State private var agentWindowDelta: (width: CGFloat, originX: CGFloat, expandedWidth: CGFloat)?
 
 
     /// True when the Arc/Dia-style unified frosted frame wraps the floating
-    /// rounded page card (sidebar or compact top bar active, not fullscreen video).
+    /// rounded page card (sidebar, compact top bar, or macOS Full Screen).
     private var arcFrame: Bool {
-        (sidebar || asideBarWanted) && browser.active?.immersed != true
+        (sidebar || asideBarWanted || browser.fullScreen) && browser.active?.immersed != true
     }
 
     private var windowTint: PageTint? {
@@ -434,13 +440,21 @@ struct ContentView: View {
                     .transition(.opacity)
             }
 
-            // Codegraff floats beside the webpage card below AsideBar, sharing
-            // the exact same top edge, bottom margin, and 10pt squircle corners.
-            if fullHeightAgent {
+            // Codegraff floats beside the webpage card below AsideBar (or in
+            // Full Screen / narrow overlay mode), sharing the exact same top
+            // edge, bottom margin, and 10pt squircle corners.
+            if fullHeightAgent || floatingAgentDrawer {
                 HStack(spacing: 0) {
                     Spacer(minLength: 0)
-                    AgentColumn(browser: browser, agent: browser.agent, prefs: browser.prefs, fullHeight: true)
-                        .padding(.top, asideBarShown ? Metrics.strip : (fullScreenTopHidden ? Fold.fullScreenGutter : 0))
+                    AgentColumn(
+                        browser: browser,
+                        agent: browser.agent,
+                        prefs: browser.prefs,
+                        fullHeight: fullHeightAgent,
+                        darkCanvas: darkCanvas,
+                        overlayDrawer: floatingAgentDrawer
+                    )
+                        .padding(.top, asideBarShown ? Metrics.strip : (fullScreenTopHidden ? Fold.fullScreenGutter : (topTabBarShown ? Metrics.strip : 0)))
                         .frame(maxHeight: .infinity, alignment: .top)
                 }
                 .transition(.move(edge: .trailing))
@@ -459,6 +473,7 @@ struct ContentView: View {
         }
         .onChange(of: chrome) { old, new in make(room: new, after: old) }
         .onChange(of: agentTrailing) { old, new in makeAgent(room: new, after: old) }
+        .onChange(of: consulting) { _, now in adjustWindowForAgent(opening: now) }
     }
 
     /// The page, or Codegraff's talk filling the stage — or the page with the
@@ -474,8 +489,8 @@ struct ContentView: View {
                     // A tab carried out of the sidebar: the half it would
                     // open on (Split.swift).
                     .overlay { SplitDropZone(browser: browser) }
-                if consulting && !fullHeightAgent {
-                    AgentColumn(browser: browser, agent: browser.agent, prefs: browser.prefs)
+                if consulting && !fullHeightAgent && !floatingAgentDrawer {
+                    AgentColumn(browser: browser, agent: browser.agent, prefs: browser.prefs, darkCanvas: darkCanvas)
                         .transition(.move(edge: .trailing).combined(with: .opacity))
                 }
             }
@@ -832,6 +847,7 @@ struct ContentView: View {
             }
             .onReceive(NotificationCenter.default.publisher(for: NSWindow.willEnterFullScreenNotification)) { note in
                 if let window, (note.object as? NSWindow) === window {
+                    agentWindowDelta = nil
                     window.backgroundColor = .black
                     withAnimation(Motion.glide) {
                         browser.fullScreen = true
@@ -843,6 +859,13 @@ struct ContentView: View {
                 if let window, (note.object as? NSWindow) === window {
                     window.backgroundColor = .black
                     browser.fullScreen = true
+                    windowWidth = window.frame.width
+                }
+            }
+            .onReceive(NotificationCenter.default.publisher(for: NSWindow.didResizeNotification)) { note in
+                if let window, (note.object as? NSWindow) === window {
+                    let w = window.frame.width
+                    if abs(w - windowWidth) >= 1 { windowWidth = w }
                 }
             }
             .onReceive(NotificationCenter.default.publisher(for: NSWindow.willExitFullScreenNotification)) { note in
@@ -1048,14 +1071,66 @@ struct ContentView: View {
         browser.consulting && browser.prefs.usesAgent && browser.active?.immersed != true
     }
 
-    /// True when the Agent sidebar sits beside AsideBar at full window height.
-    private var fullHeightAgent: Bool {
-        consulting && !browser.agentFull && (asideBarShown || (browser.fullScreen && asideBarWanted))
+    /// True when docking the Agent sidebar would squeeze the webpage below a
+    /// desktop width (< 760pt) into a mobile layout — floats the sidebar as an
+    /// elevated trailing drawer instead of crushing `WKWebView`.
+    private var floatingAgentDrawer: Bool {
+        guard consulting && !browser.agentFull else { return false }
+        let sideW: CGFloat = sidebar ? browser.prefs.sideWidth : 0
+        let remaining = windowWidth - sideW - browser.prefs.agentWidth
+        return remaining < 760
     }
 
-    /// Trailing inset reserved for the full-height Agent sidebar.
+    /// True when the Agent sidebar sits beside AsideBar or Full Screen at full
+    /// card height with matching 10pt squircle corners and 6pt bezel symmetry.
+    private var fullHeightAgent: Bool {
+        consulting && !browser.agentFull && (asideBarShown || browser.fullScreen)
+    }
+
+    /// Trailing inset reserved for the docked Agent sidebar (0 when floating
+    /// as an overlay drawer so the webpage never shrinks to mobile width).
     private var agentTrailing: CGFloat {
-        fullHeightAgent ? browser.prefs.agentWidth : 0
+        (fullHeightAgent && !floatingAgentDrawer) ? browser.prefs.agentWidth : 0
+    }
+
+    /// In windowed mode, smoothly widen the NSWindow when opening the Agent
+    /// sidebar (if screen space allows and the page would otherwise dip below
+    /// comfortable desktop width), and restore the original frame on close.
+    private func adjustWindowForAgent(opening: Bool) {
+        guard let window, !browser.fullScreen, !browser.agentFull else { return }
+        if opening {
+            let sideW: CGFloat = sidebar ? browser.prefs.sideWidth : 0
+            let agentW = browser.prefs.agentWidth
+            let currentPageW = window.frame.width - sideW
+            // If docking would drop the webpage below comfortable desktop width
+            // (1120pt, covering X.com 1095px and Gmail full tabs), expand the
+            // window horizontally up to `agentW` within the visible screen.
+            guard currentPageW - agentW < 1120,
+                  let screen = window.screen ?? NSScreen.main else { return }
+            let visible = screen.visibleFrame
+            let needed = min(agentW, max(0, 1120 - (currentPageW - agentW)))
+            let maxGrowth = max(0, visible.width - window.frame.width)
+            let growth = min(needed, maxGrowth)
+            guard growth >= 24 else { return }
+            var target = window.frame
+            target.size.width += growth
+            if target.maxX > visible.maxX {
+                target.origin.x = max(visible.minX, visible.maxX - target.size.width)
+            }
+            let dx = target.origin.x - window.frame.origin.x
+            agentWindowDelta = (width: growth, originX: dx, expandedWidth: target.size.width)
+            windowWidth = target.size.width
+            window.setFrame(target, display: true, animate: !Motion.reduced)
+        } else if let delta = agentWindowDelta {
+            agentWindowDelta = nil
+            // Only restore if the user didn't manually resize the window far away.
+            guard abs(window.frame.width - delta.expandedWidth) < 40 else { return }
+            var target = window.frame
+            target.size.width = max(640, target.size.width - delta.width)
+            target.origin.x -= delta.originX
+            windowWidth = target.size.width
+            window.setFrame(target, display: true, animate: !Motion.reduced)
+        }
     }
 
     /// True while the tabs are down the left, and not folded away (see Fold.swift).
@@ -1122,6 +1197,7 @@ struct ContentView: View {
 
     private func dress(_ window: NSWindow) {
         Links.window = window
+        windowWidth = window.frame.width
         browser.fullScreen = window.styleMask.contains(.fullScreen)
         // Light or dark is the app's to say (Settings › Appearance); the
         // window only has to be the ground colour that goes with it.

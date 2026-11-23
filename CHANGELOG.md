@@ -8,7 +8,14 @@ All notable changes to **browse** are documented here, newest first.
 
 ### Added
 
-- **NanoHarness-style multi-agent ACP switcher (`Agent.swift`, `AgentColumn.swift`, `AgentComposer.swift`, `ProviderMark.swift`, `Prefs.swift`)**: auto-discovers native ACP agent CLIs installed on your Mac — **Antigravity (`agy acp`)**, **Codegraff (`graff acp`)**, **OpenCode (`opencode acp`)**, **Gemini CLI (`gemini --acp`)**, and **Pi (`pi-acp`)** — and lets you switch agents and their native models + reasoning effort sliders right from the Model Picker popover, while automatically passing `browse`'s local MCP browser tools (`read_pages`, `search`, `fill`, `click`, `form_fields`) to every ACP backend.
+- **Zero-warm-time Swift Warm Agent Engine & full ACP lineup (`AgentEngine.swift`, `Agent.swift`, `AgentColumn.swift`, `AgentComposer.swift`, `ProviderMark.swift`, `Prefs.swift`)**:
+  - Auto-discovers native ACP agent CLIs installed on your Mac — **Codegraff (`graff acp`)**, **Antigravity (`agy acp`)**, **OpenCode (`opencode acp`)**, **Gemini CLI (`gemini --acp`)**, **Grok (`grok --no-auto-update agent --no-leader stdio`)**, **Devin (`devin acp`)**, **Hermes (`hermes acp`)**, and **Pi (`pi-acp`)** — with `browse`'s local MCP browser tools attached to every backend.
+  - Eliminates agent warm times with a one-shot cached login-shell PATH & binary table, atomic on-disk model catalog persistence (also seeding from `~/.harness/model-catalogs/` when available for <1 ms instant model lists), launch-time background pre-warming, a multi-backend warm worker pool (0 ms switches between Codegraff ↔ Antigravity ↔ OpenCode, 10 ms warm `session/new` on New Chat), and 6 ms live in-session `/model` switching in Codegraff.
+
+### Fixed
+
+- **X.com 120 FPS scrolling performance (`Forms.swift`, `Shield.swift`, `Design.swift`)**: stopped `FormRelay`'s `MutationObserver` from reading `liveInputs.length` synchronously on every virtualized timeline DOM mutation (which forced WebKit to re-walk the entire 15,000-node DOM before every scroll paint), exempted `*x.com` / `*twitter.com` from the 13,485 generic global blog cosmetic CSS rules in `Shield` while keeping all network ad/tracker blocking active, and replaced `PageShimmerRim`'s live full-window Gaussian `.blur(radius: 3.5)` over `WKWebView` with a GPU-cheap dual-stroke rim.
+- **Full Screen Agent sidebar symmetry & desktop viewport preservation (`App.swift`, `AgentColumn.swift`, `AgentComposer.swift`, `Design.swift`)**: strictly bounded `AgentColumn`'s inner card width (`prefs.agentWidth - Split.gap * 2`) and enabled matching 10pt squircle framing across all Full Screen modes so the webpage card and Agent card keep a clean 6pt pure-black bezel and center gap on all four sides; prevented the composer model chip from collapsing to a single letter at narrow widths; and smoothly expanded windowed frames (or auto-floated the Agent drawer on narrow half-screen windows) when opening the Agent sidebar so pages like Gmail and X.com keep their desktop layout instead of being squeezed to mobile width.
 
 ## 1.8.7 — 23 November 2026
 
