@@ -1373,7 +1373,8 @@ struct ContentView: View {
         // A period while reading opens the enabled agent beside the page.
         // Editors, including those in cross-origin frames, keep punctuation.
         if event.characters == ".", flags.isDisjoint(with: [.command, .option, .control, .shift]),
-           !event.isARepeat, browser.prefs.usesAgent, !browser.editing, browser.editingTab == nil,
+           !event.isARepeat, browser.prefs.usesAgent, !browser.editing, !browser.hasModalOverlay,
+           browser.editingTab == nil,
            event.window?.firstResponder is PageView,
            event.window?.firstResponder === browser.active?.built,
            browser.active?.immersed != true, !caretIn(event) {
@@ -1408,6 +1409,14 @@ struct ContentView: View {
                 withAnimation(Motion.glide) { browser.makingSpace = false }
                 return true
             }
+            if browser.bookmarksOpen {
+                browser.bookmarksOpen = false
+                return true
+            }
+            if browser.welcoming {
+                browser.welcoming = false
+                return true
+            }
             if browser.tuning {
                 if !browser.settingsSearchQuery.isEmpty {
                     browser.settingsSearchQuery = ""
@@ -1433,7 +1442,11 @@ struct ContentView: View {
                 return true
             }
             if browser.recalling {
-                browser.recalling = false
+                if !browser.recallHunt.isEmpty {
+                    browser.recallHunt = ""
+                } else {
+                    browser.recalling = false
+                }
                 return true
             }
             if browser.hoarding {

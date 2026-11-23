@@ -69,8 +69,6 @@ struct TabCycleHUD: View {
                             RoundedRectangle(cornerRadius: 11, style: .continuous)
                                 .fill(active ? Palette.accent.opacity(dark ? 0.16 : 0.10) : .clear)
                         )
-                        .scaleEffect(active ? 1.02 : 1.0)
-                        .animation(Motion.quick, value: active)
                     }
                     .buttonStyle(.plain)
                 }
