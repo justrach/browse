@@ -15,6 +15,10 @@ All notable changes to **browse** are documented here, newest first.
 - **Dia Floating Selection Action Pill (`SelectionBar.swift`, `Tab.swift`, `Browser.swift`, `App.swift`, `Prefs.swift`)**: highlighting text on any page displays a quiet frosted capsule (`Ask`, `Explain`, `Rewrite` inside editable fields like Gmail compose or X reply boxes, and `Copy`) using passive `mouseup`/`keyup` listeners with zero scroll overhead (toggleable in Settings › Agent).
 - **Visual `⌃Tab` MRU Tab Switcher with Live Previews & Arc-style Auto-Archive (`TabCycleHUD.swift`, `Browser.swift`, `App.swift`, `Sleep.swift`, `Settings.swift`, `Prefs.swift`)**: holding `⌃Tab` / `⌃⇧Tab` displays a centered frosted MRU tab switcher with live cached page thumbnails (releasing `⌃` commits the switch; `Esc` cancels), and Settings › Tabs now includes an optional **Auto-archive unpinned tabs** setting (`Never` / `12h` / `24h` / `7d`, recoverable anytime via `⌘⇧T` or History).
 
+### Fixed
+
+- **Strict modal overlay mutual exclusion (`Browser.swift`, `App.swift`, `lean-proofs/Browse/OverlayMutex.lean`)**: opening any full-window overlay (`⌘K`, `⇧⌘\`, `⌘Y`, `⇧⌘J`, `⌘,`, `⌥⌘B`, `⌘/`, Passwords, Import, Hidden-on-site, `⌃Tab`, Welcome, or `⌘L`) now atomically dismisses any other active overlay so two overlays (such as `⌘K` and `⌘Y`) can never stack on screen — formally proved for all shortcut sequences in Lean 4 (`Browse.OverlayMutex`).
+
 ## 1.8.8 — 23 November 2026
 
 ### Added

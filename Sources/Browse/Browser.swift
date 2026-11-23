@@ -119,12 +119,60 @@ final class Browser: NSObject, ObservableObject {
     /// one of them changes.
     let prefs = Preferences()
     let linkStatus = LinkStatus()
+    /// Every mutually exclusive full-window overlay (`⌘K`, `⇧⌘\`, `⌘Y`, `⌘J`,
+    /// `⌘,`, `⌘⌥B`, `⌘/`, Passwords, Import, Hidden-on-site, `⌃Tab`, Welcome,
+    /// and `⌘L` address editing). Formally verified by `Browse.OverlayMutex`
+    /// (`lean-proofs/Browse/OverlayMutex.lean`) so two overlays (such as `⌘K`
+    /// and `⌘Y`) can never stack simultaneously.
+    enum ModalOverlay: CaseIterable, Equatable {
+        case switcher, history, downloads, settings, bookmarks, shortcuts,
+             passwords, importing, reviewing, tabCycle, welcome, address
+    }
+
+    private var dismissingOverlays = false
+
+    /// True whenever any full-window modal overlay other than the address bar
+    /// is currently open.
+    var hasModalOverlay: Bool {
+        tabSwitcher != nil || recallMode != nil || hoarding || tuning ||
+        bookmarking || showingShortcuts || managing || bringingIn != nil ||
+        reviewing || !tabCycleOrder.isEmpty || welcoming
+    }
+
+    /// Closes every other full-window overlay so at most one overlay can ever
+    /// be active (`activeCount <= 1`).
+    func dismissOverlays(keeping keep: ModalOverlay? = nil) {
+        guard !dismissingOverlays else { return }
+        dismissingOverlays = true
+        defer { dismissingOverlays = false }
+
+        if keep != .switcher, tabSwitcher != nil { closeTabSwitcher() }
+        if keep != .history, recallMode != nil { recallMode = nil }
+        if keep != .downloads, hoarding { hoarding = false }
+        if keep != .settings, tuning { tuning = false }
+        if keep != .bookmarks, bookmarking { bookmarking = false }
+        if keep != .shortcuts, showingShortcuts { showingShortcuts = false }
+        if keep != .passwords, managing { managing = false }
+        if keep != .importing, bringingIn != nil { bringingIn = nil }
+        if keep != .reviewing, reviewing { reviewing = false }
+        if keep != .tabCycle, !tabCycleOrder.isEmpty { cancelTabCycle() }
+        if keep != .welcome, welcoming { welcoming = false }
+        if keep != .address, editing {
+            editing = false
+            summoning = false
+            openingNewTab = false
+            cycling = false
+            typed = ""
+        }
+        if pageSelection != nil { pageSelection = nil }
+    }
+
     /// The settings panel.
-    @Published var tuning = false
+    @Published var tuning = false { didSet { if tuning { dismissOverlays(keeping: .settings) } } }
     /// The first-launch walk-through, over everything. Also from the menu.
-    @Published var welcoming = false
+    @Published var welcoming = false { didSet { if welcoming { dismissOverlays(keeping: .welcome) } } }
     /// The guide in Help, and its one-time invitation after setup.
-    @Published var showingShortcuts = false
+    @Published var showingShortcuts = false { didSet { if showingShortcuts { dismissOverlays(keeping: .shortcuts) } } }
     @Published var shortcutReminder = false
 
     func requestShortcutReminder() {
@@ -357,7 +405,7 @@ final class Browser: NSObject, ObservableObject {
 
     let bookmarks = Bookmarks()
     /// The full list, for taking things out.
-    @Published var bookmarking = false
+    @Published var bookmarking = false { didSet { if bookmarking { dismissOverlays(keeping: .bookmarks) } } }
     /// The dropdown off the button.
     @Published var bookmarksOpen = false
 
@@ -400,7 +448,7 @@ final class Browser: NSObject, ObservableObject {
 
     /// The "Bring things over" sheet (ImportPanel), open while set: the
     /// browser it starts on by name, or "" for the first one found.
-    @Published var bringingIn: String?
+    @Published var bringingIn: String? { didSet { if bringingIn != nil { dismissOverlays(keeping: .importing) } } }
     /// The sheet opened from Settings › Extensions: only the extensions
     /// ticked, on a browser that has some. Read once as it opens.
     var bringingExtensions = false
@@ -432,7 +480,10 @@ final class Browser: NSObject, ObservableObject {
     /// without being asked — there is nothing else for that tab to show.
     @Published var editing = false {
         didSet {
-            guard !editing else { return }
+            if editing {
+                dismissOverlays(keeping: .address)
+                return
+            }
             openingNewTab = false
             cancelGoogleSuggestions()
             googleSaid = [:]
@@ -518,7 +569,7 @@ final class Browser: NSObject, ObservableObject {
     /// True between the first ⌘K and letting go of ⌘.
     var cycling = false
     /// Open-tab finder / visual overview overlay (TabOverview.swift).
-    @Published var tabSwitcher: TabSwitcherMode?
+    @Published var tabSwitcher: TabSwitcherMode? { didSet { if tabSwitcher != nil { dismissOverlays(keeping: .switcher) } } }
     let tabSwitcherState = TabSwitcherState()
     /// Search query & focus signal for Settings › Search (`⌘F` inside Settings).
     @Published var settingsSearchQuery = ""
@@ -666,7 +717,13 @@ final class Browser: NSObject, ObservableObject {
     @Published private(set) var veiling = false
     /// True while the list of what is hidden here is up.
     @Published var reviewing = false {
-        didSet { if !reviewing { stopPeeking() } }
+        didSet {
+            if reviewing {
+                dismissOverlays(keeping: .reviewing)
+            } else {
+                stopPeeking()
+            }
+        }
     }
 
     var hereHost: String? { curtain.host(of: active?.address) }
@@ -791,7 +848,7 @@ final class Browser: NSObject, ObservableObject {
     /// Active Dia-style floating text selection bar on the front tab.
     @Published var pageSelection: PageSelection?
     /// Visual `⌃Tab` MRU tab switcher order & currently highlighted tab.
-    @Published private(set) var tabCycleOrder: [Tab] = []
+    @Published private(set) var tabCycleOrder: [Tab] = [] { didSet { if !tabCycleOrder.isEmpty { dismissOverlays(keeping: .tabCycle) } } }
     @Published private(set) var tabCycleSelectedID: Tab.ID?
 
     var isTabCycling: Bool { !tabCycleOrder.isEmpty }
@@ -946,7 +1003,7 @@ final class Browser: NSObject, ObservableObject {
 
     // The list of what is kept.
 
-    @Published var managing = false { didSet { if managing { relist() } } }
+    @Published var managing = false { didSet { if managing { dismissOverlays(keeping: .passwords); relist() } } }
     /// The list, without secrets: see `Kept` and `Vault.all()`.
     @Published private(set) var saved: [Kept] = []
     @Published var hunting = ""
@@ -1248,12 +1305,12 @@ final class Browser: NSObject, ObservableObject {
     }
 
     // One state keeps closing History from leaving its clearing controls open.
-    @Published var recallMode: RecallMode?
+    @Published var recallMode: RecallMode? { didSet { if recallMode != nil { dismissOverlays(keeping: .history) } } }
     var recalling: Bool {
         get { recallMode != nil }
         set { recallMode = newValue ? .history : nil }
     }
-    @Published var hoarding = false
+    @Published var hoarding = false { didSet { if hoarding { dismissOverlays(keeping: .downloads) } } }
     @Published var recallHunt = ""
 
     /// Cookies, caches, local storage — everything a site left on this Mac,

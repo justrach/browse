@@ -720,7 +720,7 @@ struct ContentView: View {
         // The blank tab's field stands in the middle of the stage — where the
         // chat's own field takes its place when the talk fills it — so it
         // stands down there. One raised by ⌘L or ⌘K is still welcome over.
-        if !browser.welcoming, !browser.tuning, browser.fieldShowing, browser.editing || !(consulting && browser.agentFull) {
+        if !browser.hasModalOverlay, browser.fieldShowing, browser.editing || !(consulting && browser.agentFull) {
             Omnibox(browser: browser, over: !(browser.active?.isBlank ?? true))
                 // Centred on the page, not on the window. The column of tabs
                 // is not what the field is standing over, and dimming it along
