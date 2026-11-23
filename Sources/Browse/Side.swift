@@ -191,11 +191,34 @@ struct SideBar: View {
             .gesture(
                 DragGesture(minimumDistance: 1, coordinateSpace: .global)
                     .onChanged { value in
-                        if grabbed == nil { grabbed = prefs.sideWidth }
+                        if grabbed == nil {
+                            grabbed = prefs.sideWidth
+                            prefs.isDraggingSideWidth = true
+                            if let pair = browser.shownSplit {
+                                pair.left.built?.beginLiveResize()
+                                pair.right.built?.beginLiveResize()
+                            } else {
+                                browser.active?.built?.beginLiveResize()
+                            }
+                        }
                         let wanted = (grabbed ?? prefs.sideWidth) + value.translation.width
-                        prefs.sideWidth = min(Metrics.sideMax, max(Metrics.sideMin, wanted))
+                        let clamped = min(Metrics.sideMax, max(Metrics.sideMin, wanted))
+                        var still = Transaction()
+                        still.disablesAnimations = true
+                        withTransaction(still) {
+                            prefs.sideWidth = clamped
+                        }
                     }
-                    .onEnded { _ in grabbed = nil }
+                    .onEnded { _ in
+                        grabbed = nil
+                        prefs.commitSideWidth()
+                        if let pair = browser.shownSplit {
+                            pair.left.built?.endLiveResize()
+                            pair.right.built?.endLiveResize()
+                        } else {
+                            browser.active?.built?.endLiveResize()
+                        }
+                    }
             )
             .modifier(OneClick(double: true) {
                 withAnimation(Motion.settle) { prefs.sideWidth = Metrics.side }

@@ -265,10 +265,18 @@ check(
     "LinkModifiers: ⌘+click opens foreground tab and ⌘⇧+click opens background tab across normal & target=_blank links",
 )
 check(
-    "static let checkInterval: TimeInterval = 60 * 60 * 2" in updater_src
-    and "found.build > Updater.build" in updater_src
+    "found.build > Updater.build" in updater_src
+    and "static let checkInterval: TimeInterval = 60 * 60 * 2" in updater_src
     and "snoozedBuild != release.build" in updater_src,
     "UpdatePolicy: 2-hour cadence, strict monotonic build check, and per-build banner snooze",
+)
+prefs_src = read("Sources/Browse/Prefs.swift")
+check(
+    "func beginLiveResize()" in tab_scroll_src
+    and "commitAgentWidth()" in agent_col
+    and "isDraggingAgentWidth" in prefs_src
+    and "window.animator().setFrame(" in app_src,
+    "120 FPS sidebar & Agent slide/resize: async WebKit live-resize, deferred UserDefaults commits, non-blocking window animator",
 )
 
 if failures:
