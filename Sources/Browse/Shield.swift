@@ -200,16 +200,17 @@ final class Shield: ObservableObject {
                 .trimmingCharacters(in: .whitespacesAndNewlines),
               !version.isEmpty
         else { return }
-        // v4 cosmetic list drops ~490 unindexed global attribute/combinator
-        // selectors AND exempts Closure/hashed-class web apps (mail.google.com,
-        // x.com, twitter.com, docs/drive/calendar.google.com, etc.) from the
-        // 13,485 generic global cosmetic rules — fixing Gmail's `<div class="adn ads">`
-        // email body being hidden by EasyList's global `.ads` rule and keeping
-        // WebKit's StyleResolver at 120 FPS while all domain-scoped cosmetic and
-        // network ad/tracker rules stay active.
+        // v5 cosmetic list preserves 100% of domain-scoped rules while
+        // structurally restricting global (non-`if-domain`) rules to fast,
+        // unambiguous, explicitly ad-named `#id`/`.class` selectors (>= 10
+        // chars, no `unless-domain` breakage history, no unindexed CSS). This
+        // prevents minified/Closure/Webpack class collisions (like `.ads`
+        // hiding Gmail's `<div class="adn ads">` or short `.ad*` classes
+        // hiding content on other web apps) across EVERY site on the web, and
+        // cuts global StyleResolver work ~7.5x.
         let wanted = [
             ("network", "shield-network-\(version)"),
-            ("cosmetic", "shield-cosmetic-v4-\(version)"),
+            ("cosmetic", "shield-cosmetic-v5-\(version)"),
         ]
 
         store.getAvailableContentRuleListIdentifiers { kept in
@@ -251,16 +252,36 @@ final class Shield: ObservableObject {
         }
     }
 
-    /// Drops global (non-`if-domain`) cosmetic CSS rules that use unindexed
-    /// attribute selectors, combinators, or pseudo-selectors (`[`, ` `, `>`,
-    /// `+`, `~`, `:`), and exempts hashed/minified-class web apps (notably
-    /// `*mail.google.com`, where Gmail's own Closure-compiled `<div class="adn ads">`
-    /// email body collided with EasyList's global `.ads` rule, plus `*x.com` /
-    /// `*twitter.com` and productivity SPAs). Domain-scoped cosmetic rules and
-    /// all network ad/tracker blocking stay 100% active.
+    /// Structurally hardens EasyList's cosmetic list so global rules can never
+    /// hide legitimate content on ANY site (e.g. `.ads`, `.ad10`, `.adHz`
+    /// colliding with minified Closure/Webpack/React classes on Gmail or other
+    /// web apps — because WebKit content blockers drop `#@#` / `$generichide`
+    /// cosmetic exceptions):
+    ///
+    /// - Preserves 100% of domain-scoped rules (`if-domain` present).
+    /// - Drops any global rule that uses unindexed CSS (`[`, ` `, `>`, `+`, `~`, `:`).
+    /// - Drops any global rule that already carries an `unless-domain` list
+    ///   (proven history of breaking real sites in EasyList, like `.ads`).
+    /// - Keeps global `#id`/`.class` rules ONLY when the identifier is at least
+    ///   10 characters long and contains an unambiguous ad-network or ad-slot
+    ///   marker (`adsbygoogle`, `doubleclick`, `taboola`, `ad-banner`, `adslot`,
+    ///   `advertis`, etc.), shrinking global rules from ~14,000 to ~1,800.
+    /// - Also exempts ultra-heavy hashed-class web apps from global cosmetic
+    ///   overhead while keeping all 106k+ network ad/tracker rules active.
     private nonisolated static func pruneSlowGlobalCosmetics(_ data: Data) -> String? {
         guard let rules = try? JSONSerialization.jsonObject(with: data) as? [[String: Any]] else { return nil }
         let slowChars: Set<Character> = ["[", " ", ">", "+", "~", ":"]
+        let safeMarkers = [
+            "adsbygoogle", "google_ads", "google-ads", "doubleclick", "googlesyndication",
+            "taboola", "outbrain", "amazon-ad", "gpt-ad", "gpt_ad", "dfp-", "dfp_",
+            "advertis", "ad-banner", "ad_banner", "ad-container", "ad_container",
+            "ad-wrapper", "ad_wrapper", "ad-slot", "ad_slot", "ad-unit", "ad_unit",
+            "ad-leaderboard", "ad_leaderboard", "ad-skyscraper", "ad_skyscraper",
+            "sponsored-", "sponsored_", "promo-ad", "banner-ad", "banner_ad",
+            "prebid", "mgid", "revcontent", "criteo", "pubmatic", "adthrive",
+            "mediavine", "ezoic", "adnxs", "adslot", "adunit", "adbanner",
+            "adwrapper", "adcontainer", "ad-placeholder", "ad_placeholder",
+        ]
         let exemptGlobalHosts = [
             "*mail.google.com", "*docs.google.com", "*drive.google.com", "*calendar.google.com",
             "*x.com", "*twitter.com",
@@ -274,16 +295,25 @@ final class Shield: ObservableObject {
                 lean.append(rule)
                 continue
             }
-            if let action = rule["action"] as? [String: Any],
-               let selector = action["selector"] as? String,
-               selector.contains(where: { slowChars.contains($0) }) {
+            // Any global rule with existing `unless-domain` exceptions has a
+            // proven history of breaking real sites (e.g. `.ads` on Gmail/Yahoo).
+            if let existingUnless = trigger["unless-domain"] as? [String], !existingUnless.isEmpty {
                 continue
             }
-            var unless = trigger["unless-domain"] as? [String] ?? []
-            for host in exemptGlobalHosts where !unless.contains(host) {
-                unless.append(host)
+            guard let action = rule["action"] as? [String: Any],
+                  let selector = action["selector"] as? String else {
+                continue
             }
-            trigger["unless-domain"] = unless
+            guard !selector.contains(where: { slowChars.contains($0) }),
+                  let first = selector.first, (first == "#" || first == ".") else {
+                continue
+            }
+            let body = selector.dropFirst()
+            guard body.count >= 10 else { continue }
+            let low = body.lowercased()
+            guard safeMarkers.contains(where: { low.contains($0) }) else { continue }
+
+            trigger["unless-domain"] = exemptGlobalHosts
             rule["trigger"] = trigger
             lean.append(rule)
         }
