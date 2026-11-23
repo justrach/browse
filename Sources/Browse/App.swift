@@ -364,16 +364,18 @@ struct ContentView: View {
     }
 
     private var darkCanvas: Bool {
-        windowTint?.dark ?? (scheme == .dark)
+        browser.fullScreen || (windowTint?.dark ?? (scheme == .dark))
     }
 
     /// The window: unified frosted canvas, floating rounded stage card, and
     /// seamless sidebar/top-bar chrome.
     private var window_: some View {
         ZStack(alignment: .topLeading) {
-            // Black while a page has the screen; unified frosted glass canvas
-            // in Arc/Dia framed mode; plain ground in classic top-tab mode.
-            if browser.active?.immersed == true {
+            // Pure #000000 black in macOS Full Screen (or fullscreen video) so
+            // the slim frame and gutter melt seamlessly into the black menu bar
+            // and physical display bezel; unified frosted glass canvas in
+            // windowed Arc/Dia mode; plain ground in classic top-tab mode.
+            if browser.active?.immersed == true || browser.fullScreen {
                 Color.black
             } else if arcFrame {
                 ZStack {
@@ -830,6 +832,7 @@ struct ContentView: View {
             }
             .onReceive(NotificationCenter.default.publisher(for: NSWindow.willEnterFullScreenNotification)) { note in
                 if let window, (note.object as? NSWindow) === window {
+                    window.backgroundColor = .black
                     withAnimation(Motion.glide) {
                         browser.fullScreen = true
                         browser.topPeeking = false
@@ -838,11 +841,13 @@ struct ContentView: View {
             }
             .onReceive(NotificationCenter.default.publisher(for: NSWindow.didEnterFullScreenNotification)) { note in
                 if let window, (note.object as? NSWindow) === window {
+                    window.backgroundColor = .black
                     browser.fullScreen = true
                 }
             }
             .onReceive(NotificationCenter.default.publisher(for: NSWindow.willExitFullScreenNotification)) { note in
                 if let window, (note.object as? NSWindow) === window {
+                    window.backgroundColor = Palette.NS.ground
                     withAnimation(Motion.glide) {
                         browser.fullScreen = false
                         browser.topPeeking = false
@@ -851,6 +856,7 @@ struct ContentView: View {
             }
             .onReceive(NotificationCenter.default.publisher(for: NSWindow.didExitFullScreenNotification)) { note in
                 if let window, (note.object as? NSWindow) === window {
+                    window.backgroundColor = Palette.NS.ground
                     browser.fullScreen = false
                     browser.topPeeking = false
                 }
@@ -1121,7 +1127,7 @@ struct ContentView: View {
         // window only has to be the ground colour that goes with it.
         window.titlebarAppearsTransparent = true
         window.titleVisibility = .hidden
-        window.backgroundColor = Palette.NS.ground
+        window.backgroundColor = browser.fullScreen ? .black : Palette.NS.ground
         // The strip does the dragging, so the page underneath can't be grabbed
         // by accident while selecting text.
         window.isMovableByWindowBackground = false
