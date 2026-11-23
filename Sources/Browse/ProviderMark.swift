@@ -21,7 +21,7 @@ struct ProviderMark: View {
         "deepseek": "deepseek",
         "kimi": "kimi", "moonshotai": "moonshot", "moonshot": "moonshot",
         "openrouter": "openrouter",
-        "google": "gemini", "gemini": "gemini",
+        "google": "gemini", "gemini": "gemini", "antigravity": "gemini",
         "qwen": "qwen", "alibaba": "qwen",
         "mistralai": "mistral", "mistral": "mistral",
         "minimax": "minimax", "cohere": "cohere",
@@ -43,7 +43,9 @@ struct ProviderMark: View {
         case "anthropic", "claude-agent", "claude": hex = 0xd97757
         case "moonshot", "moonshotai", "kimi": hex = dark ? 0x00a1ff : 0x007cff
         case "deepseek": hex = 0x3964fe
-        case "google", "gemini": hex = 0x3186ff
+        case "google", "gemini", "antigravity": hex = 0x3186ff
+        case "opencode": hex = dark ? 0x9ca3af : 0x374151
+        case "pi": hex = 0x8b5cf6
         case "minimax": hex = 0x1887fb
         case "xiaomi": hex = 0xff6900
         case "mistral", "mistralai": hex = 0xff5229
@@ -90,6 +92,14 @@ struct ProviderMark: View {
                 GraffMark(size: size, color: Palette.ink.opacity(0.86))
                     .font(.system(size: size * 0.82, weight: .semibold))
                     .foregroundStyle(tinted ? Color(red: 0.01, green: 0.52, blue: 1.0) : Palette.ink.opacity(0.82))
+            } else if key == "opencode" {
+                Image(systemName: "terminal")
+                    .font(.system(size: size * 0.78, weight: .semibold))
+                    .foregroundStyle(Palette.ink.opacity(0.82))
+            } else if key == "pi" {
+                Image(systemName: "cpu")
+                    .font(.system(size: size * 0.78, weight: .semibold))
+                    .foregroundStyle(tinted ? Color(red: 0.55, green: 0.36, blue: 0.96) : Palette.ink.opacity(0.82))
             } else {
                 Image(systemName: "globe")
                     .font(.system(size: size * 0.82, weight: .medium))

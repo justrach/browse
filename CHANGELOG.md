@@ -6,6 +6,10 @@ All notable changes to **browse** are documented here, newest first.
 
 ## Unreleased
 
+### Added
+
+- **NanoHarness-style multi-agent ACP switcher (`Agent.swift`, `AgentColumn.swift`, `AgentComposer.swift`, `ProviderMark.swift`, `Prefs.swift`)**: auto-discovers native ACP agent CLIs installed on your Mac — **Antigravity (`agy acp`)**, **Codegraff (`graff acp`)**, **OpenCode (`opencode acp`)**, **Gemini CLI (`gemini --acp`)**, and **Pi (`pi-acp`)** — and lets you switch agents and their native models + reasoning effort sliders right from the Model Picker popover, while automatically passing `browse`'s local MCP browser tools (`read_pages`, `search`, `fill`, `click`, `form_fields`) to every ACP backend.
+
 ## 1.8.7 — 23 November 2026
 
 ### Added

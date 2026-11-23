@@ -644,6 +644,7 @@ private struct NanoModelPopover: View {
             .background(Palette.ground)
             .onAppear {
                 highlightedID = current.id
+                agent.refreshBackends()
                 DispatchQueue.main.async { searchFocused = true }
             }
     }
@@ -832,12 +833,72 @@ private struct NanoModelPopover: View {
         return (flat, sections)
     }
 
+    /// NanoHarness-style Agent Backend selector (`Codegraff` | `Antigravity` |
+    /// `OpenCode` | `Gemini` | `Pi`) for all ACP CLIs discovered on this Mac.
+    private var backendBar: some View {
+        VStack(alignment: .leading, spacing: 6) {
+            HStack(spacing: 6) {
+                Text("AGENT")
+                    .font(.system(size: 10, weight: .semibold, design: .monospaced))
+                    .foregroundStyle(Palette.muted)
+                Spacer(minLength: 4)
+                Text(agent.backend.title)
+                    .font(.system(size: 10, weight: .medium))
+                    .foregroundStyle(Palette.muted.opacity(0.85))
+                    .lineLimit(1)
+            }
+            ScrollView(.horizontal, showsIndicators: false) {
+                HStack(spacing: 4) {
+                    ForEach(agent.availableBackends) { item in
+                        let on = item == agent.backend
+                        let tint = ProviderMark.brandAccent(for: item.providerKey, dark: dark)
+                        Button {
+                            if item != agent.backend {
+                                query = ""
+                                highlightedID = nil
+                                agent.choose(backend: item)
+                            }
+                        } label: {
+                            HStack(spacing: 4.5) {
+                                ProviderMark(provider: item.providerKey, size: 11.5)
+                                Text(item.shortName)
+                                    .font(.system(size: 11, weight: on ? .semibold : .medium))
+                                    .lineLimit(1)
+                                    .fixedSize()
+                            }
+                            .foregroundStyle(on ? Palette.ink : Palette.muted)
+                            .padding(.horizontal, 8)
+                            .padding(.vertical, 4.5)
+                            .background(
+                                RoundedRectangle(cornerRadius: 7, style: .continuous)
+                                    .fill(on ? tint.opacity(dark ? 0.22 : 0.14) : Palette.ink.opacity(0.03))
+                            )
+                            .overlay(
+                                RoundedRectangle(cornerRadius: 7, style: .continuous)
+                                    .strokeBorder(on ? tint.opacity(0.42) : Palette.hairline, lineWidth: 0.75)
+                            )
+                            .contentShape(Rectangle())
+                        }
+                        .buttonStyle(.plain)
+                    }
+                }
+            }
+        }
+        .padding(.horizontal, 12)
+        .padding(.vertical, 9)
+    }
+
     private var catalogList: some View {
         let data = catalogRows
         let flat = data.flat
         let highlighted = flat.first { $0.id == highlightedID } ?? flat.first
 
         return VStack(spacing: 0) {
+            if agent.availableBackends.count > 1 {
+                backendBar
+                Rectangle().fill(Palette.hairline).frame(height: 1)
+            }
+
             HStack(spacing: 8) {
                 Image(systemName: "magnifyingglass")
                     .font(.system(size: 11, weight: .medium))
@@ -943,9 +1004,13 @@ private struct NanoModelPopover: View {
                             }
                         }
                         if flat.isEmpty {
-                            Text(starredOnly && trimmedQuery.isEmpty
-                                 ? "No starred models yet — click ★ on any model."
-                                 : "No model matches “\(query)”")
+                            Text(agent.phase == .starting
+                                 ? "Starting \(agent.backend.title)…"
+                                 : (starredOnly && trimmedQuery.isEmpty
+                                    ? "No starred models yet — click ★ on any model."
+                                    : (trimmedQuery.isEmpty
+                                       ? "\(agent.backend.title) didn't list selectable models."
+                                       : "No model matches “\(query)”")))
                                 .font(.system(size: 12.5))
                                 .foregroundStyle(Palette.muted)
                                 .padding(16)
