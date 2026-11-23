@@ -6,6 +6,8 @@ All notable changes to **browse** are documented here, newest first.
 
 ## Unreleased
 
+## 1.9.5 — 23 November 2026
+
 ### Fixed
 
 - **Silky 120 FPS Agent & Sidebar slide and edge-drag resizing (`AgentColumn.swift`, `Side.swift`, `Tab.swift`, `Prefs.swift`, `App.swift`, `lean-proofs/Browse/ScrollFastPath.lean`)**:
