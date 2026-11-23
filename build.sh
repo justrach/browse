@@ -212,6 +212,8 @@ cat > "$APP/Contents/Info.plist" <<PLIST
   <string>Websites you visit can ask to use your camera. browse asks you the first time each site does and keeps your answer; Settings › Privacy forgets them.</string>
   <key>NSMicrophoneUsageDescription</key>
   <string>Websites you visit can ask to use your microphone. browse asks you the first time each site does and keeps your answer; Settings › Privacy forgets them.</string>
+  <key>NSPhotoLibraryAddUsageDescription</key>
+  <string>browse adds the pictures you choose with Add Image to Photos to your library. It can't see or read anything already there.</string>
   <key>NSDownloadsFolderUsageDescription</key>
   <string>Files you download are saved to your Downloads folder.</string>
   <key>NSUserActivityTypes</key>

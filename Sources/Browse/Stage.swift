@@ -336,6 +336,7 @@ final class StageView: NSView {
         if let leaving = wanted, leaving !== page {
             endLiveResize()
             unbackPage()
+            if let web = leaving as? WKWebView { WindowFullScreen.shared.end(web) }
             if let dock = subviews.first(where: Self.isInspector) {
                 Self.docks.setObject(dock, forKey: leaving)
                 dock.removeFromSuperview()

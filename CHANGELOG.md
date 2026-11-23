@@ -6,6 +6,21 @@ All notable changes to **browse** are documented here, newest first.
 
 ## Unreleased
 
+### Added
+
+- **Add Image to Photos (`ImageMenu.swift`, `build.sh`, `Browse*.entitlements`)**: Right-click image menus now include **Add Image to Photos** under **Download Image** using `PHAssetCreationRequest` with add-only library permission (`NSPhotoLibraryAddUsageDescription` and `com.apple.security.personal-information.photos-library`), supporting `http:`/`https:`/`data:` and live `blob:` URLs.
+- **Per-site permissions list & reset in Privacy (`Browser.swift`, `Settings.swift`)**: **Settings › Privacy** now lists saved per-origin Camera, Microphone, Location, and Notification decisions (with search filtering when > 4 entries and one-click **Reset** per entry).
+- **Opt-in in-window video full screen (`WindowFullScreen.swift`, `Prefs.swift`, `Forms.swift`, `Tab.swift`, `Stage.swift`, `Browser.swift`, `App.swift`, `Settings.swift`)**: Added **Settings › General › Full-screen video fills this window** (off by default) so HTML5 video full screen fills the browser window without spawning a new WebKit Space.
+- **Opt-in shared live pins across Spaces (`Prefs.swift`, `Spaces.swift`, `Settings.swift`)**: Added **Settings › Tabs › Use the same pinned tabs across spaces** (off by default) to carry live pinned tabs cleanly across Spaces that share sign-ins.
+- **Native Web Inspector Dock / Undock (`Inspector.swift`, `App.swift`)**: Added **View › Dock / Undock Web Inspector** to toggle docked vs. separate-window mode on the native WebKit Web Inspector.
+
+### Fixed
+
+- **Full-screen Escape routing (`App.swift`)**: Pressing single `Esc` while the browser window is in macOS Full Screen now passes to the page first so dismissing site popups/dialogs doesn't exit Full Screen.
+- **Document-bound favicons (`Icons.swift`)**: Verified the responding `document.URL` matches the requested page before caching declared icons so rapid navigations never attach another site's icon.
+- **Tab rename unchanged-title guard (`Browser.swift`)**: Canceling/submitting **Rename Tab** without editing the page title leaves `tab.name` unset so future navigations continue updating the tab title.
+- **Cross-Space PiP return (`Browser.swift`)**: Both macOS native PiP return (`_webViewFullscreenMayReturnToInline:`) and floating video `onReturn` now locate and switch to parked Spaces before selecting the source tab and activating the window.
+
 ### Improved
 
 - **UX Polish Tiers 1–3 & upstream Search ports (`Loot.swift`, `Reader.swift`, `Stage.swift`, `TabBar.swift`, `Bookmarks.swift`, `BookmarksBar.swift`, `TabOverview.swift`, `Recall.swift`, `Spaces.swift`, `AsideBar.swift`, `Float.swift`, `AgentColumn.swift`, `Swipe.swift`, `ImageMenu.swift`)**:

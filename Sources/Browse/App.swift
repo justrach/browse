@@ -137,6 +137,7 @@ struct BrowseApp: App {
                     .shortcut(shortcuts.key(for: .jsConsole))
                 Button("Inspect Element") { browser.inspectElement() }
                     .shortcut(shortcuts.key(for: .inspectElement))
+                Button("Dock / Undock Web Inspector") { browser.toggleInspectorDock() }
             }
             CommandMenu("Tabs") {
                 Button("Back") { browser.back() }
@@ -1296,6 +1297,18 @@ struct ContentView: View {
                 if !event.modifierFlags.contains(.control) { browser.commitTabCycle() }
                 return event
             }
+            if event.keyCode == 53, let window, event.window === window,
+               window.styleMask.contains(.fullScreen),
+               browser.active?.immersed != true {
+                if FullScreenEscape.shared.cameBack(event) { return nil }
+                if take(event) { return nil }
+                if let page = (window.firstResponder as? NSView).flatMap(FullScreenEscape.page(holding:)) {
+                    FullScreenEscape.shared.handOver(event)
+                    page.keyDown(with: event)
+                    return nil
+                }
+                return event
+            }
             return take(event) ? nil : event
         }
         ContentView.keyHook = { event in take(event) ? nil : event }
@@ -1391,6 +1404,11 @@ struct ContentView: View {
         // Escape puts the page back. On a blank tab there is no page to put
         // back, so it belongs to whatever else wants it.
         if event.keyCode == 53 {
+            if let web = browser.active?.built, WindowFullScreen.shared.fills(web) {
+                if browser.tabSwitcher != nil { browser.closeTabSwitcher() }
+                WindowFullScreen.shared.end(web)
+                return true
+            }
             if browser.isTabCycling {
                 browser.cancelTabCycle()
                 return true
@@ -1759,5 +1777,30 @@ struct ContentView: View {
             browser.welcoming.toggle()
         }
         return true
+    }
+}
+
+@MainActor
+private final class FullScreenEscape {
+    static let shared = FullScreenEscape()
+    private var handed: NSEvent?
+
+    func handOver(_ event: NSEvent) {
+        handed = event
+    }
+
+    func cameBack(_ event: NSEvent) -> Bool {
+        guard let handed, PageView.same(handed, event) else { return false }
+        self.handed = nil
+        return true
+    }
+
+    static func page(holding view: NSView) -> PageView? {
+        var current: NSView? = view
+        while let candidate = current {
+            if let page = candidate as? PageView { return page }
+            current = candidate.superview
+        }
+        return nil
     }
 }

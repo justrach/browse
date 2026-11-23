@@ -366,6 +366,38 @@ check(
     "UX Tiers 1-3 & Search ports: live downloads + file-error retry, dark/non-destructive Reader, page progress bar, nav history menus, bookmark search + overflow, recently closed in ⌘K/History, Move to Space + colours, folded audio pill, PiP scrub/mute/speed, Agent retry/edit, overscrollBehaviorX + Image split + tabRowHold",
 )
 
+# 21. Upstream follow-up features & fixes (Photos, Site Permissions, WindowFullScreen, Shared Pins, Escape, Favicon guard, Rename guard, Native PiP return, Inspector dock).
+window_fs_src = read("Sources/Browse/WindowFullScreen.swift")
+icons_src = read("Sources/Browse/Icons.swift")
+inspector_src = read("Sources/Browse/Inspector.swift")
+build_sh_src = read("build.sh")
+entitlements_paths = [
+    "Browse.entitlements",
+    "Browse.passkeys.entitlements",
+    "Browse.icloud.entitlements",
+]
+photos_entitled = all(
+    "com.apple.security.personal-information.photos-library" in read(p)
+    for p in entitlements_paths
+)
+check(
+    "addImageToPhotos" in imagemenu_src
+    and "PHAssetCreationRequest" in imagemenu_src
+    and "NSPhotoLibraryAddUsageDescription" in build_sh_src
+    and photos_entitled
+    and "struct PermissionSites" in settings
+    and "fullScreenInWindow" in settings
+    and "sharedPins" in settings
+    and "final class WindowFullScreen" in window_fs_src
+    and "new MutationObserver" not in window_fs_src
+    and "return { url: document.URL, icons: out };" in icons_src
+    and "tabOriginal" in browser_src
+    and "_webViewFullscreenMayReturnToInline:" in browser_src
+    and "class FullScreenEscape" in app_src
+    and "toggleInspectorDock" in inspector_src,
+    "Upstream follow-up batch: Add Image to Photos + entitlements, Privacy PermissionSites, opt-in WindowFullScreen (0 MutationObservers), shared pins across Spaces, FullScreenEscape routing, doc-bound favicons, rename title guard, cross-Space PiP return, and dockable Web Inspector",
+)
+
 if failures:
     print(f"\n{len(failures)} source guardrail check(s) failed.", file=sys.stderr)
     sys.exit(1)
