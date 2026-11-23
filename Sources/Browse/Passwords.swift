@@ -183,11 +183,14 @@ struct PasswordsPanel: View {
 
                 Spacer(minLength: 8)
 
-                if hovering || shown {
+                // Fixed-slot opacity prevents row height/width jump on hover.
+                HStack(spacing: 6) {
                     Quick(shown ? "Hide" : "Show") { shown ? conceal() : reveal() }
                     Quick("Copy", act: copy)
                     Quick("Remove", tint: .red.opacity(0.75), act: forget)
                 }
+                .opacity(hovering || shown ? 1 : 0)
+                .allowsHitTesting(hovering || shown)
             }
             .padding(.horizontal, 10)
             .padding(.vertical, 7)
