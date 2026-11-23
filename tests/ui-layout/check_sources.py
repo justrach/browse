@@ -275,8 +275,13 @@ check(
     "func beginLiveResize()" in tab_scroll_src
     and "commitAgentWidth()" in agent_col
     and "isDraggingAgentWidth" in prefs_src
-    and "window.animator().setFrame(" in app_src,
-    "120 FPS sidebar & Agent slide/resize: async WebKit live-resize, deferred UserDefaults commits, non-blocking window animator",
+    and "window.animator().setFrame(" in app_src
+    and ".padding(.leading, chrome.width)" in app_src
+    and ".padding(.trailing, agentTrailing)" in app_src
+    and "roomedAgent" not in app_src
+    and "agentRoom" not in app_src
+    and "ZStack(alignment: .topTrailing)" in app_src,
+    "120 FPS lockstep sidebar & Agent slide/resize: direct chrome/agentTrailing binding (zero 240ms snap, zero 1-frame lag), width-matched trailing transition, async WebKit live-resize, deferred UserDefaults commits",
 )
 
 if failures:

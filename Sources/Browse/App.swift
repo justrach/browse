@@ -349,18 +349,10 @@ struct ContentView: View {
     @State private var keys: Any?
     @State private var window: NSWindow?
     @State private var resting: RestingLights?
-    /// The room the page leaves for the column and the strip, set without
-    /// animation (see `make(room:after:)`); nil only before the window is up.
-    @State private var room: CGSize?
-    @State private var roomTicket = 0
-    /// Deferred right-edge room for the full-height Agent sidebar so opening or
-    /// closing Codegraff slides smoothly at 120 FPS without resizing WKWebView
-    /// on every frame of the spring animation.
-    @State private var agentRoom: CGFloat?
-    @State private var agentRoomTicket = 0
-    /// Brief frosted edge shimmer while the webpage card settles after a
-    /// sidebar or Agent panel slide.
-    @State private var pageSettling = false
+    /// Ticket tracking in-flight sidebar / Agent open-close spring slides so
+    /// WebKit's async live-resize (`beginLiveResize` / `endLiveResize`) always
+    /// exits balanced even when slides are toggled rapidly.
+    @State private var panelSlideTicket = 0
     /// Live window width so narrow windows float the Agent sidebar as an
     /// overlay drawer instead of crushing webpages down to mobile breakpoints.
     @State private var windowWidth: CGFloat = 1440
@@ -407,19 +399,15 @@ struct ContentView: View {
                 Palette.ground
             }
 
-            // One stage, always. It starts beside the column and under the
-            // strip, not behind them — a page sliding beneath floating chrome
-            // is a browser showing off, and it costs a compositing pass.
-            //
-            // When the column or the strip comes or goes, the page slides with
-            // it and is resized once, not on every frame of the slide: laid out
-            // again thirty times a second, the page juddered along its right
-            // edge and overshot the window with the spring (see `room`).
+            // One stage, always, bound directly to `chrome` and `agentTrailing`
+            // (zero `@State` mirror lag, zero delayed post-slide snap). WebKit
+            // stays in async live-resize during every open/close slide and live
+            // edge drag so the page card and adjacent sidebar move in 1:1
+            // lockstep on every 120 Hz frame with a constant 6pt gutter.
             stage
-                .padding(.leading, roomed.width)
-                .padding(.trailing, roomedAgent)
-                .padding(.top, roomed.height)
-                .offset(x: chrome.width - roomed.width, y: chrome.height - roomed.height)
+                .padding(.leading, chrome.width)
+                .padding(.trailing, agentTrailing)
+                .padding(.top, chrome.height)
 
             // The column of tabs, in the way that has one. It takes the full
             // height, so the traffic lights sit in its own corner rather than
@@ -445,17 +433,21 @@ struct ContentView: View {
             if barShown {
                 BookmarksBar(browser: browser, bookmarks: browser.bookmarks)
                     .padding(.leading, chrome.width)
-                    .padding(.trailing, roomedAgent)
+                    .padding(.trailing, agentTrailing)
                     .padding(.top, band)
                     .transition(.opacity)
             }
 
-            // Codegraff floats beside the webpage card below AsideBar (or in
-            // Full Screen / narrow overlay mode), sharing the exact same top
-            // edge, bottom margin, and 10pt squircle corners.
-            if fullHeightAgent || floatingAgentDrawer {
-                HStack(spacing: 0) {
-                    Spacer(minLength: 0)
+            // Codegraff sits beside the webpage card below AsideBar (or in Full
+            // Screen / narrow overlay mode), sharing the exact same top edge,
+            // bottom margin, and 10pt squircle corners. Placed inside a
+            // topTrailing ZStack so `.transition(.move(edge: .trailing))`
+            // translates by `AgentColumn`'s own width (`prefs.agentWidth`) —
+            // matching `stage`'s trailing inset in exact 1:1 lockstep rather
+            // than the full window width.
+            ZStack(alignment: .topTrailing) {
+                Color.clear.allowsHitTesting(false)
+                if fullHeightAgent || floatingAgentDrawer {
                     AgentColumn(
                         browser: browser,
                         agent: browser.agent,
@@ -466,8 +458,8 @@ struct ContentView: View {
                     )
                         .padding(.top, asideBarShown ? Metrics.strip : (fullScreenTopHidden ? Fold.fullScreenGutter : (topTabBarShown ? Metrics.strip : 0)))
                         .frame(maxHeight: .infinity, alignment: .top)
+                        .transition(.move(edge: .trailing))
                 }
-                .transition(.move(edge: .trailing))
             }
         }
         .ignoresSafeArea()
@@ -475,14 +467,17 @@ struct ContentView: View {
         .animation(Motion.glide, value: browser.folded)
         .animation(Motion.glide, value: browser.fullScreen)
         .animation(Motion.glide, value: consulting)
+        .animation(Motion.glide, value: floatingAgentDrawer)
         .animation(Motion.glide, value: browser.agentFull)
         .animation(.easeOut(duration: 0.12), value: browser.active?.immersed)
-        .onAppear {
-            if room == nil { room = chrome }
-            if agentRoom == nil { agentRoom = agentTrailing }
+        .onChange(of: chrome) { old, new in
+            guard old != new, !browser.prefs.isDraggingSideWidth else { return }
+            bracketPanelSlide()
         }
-        .onChange(of: chrome) { old, new in make(room: new, after: old) }
-        .onChange(of: agentTrailing) { old, new in makeAgent(room: new, after: old) }
+        .onChange(of: agentTrailing) { old, new in
+            guard old != new, !browser.prefs.isDraggingAgentWidth else { return }
+            bracketPanelSlide()
+        }
         .onChange(of: consulting) { _, now in adjustWindowForAgent(opening: now) }
     }
 
@@ -536,11 +531,11 @@ struct ContentView: View {
                         corner: Split.corner,
                         dark: darkCanvas,
                         working: consulting && browser.agent.phase == .working && browser.agent.withPage && !tab.isBlank,
-                        settling: pageSettling
+                        settling: false
                     )
                 }
                 .padding(.leading, sidebar ? 0 : Split.gap)
-                .padding(.trailing, roomedAgent > 0 ? 0 : Split.gap)
+                .padding(.trailing, Split.gap)
                 .padding(.top, (asideBarShown || fullScreenTopHidden) ? 0 : Split.gap)
                 .padding(.bottom, Split.gap)
             } else {
@@ -610,10 +605,6 @@ struct ContentView: View {
             && browser.active?.immersed != true
     }
 
-    /// The room the page is laid out to leave them, which is not animated.
-    private var roomed: CGSize { room ?? chrome }
-    private var roomedAgent: CGFloat { agentRoom ?? agentTrailing }
-
     /// Visible WKWebView instances currently on stage (single tab or both split panes).
     private var visiblePageViews: [PageView] {
         if let pair = browser.shownSplit {
@@ -622,87 +613,22 @@ struct ContentView: View {
         return [browser.active?.built].compactMap { $0 }
     }
 
-    /// Chrome going away gives the page its room at once, the page sliding
-    /// out from under it at its new size. Chrome arriving slides over a page
-    /// still at its old size, which gives up the room once the slide is over.
-    /// A column being dragged wider or narrower is followed as it goes.
-    private func make(room new: CGSize, after old: CGSize) {
-        let now = roomed
-        let arriving = (old.width == 0 && new.width > 0, old.height == 0 && new.height > 0)
-        var at = now
-        if !arriving.0 { at.width = new.width }
-        if !arriving.1 { at.height = new.height }
-        roomTicket += 1
-        var still = Transaction()
-        still.disablesAnimations = true
-        // Suppress WebKit's synchronous geometry wait during the spring slide
-        // so ⌘S folds and unfolds smoothly without frame drops or right-edge stalls.
+    /// Bracket an animated sidebar or Agent open/close spring with WebKit's
+    /// async live-resize (`viewWillStartLiveResize` / `viewDidEndLiveResize` +
+    /// `backPage()`) so the page card resizes smoothly in 1:1 lockstep with the
+    /// sliding panel from frame 0 without blocking on synchronous WebContent
+    /// geometry updates.
+    private func bracketPanelSlide() {
+        guard !Motion.reduced else { return }
+        panelSlideTicket += 1
+        let ticket = panelSlideTicket
         let pageViews = visiblePageViews
-        if browser.prefs.isDraggingSideWidth {
-            withTransaction(still) { room = new }
-            return
-        }
-        if !Motion.reduced && (old.width != new.width || old.height != new.height) {
-            pageViews.forEach { $0.beginLiveResize() }
-        }
-        // With Reduce Motion on, nothing slides: the page takes its new room
-        // with the chrome, not after a slide that isn't there.
-        withTransaction(still) { room = Motion.reduced ? new : at }
-        let ticket = roomTicket
-        if Motion.reduced {
+        pageViews.forEach { $0.beginLiveResize() }
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.28) {
+            guard ticket == panelSlideTicket,
+                  !browser.prefs.isDraggingAgentWidth,
+                  !browser.prefs.isDraggingSideWidth else { return }
             pageViews.forEach { $0.endLiveResize() }
-            return
-        }
-        DispatchQueue.main.asyncAfter(deadline: .now() + 0.26) {
-            guard ticket == roomTicket else { return }
-            if arriving.0 || arriving.1 {
-                withTransaction(still) { room = chrome }
-            }
-            pageViews.forEach { $0.endLiveResize() }
-        }
-    }
-
-    /// Same deferred single-resize strategy for the right-side Agent sidebar:
-    /// sliding in glides smoothly over the page at 120 FPS and resizes WebKit
-    /// once when settled; sliding out widens WebKit once immediately; live edge
-    /// drags follow directly with async WebKit live-resize and zero timers.
-    private func makeAgent(room new: CGFloat, after old: CGFloat) {
-        guard old != new else { return }
-        var still = Transaction()
-        still.disablesAnimations = true
-        if browser.prefs.isDraggingAgentWidth {
-            withTransaction(still) { agentRoom = new }
-            return
-        }
-        let arriving = old == 0 && new > 0
-        agentRoomTicket += 1
-        let pageViews = visiblePageViews
-        if !Motion.reduced {
-            pageViews.forEach { $0.beginLiveResize() }
-        }
-        if Motion.reduced {
-            withTransaction(still) { agentRoom = new }
-            pageViews.forEach { $0.endLiveResize() }
-            return
-        }
-        let sliding = (old == 0 && new > 0) || (old > 0 && new == 0)
-        if sliding { pageSettling = true }
-        if !arriving {
-            withTransaction(still) { agentRoom = new }
-        }
-        let ticket = agentRoomTicket
-        DispatchQueue.main.asyncAfter(deadline: .now() + 0.24) {
-            guard ticket == agentRoomTicket else { return }
-            if arriving {
-                withTransaction(still) { agentRoom = agentTrailing }
-            }
-            pageViews.forEach { $0.endLiveResize() }
-            if sliding {
-                DispatchQueue.main.asyncAfter(deadline: .now() + 0.10) {
-                    guard ticket == agentRoomTicket else { return }
-                    pageSettling = false
-                }
-            }
         }
     }
 
