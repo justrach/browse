@@ -79,7 +79,8 @@ final class Passkeys: NSObject {
     /// The one on screen, and whom to answer when it ends. A new request
     /// ends the one before, as a page asking twice gets in any browser.
     private var controller: ASAuthorizationController?
-    /// The page's one-time key for this request's PRF results (see prfReply).
+    /// The page's one-time key for this request's PRF and largeBlob results
+    /// (see prfReply / largeBlobReply).
     private var prfKey: P256.KeyAgreement.PublicKey?
     private var token: String?
     private var answer: (([String: Any]) -> Void)?
@@ -245,12 +246,20 @@ final class Passkeys: NSObject {
                 reply["prf"] = Passkeys.prfReply(enabled: nil, first: SymmetricKey(data: SHA256.hash(data: Data("rehearsal".utf8))),
                                                  second: nil, for: Passkeys.pageKey(waiting.body))
             }
+            if let lb = waiting.body["largeBlob"] as? [String: Any] {
+                if lb["read"] as? Bool == true {
+                    reply["largeBlob"] = Passkeys.largeBlobReply(blob: Data("rehearsal".utf8), for: Passkeys.pageKey(waiting.body))
+                } else if lb["write"] != nil {
+                    reply["largeBlob"] = Passkeys.largeBlobReply(written: true, for: nil)
+                }
+            }
             return waiting.answer(reply)
         }
         let request = ASAuthorizationPlatformPublicKeyCredentialProvider(relyingPartyIdentifier: waiting.rp)
             .createCredentialAssertionRequest(clientData: waiting.clientData)
         request.allowedCredentials = [ASAuthorizationPlatformPublicKeyCredentialDescriptor(credentialID: id)]
         request.userVerificationPreference = Passkeys.verification(waiting.body["userVerification"])
+        request.largeBlob = Passkeys.largeBlobAssertion(waiting.body["largeBlob"])
         if #available(macOS 15.0, *) { request.prf = Passkeys.prfAssertion(waiting.body["prf"], allowed: [id]) }
         Passkeys.ensure { [weak self] in
             guard let self else { return }
@@ -378,6 +387,15 @@ final class Passkeys: NSObject {
                                                  first: SymmetricKey(data: SHA256.hash(data: Data("rehearsal".utf8))),
                                                  second: nil, for: Passkeys.pageKey(body))
             }
+            if let lb = body["largeBlob"] as? [String: Any] {
+                if kind == "create" {
+                    reply["largeBlob"] = Passkeys.largeBlobReply(supported: true, for: nil)
+                } else if lb["read"] as? Bool == true {
+                    reply["largeBlob"] = Passkeys.largeBlobReply(blob: Data("rehearsal".utf8), for: Passkeys.pageKey(body))
+                } else if lb["write"] != nil {
+                    reply["largeBlob"] = Passkeys.largeBlobReply(written: true, for: nil)
+                }
+            }
             return answer(reply)
         }
 
@@ -419,6 +437,7 @@ final class Passkeys: NSObject {
             .createCredentialAssertionRequest(clientData: clientData)
         platform.allowedCredentials = allowed.map { ASAuthorizationPlatformPublicKeyCredentialDescriptor(credentialID: $0.id) }
         platform.userVerificationPreference = verification
+        platform.largeBlob = Passkeys.largeBlobAssertion(body["largeBlob"])
         if #available(macOS 15.0, *) { platform.prf = Passkeys.prfAssertion(body["prf"], allowed: Set(allowed.map(\.id))) }
         var requests: [ASAuthorizationRequest] = [platform]
         if #available(macOS 14.4, *) {
@@ -457,6 +476,7 @@ final class Passkeys: NSObject {
             if #available(macOS 14.4, *) {
                 platform.excludedCredentials = excluded.map { ASAuthorizationPlatformPublicKeyCredentialDescriptor(credentialID: $0.id) }
             }
+            platform.largeBlob = Passkeys.largeBlobRegistration(body["largeBlob"])
             if #available(macOS 15.0, *), let prf = body["prf"] as? [String: Any] {
                 platform.prf = Passkeys.prfValues(prf["eval"]).map { .inputValues($0) } ?? .checkForSupport
             }
@@ -521,6 +541,19 @@ final class Passkeys: NSObject {
         (body["prfKey"] as? String).flatMap(data).flatMap { try? P256.KeyAgreement.PublicKey(x963Representation: $0) }
     }
 
+    /// Seals sensitive extension bytes (PRF outputs, largeBlob payloads) for
+    /// the page call's one-time P-256 key so no other script on the page can
+    /// read them off the `window.dispatchEvent` bridge.
+    private static func seal(_ payload: [String: String], for page: P256.KeyAgreement.PublicKey) -> [String: String]? {
+        let mine = P256.KeyAgreement.PrivateKey()
+        guard let shared = try? mine.sharedSecretFromKeyAgreement(with: page),
+              let plain = try? JSONSerialization.data(withJSONObject: payload)
+        else { return nil }
+        let key = shared.hkdfDerivedSymmetricKey(using: SHA256.self, salt: Data(), sharedInfo: Data("search-prf".utf8), outputByteCount: 32)
+        guard let box = try? AES.GCM.seal(plain, using: key).combined else { return nil }
+        return ["key": text(mine.publicKey.x963Representation), "box": text(box)]
+    }
+
     /// What the passkey derived, for the page: `enabled` only answers a
     /// registration. The results are keys only the page's own call may see,
     /// and the way back to it is an event any script on the page can listen
@@ -532,13 +565,34 @@ final class Passkeys: NSObject {
         guard let first, let page else { return reply }
         var results = ["first": text(first.withUnsafeBytes { Data($0) })]
         if let second { results["second"] = text(second.withUnsafeBytes { Data($0) }) }
-        let mine = P256.KeyAgreement.PrivateKey()
-        guard let shared = try? mine.sharedSecretFromKeyAgreement(with: page),
-              let plain = try? JSONSerialization.data(withJSONObject: results)
-        else { return reply }
-        let key = shared.hkdfDerivedSymmetricKey(using: SHA256.self, salt: Data(), sharedInfo: Data("search-prf".utf8), outputByteCount: 32)
-        guard let box = try? AES.GCM.seal(plain, using: key).combined else { return reply }
-        reply["sealed"] = ["key": text(mine.publicKey.x963Representation), "box": text(box)]
+        if let sealed = seal(results, for: page) { reply["sealed"] = sealed }
+        return reply
+    }
+
+    // MARK: - largeBlob extension (used by Apple ID / iCloud / Developer passkey sign-in)
+
+    private static func largeBlobAssertion(_ value: Any?) -> ASAuthorizationPublicKeyCredentialLargeBlobAssertionInput? {
+        guard let lb = value as? [String: Any] else { return nil }
+        if lb["read"] as? Bool == true { return .read }
+        if let write = data(lb["write"]) { return .write(write) }
+        return nil
+    }
+
+    private static func largeBlobRegistration(_ value: Any?) -> ASAuthorizationPublicKeyCredentialLargeBlobRegistrationInput? {
+        guard let lb = value as? [String: Any] else { return nil }
+        switch lb["support"] as? String {
+        case "required": return .supportRequired
+        case "preferred": return .supportPreferred
+        default: return nil
+        }
+    }
+
+    static func largeBlobReply(supported: Bool? = nil, blob: Data? = nil, written: Bool? = nil, for page: P256.KeyAgreement.PublicKey?) -> [String: Any] {
+        var reply: [String: Any] = [:]
+        if let supported { reply["supported"] = supported }
+        if let written { reply["written"] = written }
+        guard let blob, let page else { return reply }
+        if let sealed = seal(["blob": text(blob)], for: page) { reply["sealed"] = sealed }
         return reply
     }
 
@@ -752,15 +806,26 @@ extension Passkeys: ASAuthorizationControllerDelegate, ASAuthorizationController
         guard controller === self.controller else { return }
         let credential = authorization.credential
         if let got = credential as? ASAuthorizationPublicKeyCredentialAssertion {
-            let attachment = (credential as? ASAuthorizationPlatformPublicKeyCredentialAssertion)?.attachment
+            let platform = credential as? ASAuthorizationPlatformPublicKeyCredentialAssertion
+            let attachment = platform?.attachment
             Passkeys.log.notice("signed in")
             var reply = Passkeys.assertionReply(
                 id: got.credentialID, clientData: got.rawClientDataJSON, authenticatorData: got.rawAuthenticatorData,
                 signature: got.signature, user: got.userID,
                 attachment: attachment == .platform ? "platform" : "cross-platform"
             )
-            if #available(macOS 15.0, *), let prf = (credential as? ASAuthorizationPlatformPublicKeyCredentialAssertion)?.prf {
+            if #available(macOS 15.0, *), let prf = platform?.prf {
                 reply["prf"] = Passkeys.prfReply(enabled: nil, first: prf.first, second: prf.second, for: prfKey)
+            }
+            if let largeBlob = platform?.largeBlob {
+                switch largeBlob.result {
+                case .read(let data):
+                    reply["largeBlob"] = Passkeys.largeBlobReply(blob: data, for: prfKey)
+                case .write(let success):
+                    reply["largeBlob"] = Passkeys.largeBlobReply(written: success, for: nil)
+                @unknown default:
+                    break
+                }
             }
             finish(reply)
         } else if let made = credential as? ASAuthorizationPublicKeyCredentialRegistration {
@@ -773,6 +838,9 @@ extension Passkeys: ASAuthorizationControllerDelegate, ASAuthorizationController
             )
             if #available(macOS 15.0, *), let prf = platform?.prf {
                 reply["prf"] = Passkeys.prfReply(enabled: prf.isSupported, first: prf.first, second: prf.second, for: prfKey)
+            }
+            if let largeBlob = platform?.largeBlob {
+                reply["largeBlob"] = Passkeys.largeBlobReply(supported: largeBlob.isSupported, for: nil)
             }
             finish(reply)
         } else {
@@ -991,6 +1059,32 @@ final class PasskeyRelay: NSObject, WKScriptMessageHandlerWithReply {
         }
         return out;
       }
+      function largeBlobInput(extensions, made) {
+        var lb = extensions && extensions.largeBlob;
+        if (!lb || typeof lb !== 'object') return null;
+        if (made) {
+          if (lb.read || lb.write !== undefined) throw new DOMException('largeBlob read/write is only valid on get().', 'NotSupportedError');
+          if (lb.support !== undefined && lb.support !== 'required' && lb.support !== 'preferred') {
+            throw new DOMException('Invalid largeBlob support value.', 'NotSupportedError');
+          }
+          return { support: lb.support || 'preferred' };
+        }
+        if (lb.support !== undefined) throw new DOMException('largeBlob support is only valid on create().', 'NotSupportedError');
+        if (lb.read && lb.write !== undefined) throw new DOMException('largeBlob cannot both read and write.', 'NotSupportedError');
+        if (lb.read) return { read: true };
+        if (lb.write !== undefined) return { write: encode(lb.write) };
+        return null;
+      }
+      function largeBlobOutput(reply, made, binary) {
+        var out = {};
+        if (made) {
+          if (reply.supported !== undefined) out.supported = !!reply.supported;
+        } else {
+          if (reply.blob !== undefined && reply.blob !== null) out.blob = binary ? decode(reply.blob) : reply.blob;
+          if (reply.written !== undefined) out.written = !!reply.written;
+        }
+        return out;
+      }
 
       function descriptors(list) {
         return Array.prototype.map.call(list || [], function (c) {
@@ -1036,11 +1130,13 @@ final class PasskeyRelay: NSObject, WKScriptMessageHandlerWithReply {
         // naming it; the site may have asked whether it is.
         var results = {};
         if (made && extensions && extensions.credProps && reply.attachment === 'platform') results.credProps = { rk: true };
-        // PRF outputs are bytes: made afresh for each caller, base64url in JSON.
+        // PRF and largeBlob outputs are bytes: made afresh for each caller, base64url in JSON.
         var prf = extensions && extensions.prf && reply.prf ? reply.prf : null;
+        var largeBlob = extensions && extensions.largeBlob && reply.largeBlob ? reply.largeBlob : null;
         var attachment = reply.attachment || null;
         var jsonResults = JSON.parse(JSON.stringify(results));
         if (prf) jsonResults.prf = prfOutput(prf, made, false);
+        if (largeBlob) jsonResults.largeBlob = largeBlobOutput(largeBlob, made, false);
         var json = { id: reply.id, rawId: reply.id, type: 'public-key', authenticatorAttachment: attachment, clientExtensionResults: jsonResults };
         json.response = made
           ? { clientDataJSON: reply.clientDataJSON, attestationObject: reply.attestationObject, authenticatorData: reply.authenticatorData,
@@ -1054,6 +1150,7 @@ final class PasskeyRelay: NSObject, WKScriptMessageHandlerWithReply {
           getClientExtensionResults: function () {
             var copy = JSON.parse(JSON.stringify(results));
             if (prf) copy.prf = prfOutput(prf, made, true);
+            if (largeBlob) copy.largeBlob = largeBlobOutput(largeBlob, made, true);
             return copy;
           },
           toJSON: function () { return JSON.parse(JSON.stringify(json)); }
@@ -1076,18 +1173,18 @@ final class PasskeyRelay: NSObject, WKScriptMessageHandlerWithReply {
         });
       }
 
-      // A one-time key pair for a request's PRF results; the private half
-      // never leaves this script.
+      // A one-time key pair for a request's PRF and largeBlob results; the
+      // private half never leaves this script.
       function prfKeys() {
         if (!sealing) return Promise.resolve(null);
         return sealing.generate({ name: 'ECDH', namedCurve: 'P-256' }, false, ['deriveBits']).then(function (pair) {
           return sealing.exportKey('raw', pair.publicKey).then(function (raw) { return { pair: pair, raw: encode(raw) }; });
         }, function () { return null; });
       }
-      function unseal(prf, keys) {
-        if (!prf || !prf.sealed || !keys) return Promise.resolve(prf ? { enabled: prf.enabled } : null);
-        var box = new Uint8Array(decode(prf.sealed.box));
-        return sealing.importKey('raw', decode(prf.sealed.key), { name: 'ECDH', namedCurve: 'P-256' }, false, [])
+      function unsealBox(sealed, keys) {
+        if (!sealed || !keys) return Promise.resolve(null);
+        var box = new Uint8Array(decode(sealed.box));
+        return sealing.importKey('raw', decode(sealed.key), { name: 'ECDH', namedCurve: 'P-256' }, false, [])
           .then(function (theirs) { return sealing.deriveBits({ name: 'ECDH', public: theirs }, keys.pair.privateKey, 256); })
           .then(function (bits) { return sealing.importKey('raw', bits, 'HKDF', false, ['deriveKey']); })
           .then(function (base) {
@@ -1095,16 +1192,32 @@ final class PasskeyRelay: NSObject, WKScriptMessageHandlerWithReply {
               base, { name: 'AES-GCM', length: 256 }, false, ['decrypt']);
           })
           .then(function (key) { return sealing.decrypt({ name: 'AES-GCM', iv: box.slice(0, 12) }, key, box.slice(12)); })
-          .then(function (plain) {
-            var results = JSON.parse(text.decode(plain));
-            return { enabled: prf.enabled, first: results.first, second: results.second };
-          }, function () { return { enabled: prf.enabled }; });
+          .then(function (plain) { return JSON.parse(text.decode(plain)); }, function () { return null; });
+      }
+      function unsealPrf(prf, keys) {
+        if (!prf) return Promise.resolve(null);
+        if (!prf.sealed || !keys) return Promise.resolve({ enabled: prf.enabled });
+        return unsealBox(prf.sealed, keys).then(function (results) {
+          return results ? { enabled: prf.enabled, first: results.first, second: results.second } : { enabled: prf.enabled };
+        });
+      }
+      function unsealLargeBlob(lb, keys) {
+        if (!lb) return Promise.resolve(null);
+        var base = {};
+        if (lb.supported !== undefined) base.supported = lb.supported;
+        if (lb.written !== undefined) base.written = lb.written;
+        if (!lb.sealed || !keys) return Promise.resolve(base);
+        return unsealBox(lb.sealed, keys).then(function (results) {
+          if (results && results.blob !== undefined) base.blob = results.blob;
+          return base;
+        });
       }
 
       function send(request, signal, extensions) {
         if (signal && signal.aborted) return Promise.reject(aborted(signal));
         request.token = Math.random().toString(36).slice(2);
-        return (request.prf ? prfKeys() : Promise.resolve(null)).then(function (keys) {
+        var needsKey = !!(request.prf || (request.largeBlob && request.largeBlob.read));
+        return (needsKey ? prfKeys() : Promise.resolve(null)).then(function (keys) {
           if (keys) request.prfKey = keys.raw;
           return new Promise(function (resolve, reject) {
             if (signal) signal.addEventListener('abort', function () {
@@ -1120,8 +1233,9 @@ final class PasskeyRelay: NSObject, WKScriptMessageHandlerWithReply {
                 var message = (reply && reply.message) || refused;
                 return reject(name === 'TypeError' ? new TypeError(message) : new DOMException(message, name));
               }
-              unseal(reply.prf, keys).then(function (prf) {
-                if (prf) reply.prf = prf; else delete reply.prf;
+              Promise.all([unsealPrf(reply.prf, keys), unsealLargeBlob(reply.largeBlob, keys)]).then(function (both) {
+                if (both[0]) reply.prf = both[0]; else delete reply.prf;
+                if (both[1]) reply.largeBlob = both[1]; else delete reply.largeBlob;
                 resolve(credential(reply, extensions));
               });
             }, function () { reject(new DOMException(refused, 'NotAllowedError')); });
@@ -1143,7 +1257,8 @@ final class PasskeyRelay: NSObject, WKScriptMessageHandlerWithReply {
             kind: 'get', conditional: underField, challenge: encode(pk.challenge), rpId: pk.rpId || null,
             allowCredentials: descriptors(pk.allowCredentials),
             userVerification: pk.userVerification || 'preferred',
-            prf: prfInput(pk.extensions, pk.allowCredentials)
+            prf: prfInput(pk.extensions, pk.allowCredentials),
+            largeBlob: largeBlobInput(pk.extensions, false)
           };
         } catch (e) { return Promise.reject(e); }
         return send(request, signal, pk.extensions);
@@ -1166,7 +1281,8 @@ final class PasskeyRelay: NSObject, WKScriptMessageHandlerWithReply {
             residentKey: selection.residentKey || (selection.requireResidentKey ? 'required' : 'discouraged'),
             userVerification: selection.userVerification || 'preferred',
             attestation: pk.attestation || 'none',
-            prf: prfInput(pk.extensions, null)
+            prf: prfInput(pk.extensions, null),
+            largeBlob: largeBlobInput(pk.extensions, true)
           };
         } catch (e) { return Promise.reject(e); }
         return send(request, options.signal, pk.extensions);
@@ -1184,6 +1300,7 @@ final class PasskeyRelay: NSObject, WKScriptMessageHandlerWithReply {
           function ours(c) {
             c = Object.assign({}, c);
             Object.keys(c).forEach(function (k) { if (k.indexOf('extension:') === 0 && k !== 'extension:credProps') c[k] = false; });
+            c['extension:largeBlob'] = true;
             c['extension:prf'] = \(Passkeys.prfAvailable);
             return Object.assign(c, {
               conditionalCreate: false, conditionalGet: true, conditionalMediation: true, relatedOrigins: false,
