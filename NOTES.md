@@ -1,3 +1,5 @@
+Added a dedicated collapsible Agent tab group (with one-click Clear, right-click Move to My Tabs / Move to Agent Group, and session persistence) so agent-opened tabs stay cleanly separated from personal tabs, and made ⌘+click open links in a new foreground tab (⌘⇧+click for background).
+
 Inline /skills in the Agent composer and ⌘K switcher, @history mentions and local Personal Memory, YouTube video timestamp chat with clickable seeking, a floating selection action pill (Ask, Explain, Rewrite, Copy), a visual ⌃Tab MRU switcher with live previews, optional auto-archiving of stale unpinned tabs, and Lean-verified mutual exclusion across all modal overlays so ⌘K and ⌘Y can never stack.
 
 Zero-warm-time multi-agent ACP engine (Antigravity, Codegraff, OpenCode, Gemini, Grok, Devin, Hermes, Pi), universal Shield cosmetic safety fixing blank Gmail emails, smoother 120 FPS X.com scrolling, and symmetric Full Screen Agent card alignment with desktop viewport preservation.
