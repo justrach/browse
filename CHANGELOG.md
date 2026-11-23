@@ -6,6 +6,8 @@ All notable changes to **browse** are documented here, newest first.
 
 ## Unreleased
 
+## 1.8.6 — 23 November 2026
+
 ### Fixed
 
 - **Passkey sign-in on Apple Developer / Apple Account / iCloud (`Passkeys.swift`)**: implemented the WebAuthn `largeBlob` extension (`read`, `write`, and `support`, sealed over the existing one-time ECDH P-256 + HKDF-SHA256 + AES-GCM bridge and advertised via `extension:largeBlob` in `PublicKeyCredential.getClientCapabilities()`). Apple's `idmsa.apple.com` sign-in requires `largeBlob.blob` (`extensionData`) on passkey assertions and previously rejected otherwise-valid assertions with *"Your browser needs to be updated to support signing in with a passkey."*
