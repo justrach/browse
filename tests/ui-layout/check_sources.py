@@ -284,6 +284,20 @@ check(
     "120 FPS lockstep sidebar & Agent slide/resize: direct chrome/agentTrailing binding (zero 240ms snap, zero 1-frame lag), width-matched trailing transition, async WebKit live-resize, deferred UserDefaults commits",
 )
 
+# 18. Onboarding flow invariants (matches Browse.OnboardingFlow).
+welcome_research_src = read("Sources/Browse/WelcomeResearch.swift")
+check(
+    "browser.prefs.welcomed = true" in app_src
+    and "DragStrip()" in welcome
+    and "private func scanSources()" in welcome
+    and "hasApplicableSelection(for:" in welcome
+    and "done = !anyFailure" in welcome
+    and 'Button("Skip this step")' not in welcome
+    and 'Pill("Check again")' in welcome_research_src
+    and "didBecomeActiveNotification" in welcome,
+    "OnboardingFlow: Esc persists welcomed=true, draggable window band, async source scan, retryable partial import, single Continue CTA, live default-browser refresh",
+)
+
 if failures:
     print(f"\n{len(failures)} source guardrail check(s) failed.", file=sys.stderr)
     sys.exit(1)
