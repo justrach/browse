@@ -110,15 +110,24 @@ private struct TabPaletteView: View {
     }
 
     private var fallbackActions: [SwitcherAction] {
-        items.isEmpty ? browser.switcherFallbackActions(for: state.query) : []
-    }
-
-    private var selectedItem: SwitcherItem? {
-        items.first { $0.id == state.selectedID } ?? items.first
+        browser.switcherFallbackActions(
+            for: state.query,
+            excluding: items,
+            limit: items.isEmpty ? 7 : 4
+        )
     }
 
     private var selectedAction: SwitcherAction? {
-        fallbackActions.first { $0.id == state.selectedActionID } ?? fallbackActions.first
+        if let actionID = state.selectedActionID,
+           let match = fallbackActions.first(where: { $0.id == actionID }) {
+            return match
+        }
+        return items.isEmpty ? fallbackActions.first : nil
+    }
+
+    private var selectedItem: SwitcherItem? {
+        guard selectedAction == nil else { return nil }
+        return items.first { $0.id == state.selectedID } ?? items.first
     }
 
     private var selectedTab: Tab? { selectedItem?.tab }
@@ -194,6 +203,12 @@ private struct TabPaletteView: View {
 
     private func syncSelection() {
         let list = items
+        let actions = fallbackActions
+        if let currentAction = state.selectedActionID,
+           actions.contains(where: { $0.id == currentAction }) {
+            state.selectedID = nil
+            return
+        }
         if !list.isEmpty {
             state.selectedActionID = nil
             if let current = state.selectedID, list.contains(where: { $0.id == current }) {
@@ -203,10 +218,6 @@ private struct TabPaletteView: View {
             return
         }
         state.selectedID = nil
-        let actions = fallbackActions
-        if let current = state.selectedActionID, actions.contains(where: { $0.id == current }) {
-            return
-        }
         state.selectedActionID = actions.first?.id
     }
 
@@ -269,9 +280,22 @@ private struct TabPaletteView: View {
     }
 
     private func tabList(dark: Bool) -> some View {
-        ScrollViewReader { proxy in
+        let actions = fallbackActions
+        return ScrollViewReader { proxy in
             ScrollView {
                 LazyVStack(spacing: 2) {
+                    if !actions.isEmpty {
+                        HStack {
+                            Text("Open Tabs")
+                                .font(.system(size: 10.5, weight: .semibold))
+                                .foregroundStyle(Palette.muted)
+                            Spacer()
+                        }
+                        .padding(.horizontal, 10)
+                        .padding(.top, 2)
+                        .padding(.bottom, 3)
+                    }
+
                     ForEach(items) { item in
                         let tab = item.tab
                         let isSelected = item.id == selectedItem?.id
@@ -285,6 +309,7 @@ private struct TabPaletteView: View {
                             dark: dark,
                             onHover: { over in
                                 if over && !browser.cycling {
+                                    state.selectedActionID = nil
                                     state.selectedID = item.id
                                 }
                             },
@@ -297,11 +322,49 @@ private struct TabPaletteView: View {
                         )
                         .id(item.id)
                     }
+
+                    if !actions.isEmpty {
+                        HStack {
+                            Text("Sites & Web")
+                                .font(.system(size: 10.5, weight: .semibold))
+                                .foregroundStyle(Palette.muted)
+                            Spacer()
+                        }
+                        .padding(.horizontal, 10)
+                        .padding(.top, 10)
+                        .padding(.bottom, 3)
+
+                        ForEach(actions) { action in
+                            let isSelected = action.id == selectedAction?.id
+                            SwitcherActionRow(
+                                action: action,
+                                selected: isSelected,
+                                dark: dark,
+                                compact: true,
+                                onHover: { over in
+                                    if over && !browser.cycling {
+                                        state.selectedID = nil
+                                        state.selectedActionID = action.id
+                                    }
+                                },
+                                onSelect: {
+                                    browser.openActionFromSwitcher(action)
+                                }
+                            )
+                            .id(action.id)
+                        }
+                    }
                 }
                 .padding(8)
             }
             .scrollIndicators(.automatic)
             .onChange(of: state.selectedID) { _, id in
+                guard let id else { return }
+                withAnimation(Motion.quick) {
+                    proxy.scrollTo(id, anchor: .center)
+                }
+            }
+            .onChange(of: state.selectedActionID) { _, id in
                 guard let id else { return }
                 withAnimation(Motion.quick) {
                     proxy.scrollTo(id, anchor: .center)
@@ -441,7 +504,113 @@ private struct TabPaletteView: View {
                 }
             }
             .padding(16)
+        } else if let action = selectedAction {
+            actionPreview(action, dark: dark)
         }
+    }
+
+    private func actionPreview(_ action: SwitcherAction, dark: Bool) -> some View {
+        let iconName: String = switch action.kind {
+        case .url: "globe"
+        case .bookmark: "star.fill"
+        case .history: "clock"
+        case .search: "magnifyingglass"
+        }
+        let kindLabel: String = switch action.kind {
+        case .url: "Website"
+        case .bookmark: "Bookmark"
+        case .history: "Visited Site"
+        case .search: "Web Search"
+        }
+
+        return VStack(alignment: .leading, spacing: 14) {
+            ZStack {
+                RoundedRectangle(cornerRadius: 10, style: .continuous)
+                    .fill(dark ? Color.white.opacity(0.04) : Color.black.opacity(0.03))
+                    .overlay(
+                        RoundedRectangle(cornerRadius: 10, style: .continuous)
+                            .strokeBorder(
+                                dark ? Color.white.opacity(0.10) : Color.black.opacity(0.08),
+                                lineWidth: 0.75
+                            )
+                    )
+                VStack(spacing: 12) {
+                    Image(systemName: iconName)
+                        .font(.system(size: 28, weight: .regular))
+                        .foregroundStyle(action.kind == .bookmark ? Palette.accent : Palette.ink.opacity(0.75))
+                        .frame(width: 58, height: 58)
+                        .background(
+                            RoundedRectangle(cornerRadius: 14, style: .continuous)
+                                .fill(Palette.ink.opacity(dark ? 0.08 : 0.05))
+                        )
+                    Text(kindLabel)
+                        .font(.system(size: 11.5, weight: .medium))
+                        .foregroundStyle(Palette.muted)
+                }
+            }
+            .frame(maxWidth: .infinity)
+            .frame(height: 234)
+            .contentShape(Rectangle())
+            .onTapGesture { browser.openActionFromSwitcher(action) }
+
+            VStack(alignment: .leading, spacing: 4) {
+                Text(action.title)
+                    .font(.system(size: 13.5, weight: .semibold))
+                    .foregroundStyle(Palette.ink)
+                    .lineLimit(1)
+                    .truncationMode(.tail)
+                Text(action.subtitle)
+                    .font(.system(size: 11.5))
+                    .foregroundStyle(Palette.muted)
+                    .lineLimit(1)
+                    .truncationMode(.middle)
+            }
+
+            Spacer(minLength: 0)
+
+            HStack(spacing: 8) {
+                Button {
+                    browser.openActionFromSwitcher(action)
+                } label: {
+                    HStack(spacing: 5) {
+                        Text(action.kind == .search ? "Search Web" : "Open Website")
+                            .font(.system(size: 12, weight: .medium))
+                        Text("↩")
+                            .font(.system(size: 11, weight: .medium))
+                            .opacity(0.72)
+                    }
+                    .foregroundStyle(dark ? Color.black : Color.white)
+                    .padding(.horizontal, 12)
+                    .padding(.vertical, 6)
+                    .background(Capsule().fill(Palette.ink))
+                }
+                .buttonStyle(TactilePress())
+
+                Button {
+                    browser.openActionFromSwitcher(action, split: true)
+                } label: {
+                    HStack(spacing: 5) {
+                        Image(systemName: "rectangle.split.2x1")
+                            .font(.system(size: 10.5, weight: .medium))
+                        Text("Split")
+                            .font(.system(size: 12, weight: .medium))
+                        Text("⌘D")
+                            .font(.system(size: 10.5))
+                            .foregroundStyle(Palette.muted)
+                    }
+                    .foregroundStyle(Palette.ink)
+                    .padding(.horizontal, 10)
+                    .padding(.vertical, 6)
+                    .background(
+                        Capsule().fill(Palette.ink.opacity(dark ? 0.10 : 0.065))
+                    )
+                }
+                .buttonStyle(TactilePress())
+
+                Spacer(minLength: 0)
+            }
+        }
+        .padding(16)
     }
 
     private func webFallback(dark: Bool) -> some View {
@@ -507,12 +676,12 @@ private struct TabPaletteView: View {
     }
 
     private func footerBar(dark: Bool) -> some View {
-        let inSearch = items.isEmpty && !fallbackActions.isEmpty
+        let onAction = selectedAction != nil
         return HStack(spacing: 14) {
-            KeyHint(keys: "↑↓", label: inSearch ? "Select" : "Preview")
-            KeyHint(keys: "↩", label: inSearch ? "Open" : "Switch")
+            KeyHint(keys: "↑↓", label: items.isEmpty ? "Select" : "Preview")
+            KeyHint(keys: "↩", label: onAction ? (selectedAction?.kind == .search ? "Search" : "Open") : "Switch")
             KeyHint(keys: "⌘D", label: "Split")
-            if !inSearch {
+            if !onAction {
                 KeyHint(keys: "⌘⌫", label: "Close")
             }
             Spacer(minLength: 0)
@@ -529,6 +698,7 @@ private struct SwitcherActionRow: View {
     let action: SwitcherAction
     let selected: Bool
     let dark: Bool
+    var compact: Bool = false
     let onHover: (Bool) -> Void
     let onSelect: () -> Void
 
@@ -551,56 +721,58 @@ private struct SwitcherActionRow: View {
     }
 
     var body: some View {
-        HStack(spacing: 11) {
+        HStack(spacing: compact ? 9 : 11) {
             Image(systemName: iconName)
-                .font(.system(size: 13, weight: .medium))
+                .font(.system(size: compact ? 11.5 : 13, weight: .medium))
                 .foregroundStyle(action.kind == .bookmark ? Palette.accent : (selected ? Palette.ink : Palette.muted))
-                .frame(width: 28, height: 28)
+                .frame(width: compact ? 22 : 28, height: compact ? 22 : 28)
                 .background(
-                    RoundedRectangle(cornerRadius: 7, style: .continuous)
+                    RoundedRectangle(cornerRadius: compact ? 6 : 7, style: .continuous)
                         .fill(Palette.ink.opacity(selected ? (dark ? 0.14 : 0.08) : (dark ? 0.07 : 0.045)))
                 )
 
-            VStack(alignment: .leading, spacing: 2) {
+            VStack(alignment: .leading, spacing: compact ? 1 : 2) {
                 Text(action.title)
-                    .font(.system(size: 13.5, weight: selected ? .semibold : .medium))
+                    .font(.system(size: compact ? 12.5 : 13.5, weight: selected ? .semibold : .medium))
                     .foregroundStyle(Palette.ink)
                     .lineLimit(1)
                     .truncationMode(.tail)
                 Text(action.subtitle)
-                    .font(.system(size: 11.5))
+                    .font(.system(size: compact ? 11 : 11.5))
                     .foregroundStyle(Palette.muted)
                     .lineLimit(1)
                     .truncationMode(.middle)
             }
 
-            Spacer(minLength: 8)
+            Spacer(minLength: 6)
 
-            if selected {
-                HStack(spacing: 4) {
-                    Text(action.kind == .search ? "Search" : "Open")
-                        .font(.system(size: 11, weight: .medium))
-                    Text("↩")
+            if !compact {
+                if selected {
+                    HStack(spacing: 4) {
+                        Text(action.kind == .search ? "Search" : "Open")
+                            .font(.system(size: 11, weight: .medium))
+                        Text("↩")
+                            .font(.system(size: 10.5, weight: .medium))
+                            .opacity(0.75)
+                    }
+                    .foregroundStyle(dark ? Color.black : Color.white)
+                    .padding(.horizontal, 9)
+                    .padding(.vertical, 4)
+                    .background(Capsule().fill(Palette.ink))
+                } else {
+                    Text(badgeText)
                         .font(.system(size: 10.5, weight: .medium))
-                        .opacity(0.75)
+                        .foregroundStyle(Palette.muted)
+                        .padding(.horizontal, 7)
+                        .padding(.vertical, 3)
+                        .background(Capsule().fill(Palette.ink.opacity(dark ? 0.07 : 0.045)))
                 }
-                .foregroundStyle(dark ? Color.black : Color.white)
-                .padding(.horizontal, 9)
-                .padding(.vertical, 4)
-                .background(Capsule().fill(Palette.ink))
-            } else {
-                Text(badgeText)
-                    .font(.system(size: 10.5, weight: .medium))
-                    .foregroundStyle(Palette.muted)
-                    .padding(.horizontal, 7)
-                    .padding(.vertical, 3)
-                    .background(Capsule().fill(Palette.ink.opacity(dark ? 0.07 : 0.045)))
             }
         }
-        .padding(.horizontal, 10)
-        .padding(.vertical, 8)
+        .padding(.horizontal, compact ? 8 : 10)
+        .padding(.vertical, compact ? 6 : 8)
         .background(
-            RoundedRectangle(cornerRadius: 10, style: .continuous)
+            RoundedRectangle(cornerRadius: compact ? 8 : 10, style: .continuous)
                 .fill(selected ? Palette.ink.opacity(dark ? 0.11 : 0.065) : Color.clear)
         )
         .contentShape(Rectangle())
