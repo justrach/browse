@@ -68,9 +68,9 @@ struct Fold: View {
     @ObservedObject var browser: Browser
     @ObservedObject var prefs: Preferences
 
-    /// Slim top gutter in macOS Full Screen mode (reclaims 35pt of the 44pt
-    /// top bar while hosting non-overlapping spatial edge hints).
-    static let fullScreenGutter: CGFloat = 9
+    /// Slim top bezel in macOS Full Screen mode, matching `Split.gap` on all
+    /// four sides while hosting a single centered top-edge reveal handle.
+    static let fullScreenGutter: CGFloat = Split.gap
 
     /// The column going back in, a moment after the pointer left it.
     @State private var leaving: DispatchWorkItem?
@@ -153,16 +153,9 @@ struct Fold: View {
                     }
                     .transition(.move(edge: .top).combined(with: .opacity))
                 } else {
-                    FullscreenEdgeHints(
-                        browser: browser,
-                        sidebarFolded: prefs.sidebar && browser.folded,
-                        agentClosed: prefs.usesAgent && !browser.consulting,
-                        revealTop: { peekTop(true) },
-                        revealSidebar: { browser.peek(true) },
-                        openAgent: { browser.toggleAgent() }
-                    )
-                    .padding(.leading, sidebarVisible ? prefs.sideWidth : 0)
-                    .transition(.opacity)
+                    FullscreenEdgeHints(revealTop: { peekTop(true) })
+                        .padding(.leading, sidebarVisible ? prefs.sideWidth : 0)
+                        .transition(.opacity)
                 }
             }
             ZStack(alignment: .leading) {
@@ -568,74 +561,31 @@ private final class Pointer {
     }
 }
 
-/// Whisper-quiet spatial edge handles rendered in the slim 9pt fullscreen top
-/// gutter when the top bar is auto-hidden: they never cover page content, yet
-/// show at a glance where the hidden sidebar (left), address bar & controls
-/// (top center), and `graff` (top right) live.
+/// Single quiet centered handle rendered inside the pure-black Full Screen top
+/// bezel: zero corner clutter, never overlaps page content, and hovering or
+/// clicking glides the floating top bar down over the page.
 private struct FullscreenEdgeHints: View {
-    @ObservedObject var browser: Browser
-    let sidebarFolded: Bool
-    let agentClosed: Bool
     let revealTop: () -> Void
-    let revealSidebar: () -> Void
-    let openAgent: () -> Void
 
-    @State private var hoverLeft = false
     @State private var hoverCenter = false
-    @State private var hoverRight = false
 
     var body: some View {
-        // The fullscreen bezel canvas is pure #000000 black so edge handles
-        // always render in crisp translucent white.
-        let base = Color.white
-        ZStack {
-            HStack(spacing: 0) {
-                if sidebarFolded {
-                    Button(action: revealSidebar) {
-                        Capsule()
-                            .fill(base.opacity(hoverLeft ? 0.52 : 0.22))
-                            .frame(width: hoverLeft ? 28 : 22, height: 3)
-                            .frame(width: 44, height: Fold.fullScreenGutter, alignment: .leading)
-                            .contentShape(Rectangle())
-                    }
-                    .buttonStyle(.plain)
-                    .padding(.leading, 14)
-                    .onHover { hoverLeft = $0 }
-                    .help("Sidebar at left edge   ⌘S")
-                }
-
-                Spacer(minLength: 0)
-
-                if agentClosed {
-                    Button(action: openAgent) {
-                        Capsule()
-                            .fill(Palette.accent.opacity(hoverRight ? 0.80 : 0.42))
-                            .frame(width: hoverRight ? 28 : 22, height: 3)
-                            .frame(width: 44, height: Fold.fullScreenGutter, alignment: .trailing)
-                            .contentShape(Rectangle())
-                    }
-                    .buttonStyle(.plain)
-                    .padding(.trailing, 14)
-                    .onHover { hoverRight = $0 }
-                    .help("Open graff   ⌘;")
-                }
-            }
-
+        HStack {
+            Spacer(minLength: 0)
             Button(action: revealTop) {
                 Capsule()
-                    .fill(base.opacity(hoverCenter ? 0.54 : 0.26))
-                    .frame(width: hoverCenter ? 64 : 50, height: 3.5)
+                    .fill(Color.white.opacity(hoverCenter ? 0.50 : 0.22))
+                    .frame(width: hoverCenter ? 58 : 44, height: 2.5)
                     .frame(width: 96, height: Fold.fullScreenGutter)
                     .contentShape(Rectangle())
             }
             .buttonStyle(.plain)
             .onHover { hoverCenter = $0 }
             .help("Hover or click top edge for address bar & controls")
+            Spacer(minLength: 0)
         }
         .frame(maxWidth: .infinity)
         .frame(height: Fold.fullScreenGutter)
-        .animation(Motion.quick, value: hoverLeft)
         .animation(Motion.quick, value: hoverCenter)
-        .animation(Motion.quick, value: hoverRight)
     }
 }
