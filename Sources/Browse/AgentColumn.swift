@@ -18,9 +18,15 @@ struct AgentColumn: View {
 
     /// The whole stage rather than a column beside it (see Browser.agentFull).
     var full = false
-    /// True when sitting beside AsideBar at full window height (`y = 0`), so
-    /// the header matches `Metrics.strip` and acts as a window drag surface.
+    /// True when sitting beside AsideBar or framed in Full Screen (`y = 0`), so
+    /// the card matches the webpage card's 10pt squircle and 6pt bezel symmetry.
     var fullHeight = false
+    /// True when the surrounding canvas is dark (e.g. pure-black macOS Full Screen).
+    var darkCanvas = false
+    /// True when the window is too narrow to dock beside a desktop webpage,
+    /// floating the agent panel as an elevated trailing drawer instead of
+    /// squeezing the page down to mobile width.
+    var overlayDrawer = false
 
     @FocusState private var typing: Bool
     @State private var confirmingReconnect = false
@@ -38,7 +44,9 @@ struct AgentColumn: View {
 
     var body: some View {
         let card = RoundedRectangle(cornerRadius: Split.corner, style: .continuous)
-        let floatingCard = fullHeight && !full
+        let floatingCard = (fullHeight || overlayDrawer) && !full
+        let darkRim = darkCanvas || scheme == .dark
+        let cardWidth: CGFloat? = full ? nil : max(200, prefs.agentWidth - (floatingCard ? Split.gap * 2 : 0))
         VStack(spacing: 0) {
             if agent.writeMode {
                 if full || !fullHeight { head }
@@ -58,19 +66,20 @@ struct AgentColumn: View {
             }
         }
         .animation(Motion.quick, value: agent.writeMode)
-        .frame(maxWidth: .infinity, maxHeight: .infinity)
+        .frame(minWidth: 0, maxWidth: .infinity, maxHeight: .infinity)
+        .frame(width: cardWidth)
         .background(Palette.ground)
         .clipShape(RoundedRectangle(cornerRadius: floatingCard ? Split.corner : 0, style: .continuous))
         .overlay {
             if floatingCard {
                 ZStack {
                     card.strokeBorder(
-                        scheme == .dark ? Color.white.opacity(0.095) : Color.black.opacity(0.075),
+                        darkRim ? Color.white.opacity(0.095) : Color.black.opacity(0.075),
                         lineWidth: 0.75
                     )
                     PageShimmerRim(
                         corner: Split.corner,
-                        dark: scheme == .dark,
+                        dark: darkRim,
                         working: agent.phase == .working && agent.withPage && browser.active?.isBlank == false,
                         settling: false
                     )
@@ -78,9 +87,12 @@ struct AgentColumn: View {
             }
         }
         .shadow(
-            color: floatingCard ? .black.opacity(scheme == .dark ? 0.26 : 0.06) : .clear,
-            radius: scheme == .dark ? 8 : 5,
-            y: 1.5
+            color: overlayDrawer
+                ? .black.opacity(darkRim ? 0.42 : 0.16)
+                : (floatingCard ? .black.opacity(darkRim ? 0.26 : 0.06) : .clear),
+            radius: overlayDrawer ? 22 : (darkRim ? 8 : 5),
+            x: overlayDrawer ? -4 : 0,
+            y: overlayDrawer ? 6 : 1.5
         )
         .padding(.top, 0)
         .padding(.trailing, floatingCard ? Split.gap : 0)
@@ -645,6 +657,7 @@ private struct NanoModelPopover: View {
             .onAppear {
                 highlightedID = current.id
                 agent.refreshBackends()
+                agent.prewarmSecondaryBackends()
                 DispatchQueue.main.async { searchFocused = true }
             }
     }

@@ -45,6 +45,8 @@ struct ProviderMark: View {
         case "deepseek": hex = 0x3964fe
         case "google", "gemini", "antigravity": hex = 0x3186ff
         case "opencode": hex = dark ? 0x9ca3af : 0x374151
+        case "devin": hex = 0x10b981
+        case "hermes": hex = 0xf59e0b
         case "pi": hex = 0x8b5cf6
         case "minimax": hex = 0x1887fb
         case "xiaomi": hex = 0xff6900

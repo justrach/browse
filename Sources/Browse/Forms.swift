@@ -263,7 +263,9 @@ final class FormRelay: NSObject, WKScriptMessageHandler {
       setTimeout(tell, 700);
       setTimeout(tell, 2200);
       // Debounced so high-frequency DOM mutations (X/Twitter, SPAs, Speedometer)
-      // never schedule timers or touch layout when no password input is present.
+      // never call `liveInputs.length` synchronously inside MutationObserver
+      // microtasks — reading a live HTMLCollection right after DOM mutations
+      // forces WebKit to re-walk the entire 15,000-node DOM tree before paint!
       var settling = null;
       var scanTimer = null;
       function scanMutation() {
@@ -280,9 +282,23 @@ final class FormRelay: NSObject, WKScriptMessageHandler {
           window.webkit.messageHandlers.officeForms.postMessage({ kind: 'settled' });
         }, 400);
       }
-      new MutationObserver(function () {
-        if (scanTimer || (!told && !hasPasswordInput())) return;
-        scanTimer = setTimeout(scanMutation, 250);
+      new MutationObserver(function (records) {
+        if (scanTimer) return;
+        if (told) {
+          scanTimer = setTimeout(scanMutation, 400);
+          return;
+        }
+        // Only schedule a debounced scan when an element node was added —
+        // never traverse the live HTMLCollection on every scroll mutation.
+        for (var i = 0; i < records.length; i++) {
+          var added = records[i].addedNodes;
+          for (var j = 0; j < added.length; j++) {
+            if (added[j].nodeType === 1) {
+              scanTimer = setTimeout(scanMutation, 900);
+              return;
+            }
+          }
+        }
       }).observe(document.documentElement, { childList: true, subtree: true });
 
       // Whether the caret is somewhere on the page that takes typing.

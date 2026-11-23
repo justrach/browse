@@ -155,7 +155,7 @@ enum Metrics {
     static let sideMax: CGFloat = 440
     /// The agent's column down the right, when it is on (see Agent.swift).
     static let agent: CGFloat = 360
-    static let agentMin: CGFloat = 280
+    static let agentMin: CGFloat = 300
     static let agentMax: CGFloat = 640
     /// The measure its talk is held to when it fills the stage (see
     /// AgentColumn.swift).
@@ -508,16 +508,17 @@ struct PageShimmerRim: View {
                     center: .center,
                     angle: .degrees(Motion.reduced ? 45 : spin)
                 )
+                // Lightweight dual-stroke luminous rim without a full-window
+                // Gaussian `.blur()` pass so scrolling heavy SPAs (like X.com)
+                // stays locked at 120 FPS even while the agent is working.
                 ZStack {
-                    // Diffused inner bloom (clipped cleanly to the card squircle).
                     shape
-                        .strokeBorder(gradient, lineWidth: 3.5)
-                        .blur(radius: 3.5)
-                        .opacity(dark ? 0.55 : 0.45)
-                    // Crisp hairline highlight tracing the card rim.
+                        .strokeBorder(gradient, lineWidth: 2.5)
+                        .opacity(dark ? 0.28 : 0.22)
                     shape
                         .strokeBorder(gradient, lineWidth: 1.25)
                 }
+                .drawingGroup()
                 .clipShape(shape)
                 .transition(.opacity)
                 .onAppear {
