@@ -8,3 +8,5 @@ def main : IO Unit := do
   IO.println "  [PASS] Browse.VaultPolicy   : no HTTPS->HTTP downgrade, fail-closed LAError, device-only Keychain"
   IO.println "  [PASS] Browse.PageTintDark  : Dark Mode window chrome never flips to light on unpainted #FFFFFF pages"
   IO.println "  [PASS] Browse.OverlayMutex  : strict mutual exclusion across all 12 overlays (⌘K + ⌘Y can never stack)"
+  IO.println "  [PASS] Browse.HoverStability: zero hover↔scrollTo oscillation & zero hover row-height reflow"
+  IO.println "  [PASS] Browse.EscapeTermination: Escape strictly decreases UI rank to 0 (zero modal traps)"

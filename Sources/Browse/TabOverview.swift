@@ -983,10 +983,9 @@ private struct TabOverviewGridView: View {
                             .padding(.top, 4)
                             .padding(.bottom, 32)
                         }
-                        .onChange(of: state.selectedID) { _, id in
-                            guard let id else { return }
-                            withAnimation(Motion.quick) {
-                                proxy.scrollTo(id, anchor: .center)
+                        .onChange(of: state.keyboardScrollTick) { _, _ in
+                            if let id = state.selectedID {
+                                proxy.scrollTo(id)
                             }
                         }
                     }
@@ -1168,7 +1167,7 @@ private struct TabOverviewCard: View {
                         .background(Capsule().fill(Palette.accent.opacity(0.14)))
                 }
                 Spacer(minLength: 4)
-                if hovering {
+                ZStack(alignment: .trailing) {
                     HStack(spacing: 4) {
                         if space == nil && !active && !tab.isBlank {
                             Button(action: onSplit) {
@@ -1191,8 +1190,9 @@ private struct TabOverviewCard: View {
                         .buttonStyle(.plain)
                         .help("Close tab")
                     }
-                    .transition(.opacity)
-                } else {
+                    .opacity(hovering ? 1 : 0)
+                    .allowsHitTesting(hovering)
+
                     HStack(spacing: 4) {
                         if tab.noisy || tab.muted {
                             Image(systemName: tab.muted ? "speaker.slash.fill" : "speaker.wave.2.fill")
@@ -1215,7 +1215,10 @@ private struct TabOverviewCard: View {
                                 .foregroundStyle(Palette.muted.opacity(0.75))
                         }
                     }
+                    .opacity(hovering ? 0 : 1)
+                    .allowsHitTesting(false)
                 }
+                .frame(height: 20)
             }
             .padding(.horizontal, 10)
             .frame(height: 34)
@@ -1276,8 +1279,7 @@ private struct TabOverviewCard: View {
             radius: hovering || selected ? 16 : 8,
             y: hovering || selected ? 6 : 2
         )
-        .scaleEffect(!Motion.reduced && hovering ? 1.014 : 1.0)
-        .animation(Motion.snappy, value: hovering)
+        .animation(Motion.quick, value: hovering)
         .animation(Motion.quick, value: selected)
         .contentShape(shape)
         .onHover { hovering = $0 }

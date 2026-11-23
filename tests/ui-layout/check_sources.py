@@ -214,6 +214,28 @@ check(
     f"All 12 modal overlays enforce mutual exclusion via dismissOverlays(keeping:) (missing: {missing_guards})",
 )
 
+# 15. Hover stability (matches Browse.HoverStability): no hover↔scrollTo feedback
+# loops, no bouncy anchor: .center on selection change, and no hover row-height reflow.
+recall_src = read("Sources/Browse/Recall.swift")
+passwords_src = read("Sources/Browse/Passwords.swift")
+check(
+    "proxy.scrollTo(id, anchor: .center)" not in tab_overview
+    and ".onChange(of: state.keyboardScrollTick)" in tab_overview
+    and not re.search(r"(?m)^\s*if hovering\b", tab_overview)
+    and not re.search(r"(?m)^\s*if hovering\b", recall_src)
+    and not re.search(r"(?m)^\s*if hovering\b", passwords_src),
+    "Hover stability: keyboard-only scrollTo (no hover↔scrollTo loop) and fixed-slot opacity rows in TabOverview, Recall, and Passwords",
+)
+
+# 16. Escape-key termination (matches Browse.EscapeTermination): no modal traps.
+check(
+    "if browser.bookmarksOpen {" in app_src
+    and "if browser.welcoming {" in app_src
+    and "if !browser.recallHunt.isEmpty {" in app_src
+    and "!browser.hasModalOverlay" in app_src,
+    "Escape-key termination: Escape dismisses bookmarksOpen, welcoming, and History search query before closing",
+)
+
 if failures:
     print(f"\n{len(failures)} source guardrail check(s) failed.", file=sys.stderr)
     sys.exit(1)

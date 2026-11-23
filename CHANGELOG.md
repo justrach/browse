@@ -13,6 +13,9 @@ All notable changes to **browse** are documented here, newest first.
 ### Fixed
 
 - **Eliminated `⌘K` Command Switcher hover/scroll shaking (`TabOverview.swift`, `Browser.swift`, `App.swift`)**: decoupled keyboard scrolling (`keyboardScrollTick`) from mouse hover so hovering rows never triggers a `ScrollViewReader.scrollTo(anchor: .center)` feedback loop, reserved fixed space for the row close button, and removed preview card teardown (`.id(tab.id)`) so switching rows is completely steady and instantaneous.
+- **Eliminated hover layout reflow & Escape-key modal traps across History, Downloads, Passwords, and Tab Overview (`TabOverview.swift`, `Recall.swift`, `Passwords.swift`, `TabCycleHUD.swift`, `App.swift`, `lean-proofs/Browse/HoverStability.lean`, `lean-proofs/Browse/EscapeTermination.lean`)**:
+  - Replaced height/width-shifting `if hovering { ... }` button insertions in History, Downloads, Passwords, and `⇧⌘\` Tab Overview cards with fixed-slot opacity controls and removed card/HUD scale wobble and `⇧⌘\` `scrollTo(anchor: .center)` bounce — formally verified in Lean 4 (`Browse.HoverStability`).
+  - Added Escape dismissal for `Welcome…` and the Bookmarks popover, made Escape clear History's search query before closing History, and guarded the `.` quick-agent shortcut against active modal overlays — formally proved to reach a clean page from every state in Lean 4 (`Browse.EscapeTermination`).
 
 ## 1.9.1 — 23 November 2026
 

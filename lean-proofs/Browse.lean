@@ -4,3 +4,5 @@ import Browse.OmniboxRank
 import Browse.VaultPolicy
 import Browse.PageTintDark
 import Browse.OverlayMutex
+import Browse.HoverStability
+import Browse.EscapeTermination

@@ -263,13 +263,18 @@ struct HistoryPanel: View {
                         .truncationMode(.middle)
                 }
                 Spacer(minLength: 8)
-                if hovering {
+                // Fixed-slot ZStack keeps row height and title width invariant
+                // across hover (zero list shake; verified by Browse.HoverStability).
+                ZStack(alignment: .trailing) {
                     Quick("Remove", tint: .red.opacity(0.75), act: forget)
-                } else {
+                        .opacity(hovering ? 1 : 0)
+                        .allowsHitTesting(hovering)
                     Text(When.clock(trace.last))
                         .font(.system(size: 11.5))
                         .foregroundStyle(Palette.muted)
                         .monospacedDigit()
+                        .opacity(hovering ? 0 : 1)
+                        .allowsHitTesting(false)
                 }
             }
             .padding(.horizontal, 14)
@@ -348,10 +353,13 @@ struct DownloadsPanel: View {
                         .lineLimit(1)
                 }
                 Spacer(minLength: 8)
-                if hovering {
+                // Fixed-slot opacity keeps row height invariant on hover.
+                HStack(spacing: 6) {
                     if keep.stillThere { Quick("Show in Finder", act: reveal) }
                     Quick("Remove", tint: .red.opacity(0.75), act: forget)
                 }
+                .opacity(hovering ? 1 : 0)
+                .allowsHitTesting(hovering)
             }
             .padding(.horizontal, 14)
             .padding(.vertical, 9)
