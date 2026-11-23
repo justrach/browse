@@ -8,7 +8,7 @@ All notable changes to **browse** are documented here, newest first.
 
 ### Added
 
-- **Auto-hiding Full Screen top panel with pure black bezel canvas & edge hints (`App.swift`, `Fold.swift`, `AsideBar.swift`, `Side.swift`, `Split.swift`, `Browser.swift`)**: entering macOS Full Screen switches the surrounding frame canvas to pure `#000000` black (blending seamlessly into the macOS menu bar and physical display bezel, with dark chrome on the peeking top bar, sidebar, and Split View headers) and frees up the 44pt top panel (`AsideBar` / `TabBar`) into a slim 9pt top gutter (reclaiming 35pt of vertical screen space). Subtle, non-overlapping edge handles in the gutter show where the hidden sidebar (left), address bar & controls (center), and `graff` (right) live; hovering the top edge or clicking the center handle smoothly slides the floating top bar down over the page without WebKit reflow.
+- **Auto-hiding Full Screen top panel with pure black bezel canvas (`App.swift`, `Fold.swift`, `AsideBar.swift`, `Side.swift`, `Split.swift`, `Browser.swift`)**: entering macOS Full Screen switches the surrounding frame canvas to pure `#000000` black (blending seamlessly into the macOS menu bar and physical display bezel, with dark chrome on the peeking top bar, sidebar, and Split View headers) and frees up the 44pt top panel (`AsideBar` / `TabBar`) into a uniform 6pt top bezel with a single centered reveal handle (reclaiming 38pt of vertical screen space). Hovering the top edge or clicking the centered handle smoothly slides the floating top bar down over the page without WebKit reflow.
 
 ## 1.8.6 — 23 November 2026
 
