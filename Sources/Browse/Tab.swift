@@ -1427,6 +1427,27 @@ final class PageView: WKWebView {
         splitLiveResizing || super.inLiveResize
     }
 
+    /// Tells the hosting `StageView` + WebKit to switch into async live-resize
+    /// mode (with background colour backing) so edge drags and sidebar slides
+    /// run at 120 FPS without synchronous `DidUpdateGeometry` main-thread stalls.
+    func beginLiveResize() {
+        if let stage = superview as? StageView {
+            stage.startLiveResize()
+        } else if !splitLiveResizing {
+            splitLiveResizing = true
+            viewWillStartLiveResize()
+        }
+    }
+
+    func endLiveResize() {
+        if let stage = superview as? StageView {
+            stage.endLiveResize()
+        } else if splitLiveResizing {
+            splitLiveResizing = false
+            viewDidEndLiveResize()
+        }
+    }
+
     /// What extensions added to the right-click menu, at the end of it.
     override func willOpenMenu(_ menu: NSMenu, with event: NSEvent) {
         super.willOpenMenu(menu, with: event)

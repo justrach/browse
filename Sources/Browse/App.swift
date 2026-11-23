@@ -638,15 +638,19 @@ struct ContentView: View {
         // Suppress WebKit's synchronous geometry wait during the spring slide
         // so ⌘S folds and unfolds smoothly without frame drops or right-edge stalls.
         let pageViews = visiblePageViews
+        if browser.prefs.isDraggingSideWidth {
+            withTransaction(still) { room = new }
+            return
+        }
         if !Motion.reduced && (old.width != new.width || old.height != new.height) {
-            pageViews.forEach { $0.splitLiveResizing = true }
+            pageViews.forEach { $0.beginLiveResize() }
         }
         // With Reduce Motion on, nothing slides: the page takes its new room
         // with the chrome, not after a slide that isn't there.
         withTransaction(still) { room = Motion.reduced ? new : at }
         let ticket = roomTicket
         if Motion.reduced {
-            pageViews.forEach { $0.splitLiveResizing = false }
+            pageViews.forEach { $0.endLiveResize() }
             return
         }
         DispatchQueue.main.asyncAfter(deadline: .now() + 0.26) {
@@ -654,27 +658,31 @@ struct ContentView: View {
             if arriving.0 || arriving.1 {
                 withTransaction(still) { room = chrome }
             }
-            pageViews.forEach { $0.splitLiveResizing = false }
+            pageViews.forEach { $0.endLiveResize() }
         }
     }
 
     /// Same deferred single-resize strategy for the right-side Agent sidebar:
     /// sliding in glides smoothly over the page at 120 FPS and resizes WebKit
     /// once when settled; sliding out widens WebKit once immediately; live edge
-    /// drags follow with `splitLiveResizing` enabled.
+    /// drags follow directly with async WebKit live-resize and zero timers.
     private func makeAgent(room new: CGFloat, after old: CGFloat) {
         guard old != new else { return }
-        let arriving = old == 0 && new > 0
-        agentRoomTicket += 1
         var still = Transaction()
         still.disablesAnimations = true
+        if browser.prefs.isDraggingAgentWidth {
+            withTransaction(still) { agentRoom = new }
+            return
+        }
+        let arriving = old == 0 && new > 0
+        agentRoomTicket += 1
         let pageViews = visiblePageViews
         if !Motion.reduced {
-            pageViews.forEach { $0.splitLiveResizing = true }
+            pageViews.forEach { $0.beginLiveResize() }
         }
         if Motion.reduced {
             withTransaction(still) { agentRoom = new }
-            pageViews.forEach { $0.splitLiveResizing = false }
+            pageViews.forEach { $0.endLiveResize() }
             return
         }
         let sliding = (old == 0 && new > 0) || (old > 0 && new == 0)
@@ -688,7 +696,7 @@ struct ContentView: View {
             if arriving {
                 withTransaction(still) { agentRoom = agentTrailing }
             }
-            pageViews.forEach { $0.splitLiveResizing = false }
+            pageViews.forEach { $0.endLiveResize() }
             if sliding {
                 DispatchQueue.main.asyncAfter(deadline: .now() + 0.10) {
                     guard ticket == agentRoomTicket else { return }
@@ -1112,6 +1120,8 @@ struct ContentView: View {
     /// elevated trailing drawer instead of crushing `WKWebView`.
     private var floatingAgentDrawer: Bool {
         guard consulting && !browser.agentFull else { return false }
+        // Never flip docked ↔ floating mid-drag while pulling the Agent edge.
+        if browser.prefs.isDraggingAgentWidth { return false }
         let sideW: CGFloat = sidebar ? browser.prefs.sideWidth : 0
         let remaining = windowWidth - sideW - browser.prefs.agentWidth
         return remaining < 760
@@ -1156,7 +1166,7 @@ struct ContentView: View {
             let dx = target.origin.x - window.frame.origin.x
             agentWindowDelta = (width: growth, originX: dx, expandedWidth: target.size.width)
             windowWidth = target.size.width
-            window.setFrame(target, display: true, animate: !Motion.reduced)
+            animateWindowFrame(window, to: target)
         } else if let delta = agentWindowDelta {
             agentWindowDelta = nil
             // Only restore if the user didn't manually resize the window far away.
@@ -1165,7 +1175,22 @@ struct ContentView: View {
             target.size.width = max(640, target.size.width - delta.width)
             target.origin.x -= delta.originX
             windowWidth = target.size.width
-            window.setFrame(target, display: true, animate: !Motion.reduced)
+            animateWindowFrame(window, to: target)
+        }
+    }
+
+    /// Non-blocking CoreAnimation window frame transition so NSWindow widening
+    /// glides in lockstep with SwiftUI's 120 Hz AgentColumn slide (unlike
+    /// `window.setFrame(..., animate: true)` which runs a blocking nested runloop).
+    private func animateWindowFrame(_ window: NSWindow, to target: NSRect) {
+        if Motion.reduced {
+            window.setFrame(target, display: true, animate: false)
+            return
+        }
+        NSAnimationContext.runAnimationGroup { ctx in
+            ctx.duration = 0.22
+            ctx.timingFunction = CAMediaTimingFunction(name: .easeOut)
+            window.animator().setFrame(target, display: true)
         }
     }
 
