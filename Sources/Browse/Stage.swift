@@ -299,7 +299,8 @@ final class StageView: NSView {
         super.layout()
         let size = bounds.size
         if size != lastSize {
-            if lastSize.width > 0, lastSize.height > 0, size.width > 0, size.height > 0 {
+            if lastSize.width > 0, lastSize.height > 0, size.width > 0, size.height > 0,
+               backedWeb !== (wanted as? WKWebView) {
                 backPage()
             }
             lastSize = size
@@ -363,6 +364,14 @@ final class StageView: NSView {
         liveResizingWeb = nil
         (web as? PageView)?.splitLiveResizing = false
         web.viewDidEndLiveResize()
+        // Schedule a single unback once live-resize finishes instead of
+        // cancelling/reallocating timers on every intermediate 120 Hz frame.
+        if backedWeb != nil {
+            unback?.cancel()
+            let work = DispatchWorkItem { [weak self] in self?.unbackPage() }
+            unback = work
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.5, execute: work)
+        }
     }
 
     /// Keep the page's own background colour behind WebKit during live resize

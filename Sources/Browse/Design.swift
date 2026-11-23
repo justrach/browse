@@ -179,6 +179,15 @@ enum Motion {
         reduced ? .easeOut(duration: 0.14) : .spring(response: 0.24, dampingFraction: 0.88)
     }
 
+    /// Smooth, zero-overshoot deceleration curve for ⌘; Agent & ⌘S Sidebar
+    /// slides (0.36 s ≈ 43 frames at 120 Hz) — gives WebKit generous time for
+    /// its single reflow and matches `animateWindowFrame`'s exact CoreAnimation
+    /// cubic-bezier `(0.22, 1.0, 0.36, 1.0)` with zero bounce.
+    static let panelSlideDuration: TimeInterval = 0.36
+    static var panelSlide: Animation? {
+        reduced ? .easeOut(duration: 0.16) : .timingCurve(0.22, 1.0, 0.36, 1.0, duration: panelSlideDuration)
+    }
+
     /// Snappy spring for list rows and arriving/departing cards.
     static var settle: Animation? {
         reduced ? .easeOut(duration: 0.14) : .spring(response: 0.24, dampingFraction: 0.88)
