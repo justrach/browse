@@ -68,8 +68,15 @@ final class HoveredLink: NSObject, WKScriptMessageHandler {
 
         let pendingEvent = null;
         let raf = 0;
+        // Track actual pointer coordinates so synthetic scroll-induced mouseover
+        // events (links sliding under a stationary cursor on GitHub, HN, X, etc.)
+        // produce ZERO DOM walks, ZERO IPC, and ZERO SwiftUI LinkBubble redraws.
+        let lastX = -1, lastY = -1;
         addEventListener('mouseover', event => {
             if (!state.on) return;
+            if (event.clientX === lastX && event.clientY === lastY) return;
+            lastX = event.clientX;
+            lastY = event.clientY;
             pendingEvent = event;
             if (raf) return;
             raf = requestAnimationFrame(() => {
@@ -85,7 +92,12 @@ final class HoveredLink: NSObject, WKScriptMessageHandler {
             });
         }, { passive: true, capture: true });
         // Leaving the frame altogether: there is no next element to enter.
-        addEventListener('mouseout', event => { if (!event.relatedTarget) report(''); }, { passive: true, capture: true });
+        addEventListener('mouseout', event => {
+            if (!event.relatedTarget) {
+                lastX = -1; lastY = -1;
+                report('');
+            }
+        }, { passive: true, capture: true });
         addEventListener('pagehide', () => report(''));
     })();
     """

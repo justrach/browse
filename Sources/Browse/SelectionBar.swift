@@ -53,9 +53,20 @@ final class SelectionRelay: NSObject, WKScriptMessageHandler {
       var shown = false;
       var timer = null;
 
+      function show(payload) {
+        if (!shown) {
+          shown = true;
+          // Attach scroll listener ONLY while selection pill is visible —
+          // zero capture scroll listeners during normal browsing.
+          window.addEventListener('scroll', hide, { passive: true, capture: true });
+        }
+        window.webkit.messageHandlers.\(name).postMessage(payload);
+      }
+
       function hide() {
         if (!shown) return;
         shown = false;
+        window.removeEventListener('scroll', hide, true);
         window.webkit.messageHandlers.\(name).postMessage({ clear: true });
       }
 
@@ -85,8 +96,7 @@ final class SelectionRelay: NSObject, WKScriptMessageHandler {
             if (val.length >= 12) {
               var ar = active.getBoundingClientRect();
               if (ar.width > 0 && ar.height > 0) {
-                shown = true;
-                window.webkit.messageHandlers.\(name).postMessage({
+                show({
                   text: val.slice(0, 3500),
                   rect: { x: ar.left, y: ar.top, w: ar.width, h: Math.min(ar.height, 44) },
                   editable: true
@@ -109,8 +119,7 @@ final class SelectionRelay: NSObject, WKScriptMessageHandler {
         var rect = range.getBoundingClientRect();
         if (!rect || (rect.width === 0 && rect.height === 0)) { hide(); return; }
         if (rect.bottom < 0 || rect.top > window.innerHeight) { hide(); return; }
-        shown = true;
-        window.webkit.messageHandlers.\(name).postMessage({
+        show({
           text: text.slice(0, 3500),
           rect: { x: rect.left, y: rect.top, w: rect.width, h: rect.height },
           editable: ed === true
@@ -127,7 +136,6 @@ final class SelectionRelay: NSObject, WKScriptMessageHandler {
         if (e.shiftKey || e.key === 'a' || e.key === 'A') schedule();
       }, { passive: true, capture: true });
       document.addEventListener('mousedown', hide, { passive: true, capture: true });
-      window.addEventListener('scroll', hide, { passive: true, capture: true });
       window.addEventListener('pagehide', hide, { passive: true });
     })();
     """
