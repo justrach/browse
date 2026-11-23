@@ -6,6 +6,8 @@ All notable changes to **browse** are documented here, newest first.
 
 ## Unreleased
 
+## 1.8.7 — 23 November 2026
+
 ### Added
 
 - **Unified `⌘K` Command Switcher — open tabs, sites, and web search together (`Browser.swift`, `TabOverview.swift`)**: typing in `⌘K` now surfaces direct URLs, matching bookmarks & visited sites (prioritizing exact visited host labels like `apple` → `apple.com`), and web search with your configured engine both below matching open tabs (deduplicated against open tabs, with a right-side action preview pane) and as a full search/launcher view when no open tabs match — all navigable with `↑`/`↓`, `↩` (switch/open), and `⌘D` (open in Split View).

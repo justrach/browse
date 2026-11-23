@@ -1,3 +1,5 @@
+Auto-hiding Full Screen top panel with a seamless pure-black bezel canvas and centered reveal handle, plus a unified ⌘K Command Switcher that surfaces websites, bookmarks, history, and web search alongside open tabs.
+
 Fix Apple Developer and Apple Account passkey sign-in via WebAuthn largeBlob support, and eliminate bright corner bleed artifacts on rounded page cards.
 
 Image pasting and Fast/Ultra Fast speed modes in graff, Dark Mode chrome fix on dark SPAs, major X/Twitter and main-thread performance optimizations (48× faster History, 59× faster Bookmarks), and Lean 4 formal verification proofs.
