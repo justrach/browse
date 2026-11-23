@@ -462,6 +462,15 @@ final class Tab: ObservableObject, Identifiable {
     /// a job, not for a page.
     @Published var name: String?
 
+    /// Non-nil when this tab lives in the dedicated Agent tab group (opened
+    /// by the agentic browser via MCP tools, citations, or moved there by the
+    /// user) so agent-driven browsing stays cleanly separated from personal tabs.
+    @Published var agentGroup: String?
+
+    /// True while this tab is grouped under the Agent tab group (pinning a tab
+    /// promotes it out of the Agent group into the pinned grid).
+    var isAgentTab: Bool { agentGroup != nil && pin == nil }
+
     /// When you last looked at it. The summon lists pages by this, because
     /// what you were just reading is what you are most likely to want back.
     private(set) var touched = Date()

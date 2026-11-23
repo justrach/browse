@@ -21,6 +21,8 @@ struct SideBar: View {
     @State private var onEdge = false
     @State private var headerHover = false
     @State private var clearHover = false
+    @State private var agentHeaderHover = false
+    @State private var agentClearHover = false
     @ObservedObject private var shortcuts = ShortcutStore.shared
 
     /// A pin, picked up out of the grid — a separate state from the loose
@@ -330,15 +332,21 @@ struct SideBar: View {
         let pinRows = pins == 0 ? 0 : (pins + cols - 1) / cols
         let pinBlock = pinRows == 0 ? 0
             : CGFloat(pinRows) * pinHeight + CGFloat(pinRows - 1) * SideBar.pinGap + 10
-        let loose = CGFloat(browser.tabs.count - pins) * (SideBar.row + SideBar.gap)
+        let agentCount = agentTabs.count
+        let agentBlock: CGFloat = agentCount == 0 ? 0 : (
+            SideBar.todayHeight + 4
+            + (browser.agentGroupCollapsed ? 0 : CGFloat(agentCount) * (SideBar.row + SideBar.gap) + 6)
+        )
+        let loose = CGFloat(looseTabs.count) * (SideBar.row + SideBar.gap)
         let newRow = SideBar.row + SideBar.gap
-        return Metrics.strip + pinBlock + SideBar.todayHeight + newRow + loose + 8
+        return Metrics.strip + pinBlock + agentBlock + SideBar.todayHeight + newRow + loose + 8
     }
 
     // MARK: - the pinned squares
 
     private var pinnedTabs: [Tab] { browser.tabs.filter { $0.pin != nil } }
-    private var looseTabs: [Tab] { browser.tabs.filter { $0.pin == nil } }
+    private var agentTabs: [Tab] { browser.agentTabs }
+    private var looseTabs: [Tab] { browser.personalLooseTabs }
 
     /// Three columns is the block's own shape — up to six pins, that's two
     /// full rows, and one or two is just those same three places with a
@@ -510,7 +518,7 @@ struct SideBar: View {
                     },
                     land: { browser.dropOut(tab) }
                 ) {
-                    browser.move(tab, to: $0 + browser.pinnedCount)
+                    browser.move(tab, to: $0 + browser.pinnedCount + agentTabs.count)
                 })
             }
         }
@@ -536,9 +544,123 @@ struct SideBar: View {
         return [ids[min(l, r)]]
     }
 
+    /// Dedicated collapsible Agent tab group: separates tabs opened by the
+    /// agentic browser from your personal Today tabs, with a subtle accent rail
+    /// and one-click Clear.
+    private var agentGroupSection: some View {
+        let grouped = agentTabs
+        let collapsed = browser.agentGroupCollapsed
+        return VStack(alignment: .leading, spacing: 0) {
+            HStack(spacing: 5) {
+                Button {
+                    withAnimation(Motion.quick) { browser.agentGroupCollapsed.toggle() }
+                } label: {
+                    HStack(spacing: 5) {
+                        Image(systemName: collapsed ? "chevron.right" : "chevron.down")
+                            .font(.system(size: 8.5, weight: .semibold))
+                            .foregroundStyle(Palette.accent.opacity(0.82))
+                            .frame(width: 9)
+                        Image(systemName: "sparkles")
+                            .font(.system(size: 9.5, weight: .semibold))
+                            .foregroundStyle(Palette.accent)
+                        Text("Agent")
+                            .font(.system(size: 11, weight: .semibold))
+                            .foregroundStyle(Palette.accent.opacity(0.92))
+                            .lineLimit(1)
+                        Text("\(grouped.count)")
+                            .font(.system(size: 10, weight: .semibold, design: .rounded))
+                            .foregroundStyle(Palette.accent)
+                            .padding(.horizontal, 5)
+                            .padding(.vertical, 1)
+                            .background(Capsule().fill(Palette.accent.opacity(0.12)))
+                    }
+                    .padding(.leading, 8)
+                    .contentShape(Rectangle())
+                }
+                .buttonStyle(.plain)
+                .help(collapsed ? "Expand Agent Tab Group" : "Collapse Agent Tab Group")
+
+                Rectangle()
+                    .fill(Palette.accent.opacity(0.22))
+                    .frame(height: 0.75)
+                    .frame(maxWidth: .infinity)
+
+                if agentHeaderHover {
+                    Button { browser.clearAgentTabs() } label: {
+                        Text("Clear")
+                            .font(.system(size: 10.5, weight: .medium))
+                            .foregroundStyle(agentClearHover ? Palette.ink.opacity(0.88) : Palette.muted)
+                            .padding(.horizontal, 7)
+                            .frame(height: 19)
+                            .background(
+                                Capsule()
+                                    .fill(Palette.ink.opacity(agentClearHover ? 0.09 : 0.048))
+                            )
+                            .contentShape(Capsule())
+                    }
+                    .buttonStyle(.plain)
+                    .onHover { agentClearHover = $0 }
+                    .help("Close All Tabs in Agent Group")
+                    .transition(.opacity.combined(with: .scale(scale: 0.92)))
+                }
+            }
+            .padding(.trailing, 4)
+            .frame(height: SideBar.todayHeight)
+            .contentShape(Rectangle())
+            .onHover { agentHeaderHover = $0 }
+            .padding(.bottom, 4)
+            .animation(Motion.quick, value: agentHeaderHover)
+            .animation(Motion.quick, value: agentClearHover)
+
+            if !collapsed {
+                HStack(spacing: 0) {
+                    RoundedRectangle(cornerRadius: 1.5, style: .continuous)
+                        .fill(Palette.accent.opacity(0.42))
+                        .frame(width: 2)
+                        .padding(.leading, 6)
+                        .padding(.trailing, 5)
+                        .padding(.vertical, 3)
+
+                    VStack(spacing: SideBar.gap) {
+                        let step = SideBar.row + SideBar.gap
+                        ForEach(Array(grouped.enumerated()), id: \.element.id) { index, tab in
+                            SideRow(
+                                browser: browser,
+                                prefs: prefs,
+                                tab: tab,
+                                live: tab.id == browser.activeID && !browser.talkOnStage,
+                                pill: pill,
+                                close: { browser.close(tab) }
+                            )
+                            .modifier(Carried(
+                                index: index, count: grouped.count, step: step, vertical: true, space: "agentRows",
+                                outside: { point in
+                                    let at = CGPoint(x: point.x + rowsOrigin.x, y: point.y + rowsOrigin.y)
+                                    let out = at.x > prefs.sideWidth + 16
+                                    browser.dragOut(tab, at: out ? at : nil)
+                                    return out
+                                },
+                                land: { browser.dropOut(tab) }
+                            ) {
+                                browser.move(tab, to: $0 + browser.pinnedCount)
+                            })
+                        }
+                    }
+                    .coordinateSpace(name: "agentRows")
+                }
+                .padding(.bottom, 8)
+                .transition(.opacity.combined(with: .move(edge: .top)))
+            }
+        }
+        .animation(Motion.quick, value: collapsed)
+    }
+
     /// The loose tabs and the Arc-style "+ New Tab" row, which scroll as one.
     private var rows: some View {
         VStack(alignment: .leading, spacing: 0) {
+            if !agentTabs.isEmpty {
+                agentGroupSection
+            }
             today(loose: !looseTabs.isEmpty)
             NewTabRow(browser: browser)
                 .padding(.bottom, SideBar.gap)

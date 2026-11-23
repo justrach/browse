@@ -167,6 +167,16 @@ final class Browser: NSObject, ObservableObject {
         if pageSelection != nil { pageSelection = nil }
     }
 
+    /// True when the dedicated Agent tab group is folded into its header pill.
+    @Published var agentGroupCollapsed = false
+
+    /// Tabs opened by or assigned to the agentic browser (kept in their own
+    /// collapsible group, separate from personal tabs).
+    var agentTabs: [Tab] { tabs.filter { $0.isAgentTab } }
+
+    /// Personal unpinned tabs (everything outside Pinned and the Agent group).
+    var personalLooseTabs: [Tab] { tabs.filter { $0.pin == nil && !$0.isAgentTab } }
+
     /// The settings panel.
     @Published var tuning = false { didSet { if tuning { dismissOverlays(keeping: .settings) } } }
     /// The first-launch walk-through, over everything. Also from the menu.
@@ -1516,6 +1526,7 @@ final class Browser: NSObject, ObservableObject {
 
     func pin(_ tab: Tab) {
         if tab.pin == nil {
+            tab.agentGroup = nil
             tab.pin = tab.monogram
             // Pinned tabs live at the head of the row, in the order they were
             // pinned, so their letters never move under your hand.
@@ -1888,6 +1899,7 @@ final class Browser: NSObject, ObservableObject {
             prepare(tab)
             tab.restore(url: url, title: entry.title, name: entry.name)
             tab.pin = entry.pin
+            tab.agentGroup = entry.pin == nil ? entry.agentGroup : nil
             tabs.append(tab)
             made[at] = tab
         }
@@ -2085,7 +2097,8 @@ final class Browser: NSObject, ObservableObject {
             if tab.id == activeID { active = entries.count }
             written[tab.id] = entries.count
             entries.append(Session.Entry(
-                url: url.absoluteString, title: tab.title, pin: tab.pin, name: tab.name
+                url: url.absoluteString, title: tab.title, pin: tab.pin, name: tab.name,
+                agentGroup: tab.isAgentTab ? tab.agentGroup : nil
             ))
         }
         // The tab you were on isn't kept — a private or blank one: the one
@@ -2218,6 +2231,9 @@ final class Browser: NSObject, ObservableObject {
     }
 
     func select(_ tab: Tab) {
+        if tab.isAgentTab, agentGroupCollapsed {
+            agentGroupCollapsed = false
+        }
         // A peek is over the tab it was opened from; another tab puts it away.
         if peekTab != nil, tab.id != activeID { closePeek() }
         cancelTabEdit()
@@ -2337,19 +2353,51 @@ final class Browser: NSObject, ObservableObject {
         select(keep)
     }
 
-    /// The trash on the sidebar's line: every tab that isn't pinned goes, and
-    /// a new one takes their place — made first, so closing the others
-    /// doesn't land on a pinned tile and wake its page on the way. ⌘⇧T
-    /// brings them back, one at a time.
+    /// The trash on the sidebar's line: every personal tab that isn't pinned
+    /// goes, and a new one takes their place — made first, so closing the others
+    /// doesn't land on a pinned tile and wake its page on the way. Tabs in the
+    /// Agent group have their own Clear button. ⌘⇧T brings them back.
     func clearLoose() {
-        guard tabs.contains(where: { $0.pin == nil && !$0.bench }) else { return }
+        guard tabs.contains(where: { $0.pin == nil && !$0.isAgentTab && !$0.bench }) else { return }
         // newTab(immediate: true) may bring an empty tab already open to the front rather
         // than make one; whichever it lands on stays.
         newTab(immediate: true)
-        let going = tabs.filter { $0.pin == nil && !$0.bench && $0.id != activeID }
+        let going = tabs.filter { $0.pin == nil && !$0.isAgentTab && !$0.bench && $0.id != activeID }
         for tab in going { close(tab) }
         guard !going.isEmpty else { return }
         announce(going.count == 1 ? "Closed one tab — ⌘⇧T brings it back" : "Closed \(going.count) tabs — ⌘⇧T brings them back")
+    }
+
+    /// Close every tab in the dedicated Agent tab group without touching
+    /// personal or pinned tabs. ⌘⇧T still brings any closed tab back.
+    func clearAgentTabs() {
+        let going = tabs.filter { $0.isAgentTab && !$0.bench }
+        guard !going.isEmpty else { return }
+        if tabs.count == going.count {
+            newTab(immediate: true)
+        }
+        for tab in going { close(tab) }
+        announce(going.count == 1 ? "Closed 1 Agent tab — ⌘⇧T brings it back" : "Closed \(going.count) Agent tabs — ⌘⇧T brings them back")
+    }
+
+    /// Move a personal tab into the dedicated Agent tab group.
+    func moveToAgentGroup(_ tab: Tab) {
+        guard !tab.isAgentTab else { return }
+        if tab.pin != nil { tab.pin = nil }
+        tab.agentGroup = "Agent"
+        agentGroupCollapsed = false
+        let target = pinnedCount + agentTabs.count - 1
+        move(tab, to: max(pinnedCount, target))
+        rememberSession()
+    }
+
+    /// Promote an Agent-grouped tab out into your personal tabs.
+    func moveOutOfAgentGroup(_ tab: Tab) {
+        guard tab.isAgentTab else { return }
+        tab.agentGroup = nil
+        let target = pinnedCount + agentTabs.count
+        move(tab, to: min(target, max(0, tabs.count - 1)))
+        rememberSession()
     }
 
     /// A link let go of over the tabs becomes a tab among them.
@@ -2430,7 +2478,7 @@ final class Browser: NSObject, ObservableObject {
     /// `from`: the tab it was opened out of. A private one's opens private,
     /// in the same store, as a link that asks for a new window already does.
     @discardableResult
-    func open(_ url: URL, foreground: Bool, atEnd: Bool = false, from source: Tab? = nil) -> Tab {
+    func open(_ url: URL, foreground: Bool, atEnd: Bool = false, from source: Tab? = nil, agentGroup: String? = nil) -> Tab {
         // An extension's own page is served only to a view built from that
         // extension's configuration.
         let url = Browser.page(url)
@@ -2440,8 +2488,18 @@ final class Browser: NSObject, ObservableObject {
         } else {
             Tab(configuration: page)
         }
+        let group = agentGroup ?? source?.agentGroup
+        tab.agentGroup = group
         prepare(tab)
-        tabs.insert(tab, at: atEnd ? tabs.count : placeForNew())
+        let index: Int
+        if group != nil {
+            if foreground { agentGroupCollapsed = false }
+            let lastAgent = tabs.lastIndex(where: { $0.isAgentTab })
+            index = lastAgent.map { $0 + 1 } ?? pinnedCount
+        } else {
+            index = atEnd ? tabs.count : placeForNew()
+        }
+        tabs.insert(tab, at: min(max(0, index), tabs.count))
         tab.go(to: url)
         if foreground {
             leaving()
@@ -2478,6 +2536,7 @@ final class Browser: NSObject, ObservableObject {
         fresh.popup = tab.popup
         fresh.pin = tab.pin
         fresh.name = tab.name
+        fresh.agentGroup = tab.agentGroup
         prepare(fresh)
         let wasActive = activeID == tab.id
         tabs[index] = fresh
@@ -2636,6 +2695,7 @@ final class Browser: NSObject, ObservableObject {
             prepare(tab)
             tab.restore(url: url, title: entry.title, name: entry.name)
             tab.pin = entry.pin
+            tab.agentGroup = entry.pin == nil ? entry.agentGroup : nil
             row.append(tab)
         }
         let active = row.indices.contains(saved.active) ? row[saved.active].id : row.first?.id
@@ -2654,8 +2714,9 @@ final class Browser: NSObject, ObservableObject {
     /// them. A link from another app, with a pin in front, landed between two
     /// (#219).
     func placeForNew() -> Int {
+        let floor = pinnedCount + agentTabs.count
         guard let here = tabs.firstIndex(where: { $0.id == activeID }) else { return tabs.count }
-        return max(here + 1, pinnedCount)
+        return max(here + 1, floor)
     }
 
     /// A tab made outside the row — a peek being kept — put in it at `index`.
