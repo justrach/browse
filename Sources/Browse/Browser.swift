@@ -401,6 +401,11 @@ final class Browser: NSObject, ObservableObject {
     /// while it is (see Fold.swift).
     @Published var folded = false
     @Published var peeking = false
+    /// True while this browser window is in macOS Full Screen mode.
+    @Published var fullScreen = false
+    /// True while the auto-hidden fullscreen top bar (`AsideBar` / `TabBar`)
+    /// is peeking down over the page from the top edge (see Fold.swift).
+    @Published var topPeeking = false
 
     /// The address field, raised over a page by ⌘L. A blank tab shows it
     /// without being asked — there is nothing else for that tab to show.

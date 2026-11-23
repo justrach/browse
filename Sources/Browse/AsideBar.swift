@@ -18,6 +18,10 @@ struct AsideBar: View {
     /// True when sitting inside the unified Arc/Dia frosted window canvas
     /// above a floating rounded page card (transparent ground, no bottom seam).
     var framed: Bool = false
+    /// True in macOS Full Screen mode (no window traffic lights on the left).
+    var fullScreen: Bool = false
+    /// True when floating down over the page on top-edge hover in Full Screen.
+    var floating: Bool = false
 
     @State private var addressHover = false
     @State private var askHover = false
@@ -149,7 +153,7 @@ struct AsideBar: View {
                 }
                 .fixedSize()
             }
-            .padding(.leading, sidebarOpen ? (framed ? 0 : 10) : Metrics.lights)
+            .padding(.leading, sidebarOpen ? (framed ? 0 : 10) : (fullScreen ? 10 : Metrics.lights))
             .padding(.trailing, framed ? Split.gap + 2 : 12)
             .animation(Motion.glide, value: sidebarOpen)
         }
@@ -157,7 +161,16 @@ struct AsideBar: View {
         .frame(height: Metrics.strip)
         .clipped()
         .background {
-            if !framed {
+            if floating {
+                ZStack {
+                    SideGlass(dark: tint?.dark)
+                    if let tint {
+                        tint.wash
+                    } else {
+                        Palette.ground.opacity(scheme == .dark ? 0.86 : 0.90)
+                    }
+                }
+            } else if !framed {
                 if let tint {
                     Color(nsColor: tint.color)
                 } else {
@@ -166,10 +179,15 @@ struct AsideBar: View {
             }
         }
         .overlay(alignment: .bottom) {
-            if !framed {
+            if floating || !framed {
                 Rectangle().fill(seam).frame(height: 1)
             }
         }
+        .shadow(
+            color: floating ? .black.opacity(isDark ? 0.34 : 0.14) : .clear,
+            radius: floating ? 18 : 0,
+            y: floating ? 4 : 0
+        )
         .environment(\.colorScheme, tint.map { $0.dark ? .dark : .light } ?? scheme)
         .animation(Motion.glide, value: tint)
     }
