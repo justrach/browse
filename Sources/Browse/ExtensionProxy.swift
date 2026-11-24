@@ -25,6 +25,7 @@ enum ExtensionProxyMode: Equatable, Sendable {
 enum ExtensionProxy {
     @MainActor static private(set) var current: [ProxyConfiguration] = []
     @MainActor static private(set) var activeExtensionID: String?
+    @MainActor private static var lastSynced: (id: String?, mode: ExtensionProxyMode, storeIDs: [ObjectIdentifier])?
 
     /// Normalizes Chrome `bypassList` entries into domain suffixes/hosts for `ProxyConfiguration.excludedDomains`.
     static func normalizeBypass(_ entries: [String]) -> [String] {
@@ -220,31 +221,41 @@ enum ExtensionProxy {
     @MainActor
     @discardableResult
     static func sync(owner: Extensions) -> (id: String, issue: String)? {
+        var targetID: String?
+        var targetMode: ExtensionProxyMode = .system
+        var problem: (id: String, issue: String)?
         for item in owner.installed.reversed() where item.enabled {
             let settings = Extensions.settings(for: item.id)
             guard let raw = settings["proxy.settings"] as? [String: Any] else { continue }
-            switch parse(raw) {
-            case .system, .direct:
-                activeExtensionID = item.id
-                current = []
-                apply(to: Spaces.everyStore)
-                return nil
-            case .fixed(let specs):
-                activeExtensionID = item.id
-                current = makeConfigurations(specs)
-                apply(to: Spaces.everyStore)
-                return nil
+            let parsed = parse(raw)
+            switch parsed {
+            case .system, .direct, .fixed:
+                targetID = item.id
+                targetMode = parsed
             case .unsupported(let reason):
-                activeExtensionID = nil
-                current = []
-                apply(to: Spaces.everyStore)
-                return (item.id, reason)
+                targetID = nil
+                targetMode = .system
+                problem = (item.id, reason)
             }
+            break
         }
-        activeExtensionID = nil
-        current = []
-        apply(to: Spaces.everyStore)
-        return nil
+        let stores = Spaces.everyStore
+        let storeIDs = stores.map(ObjectIdentifier.init)
+        if let lastSynced,
+           lastSynced.id == targetID,
+           lastSynced.mode == targetMode,
+           lastSynced.storeIDs == storeIDs {
+            return problem
+        }
+        activeExtensionID = targetID
+        if case .fixed(let specs) = targetMode {
+            current = makeConfigurations(specs)
+        } else {
+            current = []
+        }
+        apply(to: stores)
+        lastSynced = (targetID, targetMode, storeIDs)
+        return problem
     }
     #endif
 }

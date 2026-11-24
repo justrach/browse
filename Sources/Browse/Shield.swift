@@ -23,10 +23,22 @@ final class Shield: ObservableObject {
     /// What's compiled so far, in the order it arrived.
     private(set) var lists: [WKContentRuleList] = []
 
+    /// Tracks each controller's current host and how many of `lists` are attached,
+    /// avoiding WebKit content-rule-list tear-down/re-attach IPC on normal navigations.
+    private final class ControllerState {
+        var host: String
+        var attachedCount: Int
+
+        init(host: String, attachedCount: Int) {
+            self.host = host
+            self.attachedCount = attachedCount
+        }
+    }
+
     /// Every page's controller, with the site it's on (empty until it's
     /// going somewhere), so a list that arrives late reaches the pages open
     /// already — except on the sites it's paused for.
-    private let controllers = NSMapTable<WKUserContentController, NSString>.weakToStrongObjects()
+    private let controllers = NSMapTable<WKUserContentController, ControllerState>.weakToStrongObjects()
 
     /// Set the one time compiling our own list didn't work. The toggle in
     /// Settings can say "on" all it wants; nothing is actually blocked until
@@ -61,9 +73,35 @@ final class Shield: ObservableObject {
     /// doing this at the navigation is what makes "off for this site" true
     /// for the whole page rather than for the second half of it.
     func tune(_ controller: WKUserContentController, for host: String?) {
-        controllers.setObject((host ?? "") as NSString, forKey: controller)
+        let hostKey = host ?? ""
+        let want = enabled && !isPaused(on: host)
+        if let state = controllers.object(forKey: controller) {
+            state.host = hostKey
+            sync(controller, state: state, want: want)
+            return
+        }
+        // Unregistered controller (e.g. external caller): ensure clean initial state.
+        let state = ControllerState(host: hostKey, attachedCount: 0)
+        controllers.setObject(state, forKey: controller)
         lists.forEach { controller.remove($0) }
-        if enabled, !isPaused(on: host) { lists.forEach { controller.add($0) } }
+        if want {
+            lists.forEach { controller.add($0) }
+            state.attachedCount = lists.count
+        }
+    }
+
+    private func sync(_ controller: WKUserContentController, state: ControllerState, want: Bool) {
+        if want {
+            guard state.attachedCount < lists.count else { return }
+            for i in state.attachedCount..<lists.count {
+                controller.add(lists[i])
+            }
+            state.attachedCount = lists.count
+        } else {
+            guard state.attachedCount > 0 else { return }
+            lists.forEach { controller.remove($0) }
+            state.attachedCount = 0
+        }
     }
 
     /// Third parties whose only job is to watch or to sell. First-party
@@ -122,10 +160,7 @@ final class Shield: ObservableObject {
         "shreddit-dynamic-ad-link", "comment-tree-ad", ".promotedlink",
     ]
 
-    func compile() {
-        guard lists.isEmpty, !compiling else { return }
-        compiling = true
-        trouble = nil
+    private static let builtinSpec: (identifier: String, json: String)? = {
         var rules: [[String: Any]] = Shield.unwanted.map { domain in
             let escaped = domain.replacingOccurrences(of: ".", with: "\\.")
             return [
@@ -144,10 +179,18 @@ final class Shield: ObservableObject {
             "trigger": ["url-filter": ".*", "if-domain": ["*reddit.com"]],
             "action": ["type": "css-display-none", "selector": Shield.reddit.joined(separator: ", ")],
         ])
-
         guard let data = try? JSONSerialization.data(withJSONObject: rules),
               let json = String(data: data, encoding: .utf8)
-        else {
+        else { return nil }
+        let digest = SHA256.hash(data: data).prefix(6).map { String(format: "%02x", $0) }.joined()
+        return ("office-shield-\(digest)", json)
+    }()
+
+    func compile() {
+        guard lists.isEmpty, !compiling else { return }
+        compiling = true
+        trouble = nil
+        guard let builtin = Shield.builtinSpec else {
             compiling = false
             trouble = "Couldn't build the block list"
             release()
@@ -160,8 +203,8 @@ final class Shield: ObservableObject {
             release()
             return
         }
-        let digest = SHA256.hash(data: data).prefix(6).map { String(format: "%02x", $0) }.joined()
-        let builtinIdentifier = "office-shield-\(digest)"
+        let builtinIdentifier = builtin.identifier
+        let json = builtin.json
         store.getAvailableContentRuleListIdentifiers { kept in
             for old in kept ?? [] where old.hasPrefix("office-shield") && old != builtinIdentifier {
                 store.removeContentRuleList(forIdentifier: old) { _ in }
@@ -351,24 +394,32 @@ final class Shield: ObservableObject {
         lists.append(list)
         guard enabled else { return }
         for controller in controllers.keyEnumerator().allObjects as? [WKUserContentController] ?? [] {
-            let host = controllers.object(forKey: controller) as String?
-            if !isPaused(on: host?.isEmpty == false ? host : nil) { controller.add(list) }
+            guard let state = controllers.object(forKey: controller) else { continue }
+            let host = state.host.isEmpty ? nil : state.host
+            if !isPaused(on: host) {
+                sync(controller, state: state, want: true)
+            }
         }
     }
 
     /// Every tab asks for it; whoever asks before it is ready gets it as
     /// each list arrives.
     func protect(_ controller: WKUserContentController) {
-        controllers.setObject("", forKey: controller)
+        let state = ControllerState(host: "", attachedCount: enabled ? lists.count : 0)
+        controllers.setObject(state, forKey: controller)
         if enabled { lists.forEach { controller.add($0) } }
     }
 
     /// Switched on or off for every page that is already open.
     func apply(to controllers: [WKUserContentController]) {
         for controller in controllers {
-            let host = self.controllers.object(forKey: controller) as String?
-            lists.forEach { controller.remove($0) }
-            if enabled, !isPaused(on: host?.isEmpty == false ? host : nil) { lists.forEach { controller.add($0) } }
+            if let state = self.controllers.object(forKey: controller) {
+                let host = state.host.isEmpty ? nil : state.host
+                sync(controller, state: state, want: enabled && !isPaused(on: host))
+            } else {
+                lists.forEach { controller.remove($0) }
+                if enabled { lists.forEach { controller.add($0) } }
+            }
         }
     }
 }

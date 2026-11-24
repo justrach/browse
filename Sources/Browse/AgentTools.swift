@@ -168,7 +168,7 @@ final class AgentTools: ObservableObject {
         }
         self.listener = listener
         listener.newConnectionHandler = { [weak self] connection in
-            Task { @MainActor in self?.serve(connection) }
+            self?.serve(connection)
         }
         listener.stateUpdateHandler = { [weak self] state in
             Task { @MainActor in
@@ -195,17 +195,50 @@ final class AgentTools: ObservableObject {
         all.forEach { $0.resume(returning: ok) }
     }
 
-    /// Locate the local Harness CLI (`harness mcp`) so Browse's graff worker
-    /// can talk directly to the running NanoHarness engine on 127.0.0.1:27664.
-    nonisolated static func harnessExecutable() -> URL? {
-        guard !Store.testing else { return nil }
+    private final class HarnessCache: @unchecked Sendable {
+        let lock = NSLock()
+        var checked = false
+        var url: URL?
+    }
+
+    nonisolated private static let harnessCache = HarnessCache()
+
+    nonisolated static func refreshHarnessCache() -> URL? {
+        let cache = harnessCache
+        guard !Store.testing else {
+            cache.lock.lock()
+            cache.url = nil
+            cache.checked = true
+            cache.lock.unlock()
+            return nil
+        }
         let home = FileManager.default.homeDirectoryForCurrentUser
         let candidates = [
             URL(fileURLWithPath: "/Applications/Harness.app/Contents/MacOS/harness"),
             home.appendingPathComponent("Applications/Harness.app/Contents/MacOS/harness"),
             home.appendingPathComponent(".harness/bin/harness"),
         ]
-        return candidates.first { FileManager.default.isExecutableFile(atPath: $0.path) }
+        let found = candidates.first { FileManager.default.isExecutableFile(atPath: $0.path) }
+        cache.lock.lock()
+        cache.url = found
+        cache.checked = true
+        cache.lock.unlock()
+        return found
+    }
+
+    /// Locate the local Harness CLI (`harness mcp`) so Browse's graff worker
+    /// can talk directly to the running NanoHarness engine on 127.0.0.1:27664.
+    nonisolated static func harnessExecutable() -> URL? {
+        guard !Store.testing else { return nil }
+        let cache = harnessCache
+        cache.lock.lock()
+        if cache.checked {
+            let hit = cache.url
+            cache.lock.unlock()
+            return hit
+        }
+        cache.lock.unlock()
+        return refreshHarnessCache()
     }
 
     nonisolated static var harnessAvailable: Bool { harnessExecutable() != nil }
@@ -225,7 +258,7 @@ final class AgentTools: ObservableObject {
                 "eager": true,
             ] as [String: Any],
         ]
-        if let harness = AgentTools.harnessExecutable() {
+        if let harness = AgentTools.refreshHarnessCache() {
             servers["harness"] = [
                 "command": harness.path,
                 "args": ["mcp"],
@@ -263,7 +296,7 @@ final class AgentTools: ObservableObject {
 
     /// One HTTP request a connection: read it whole, answer, close. Each is
     /// answered as soon as it is done, so graff can have many going at once.
-    private func serve(_ connection: NWConnection) {
+    nonisolated private func serve(_ connection: NWConnection) {
         connection.start(queue: queue)
         read(connection, Data())
     }
@@ -624,23 +657,28 @@ final class AgentTools: ObservableObject {
             let limit = arguments["limit"] as? Int ?? 8_000
             let chosen = Array(urls.prefix(12))
             let each = min(limit, AgentTools.largest / chosen.count / 2)
-            // All at once: the main thread only starts each load and reads
-            // each page once it is there; the loading itself is WebKit's, in
-            // processes of its own.
+            // Cap active concurrent reading sheets at `AgentTools.most` while
+            // letting up to 12 URLs drain without hitting active-sheet limits.
             let read = await withTaskGroup(of: (Int, String).self) { group in
-                for (index, url) in chosen.enumerated() {
-                    group.addTask { @MainActor in
-                        let sheet = await self.load(url, as: nil, reading: true, owner: owner)
-                        let (text, error) = await sheet.run("document.body ? document.body.innerText : ''")
-                        let body = error.map { "(couldn't read it: \($0))" } ?? AgentTools.cut(text as? String ?? "", each)
-                        let said = "## \(sheet.title)\n\(sheet.address)\n\n\(body)"
-                        // Read, so closed; `open` is for a page to act on.
-                        self.close(sheet)
-                        return (index, said)
-                    }
+                let maxConcurrent = min(AgentTools.most, chosen.count)
+                var nextIndex = 0
+                while nextIndex < maxConcurrent {
+                    let index = nextIndex
+                    let url = chosen[index]
+                    nextIndex += 1
+                    group.addTask { @MainActor in (index, await self.readPage(url, limit: each, owner: owner)) }
                 }
                 var all: [(Int, String)] = []
-                for await one in group { all.append(one) }
+                all.reserveCapacity(chosen.count)
+                for await one in group {
+                    all.append(one)
+                    if nextIndex < chosen.count {
+                        let index = nextIndex
+                        let url = chosen[index]
+                        nextIndex += 1
+                        group.addTask { @MainActor in (index, await self.readPage(url, limit: each, owner: owner)) }
+                    }
+                }
                 return all.sorted { $0.0 < $1.0 }.map(\.1)
             }
             return AgentTools.text(read.joined(separator: "\n\n"))
@@ -730,7 +768,7 @@ final class AgentTools: ObservableObject {
                 if let error { return AgentTools.failed(error) }
                 // A field's own scripts — a search as you type, a form that
                 // grows another field — have a moment to answer.
-                try? await Task.sleep(nanoseconds: 250_000_000)
+                try? await Task.sleep(nanoseconds: 100_000_000)
                 return AgentTools.text("\(target.id) · \(target.title)\n\n" + (value as? String ?? ""))
             }
 
@@ -741,8 +779,7 @@ final class AgentTools: ObservableObject {
                 if let error { return AgentTools.failed(error) }
                 guard value as? String == "ok" else { return AgentTools.failed(value as? String ?? "didn't work") }
                 // A click or a submit may have sent the page somewhere.
-                try? await Task.sleep(nanoseconds: 400_000_000)
-                await target.settled()
+                await target.settledIfLoading()
                 return AgentTools.said(["page": target.id, "title": target.title, "url": target.address])
             }
 
@@ -757,8 +794,7 @@ final class AgentTools: ObservableObject {
                 if let dict = value as? [String: Any], let err = dict["error"] as? String {
                     return AgentTools.failed(err)
                 }
-                try? await Task.sleep(nanoseconds: 350_000_000)
-                await target.settled()
+                await target.settledIfLoading()
                 var out = (value as? [String: Any]) ?? [:]
                 out["page"] = target.id
                 out["title"] = target.title
@@ -832,8 +868,7 @@ final class AgentTools: ObservableObject {
                 let (value, error) = await target.run(AgentTools.pressKeyScript(key: key, selector: selector, modifiers: modifiers))
                 if let error { return AgentTools.failed(error) }
                 guard value as? String == "ok" else { return AgentTools.failed(value as? String ?? "press_key failed") }
-                try? await Task.sleep(nanoseconds: 250_000_000)
-                await target.settled()
+                await target.settledIfLoading()
                 return AgentTools.said(["page": target.id, "key": key, "title": target.title, "url": target.address])
             }
 
@@ -843,7 +878,7 @@ final class AgentTools: ObservableObject {
                 let (value, error) = await target.run(AgentTools.hoverScript(selector: selector))
                 if let error { return AgentTools.failed(error) }
                 guard value as? String == "ok" else { return AgentTools.failed(value as? String ?? "hover failed") }
-                try? await Task.sleep(nanoseconds: 200_000_000)
+                try? await Task.sleep(nanoseconds: 80_000_000)
                 return AgentTools.said(["page": target.id, "hovered": selector])
             }
 
@@ -873,10 +908,11 @@ final class AgentTools: ObservableObject {
         case "screenshot":
             let targetKind = (arguments["target"] as? String ?? "page").lowercased()
             let saveTo = (arguments["save_to"] as? String)?.trimmingCharacters(in: .whitespacesAndNewlines)
+            let wantPNG = saveTo?.lowercased().hasSuffix(".png") == true
             if targetKind == "window" {
                 if let refused = await refusedTabs(caller) { return refused }
                 guard let window = Links.window ?? NSApp.keyWindow ?? NSApp.windows.first(where: { $0.contentView != nil && !($0 is NSPanel) }),
-                      let (data, mime, rawPNG) = AgentTools.windowPicture(window)
+                      let (data, mime, rawPNG) = await AgentTools.windowPicture(window, wantPNG: wantPNG)
                 else { return AgentTools.failed("No browse window available to capture") }
                 return AgentTools.imageReply(data: data, mime: mime, rawPNG: rawPNG, saveTo: saveTo)
             }
@@ -907,7 +943,7 @@ final class AgentTools: ObservableObject {
                         cropRect = CGRect(x: 0, y: 0, width: w, height: h)
                     }
                 }
-                guard let (data, mime, rawPNG) = await AgentTools.picture(target.web, rect: cropRect) else {
+                guard let (data, mime, rawPNG) = await AgentTools.picture(target.web, rect: cropRect, wantPNG: wantPNG) else {
                     return AgentTools.failed("No picture")
                 }
                 return AgentTools.imageReply(data: data, mime: mime, rawPNG: rawPNG, saveTo: saveTo)
@@ -1056,11 +1092,21 @@ final class AgentTools: ObservableObject {
         }
     }
 
+    /// Load, extract text, and close a disposable reading sheet for `read_pages`.
+    private func readPage(_ url: URL, limit: Int, owner: String) async -> String {
+        let sheet = await load(url, as: nil, reading: true, owner: owner)
+        let (text, error) = await sheet.run("document.body ? document.body.innerText : ''")
+        let body = error.map { "(couldn't read it: \($0))" } ?? AgentTools.cut(text as? String ?? "", limit)
+        let said = "## \(sheet.title)\n\(sheet.address)\n\n\(body)"
+        close(sheet)
+        return said
+    }
+
     /// A page put away once it has been read, or when asked.
     private func close(_ sheet: Sheet) {
         pages.removeAll { $0 === sheet }
         sheet.drop()
-        publishPages()
+        if !sheet.reading { publishPages() }
     }
 
     /// Each owner keeps its latest few; its oldest goes when another is wanted.
@@ -1069,11 +1115,14 @@ final class AgentTools: ObservableObject {
         let window = room ?? makeRoom()
         let sheet = Sheet(id: "p\(made)", owner: owner, in: window, reading: reading, bare: reading ? bare : nil)
         pages.append(sheet)
-        if !reading { ensureReaper() }
-        sheet.onChange = { [weak self] in self?.publishPages() }
-        publishPages()
-        while pages.filter({ $0.owner == owner }).count > AgentTools.most, let oldest = pages.first(where: { $0.owner == owner }) {
-            close(oldest)
+        if !reading {
+            ensureReaper()
+            sheet.onChange = { [weak self] in self?.publishPages() }
+            publishPages()
+            while pages.filter({ $0.owner == owner && !$0.reading }).count > AgentTools.most,
+                  let oldest = pages.first(where: { $0.owner == owner && !$0.reading }) {
+                close(oldest)
+            }
         }
         return sheet
     }
@@ -1746,7 +1795,7 @@ final class AgentTools: ObservableObject {
         """
     }
 
-    private static func picture(_ web: WKWebView, rect: CGRect? = nil) async -> (Data, String, Data?)? {
+    private static func picture(_ web: WKWebView, rect: CGRect? = nil, wantPNG: Bool = false) async -> (Data, String, Data?)? {
         let shot = WKSnapshotConfiguration()
         shot.afterScreenUpdates = true
         if let rect {
@@ -1758,32 +1807,38 @@ final class AgentTools: ObservableObject {
         let image: NSImage? = await withCheckedContinuation { done in
             web.takeSnapshot(with: shot) { image, _ in done.resume(returning: image) }
         }
-        return encodeImage(image)
+        let cg = image?.cgImage(forProposedRect: nil, context: nil, hints: nil)
+            ?? image?.tiffRepresentation.flatMap { NSBitmapImageRep(data: $0)?.cgImage }
+        return await encodeCGImage(cg, wantPNG: wantPNG, maxBytes: largest)
     }
 
-    private static func windowPicture(_ window: NSWindow) -> (Data, String, Data?)? {
+    private static func windowPicture(_ window: NSWindow, wantPNG: Bool = false) async -> (Data, String, Data?)? {
         guard let view = window.contentView else { return nil }
         let bounds = view.bounds
         guard bounds.width > 0, bounds.height > 0,
               let rep = view.bitmapImageRepForCachingDisplay(in: bounds)
         else { return nil }
         view.cacheDisplay(in: bounds, to: rep)
-        let image = NSImage(size: bounds.size)
-        image.addRepresentation(rep)
-        return encodeImage(image)
+        return await encodeCGImage(rep.cgImage, wantPNG: wantPNG, maxBytes: largest)
     }
 
-    private static func encodeImage(_ image: NSImage?) -> (Data, String, Data?)? {
-        guard let tiff = image?.tiffRepresentation, let bitmap = NSBitmapImageRep(data: tiff) else { return nil }
-        let png = bitmap.representation(using: .png, properties: [:])
-        for quality in [0.78, 0.58, 0.38] {
-            if let jpeg = bitmap.representation(using: .jpeg, properties: [.compressionFactor: quality]),
-               jpeg.count * 4 / 3 < largest {
-                return (jpeg, "image/jpeg", png)
+    nonisolated private static func encodeCGImage(_ cg: CGImage?, wantPNG: Bool, maxBytes: Int) async -> (Data, String, Data?)? {
+        guard let cg else { return nil }
+        return await Task.detached(priority: .userInitiated) {
+            let bitmap = NSBitmapImageRep(cgImage: cg)
+            let png = wantPNG ? bitmap.representation(using: .png, properties: [:]) : nil
+            for quality in [0.78, 0.58, 0.38] {
+                if let jpeg = bitmap.representation(using: .jpeg, properties: [.compressionFactor: quality]),
+                   jpeg.count * 4 / 3 < maxBytes {
+                    return (jpeg, "image/jpeg", png)
+                }
             }
-        }
-        if let png, png.count * 4 / 3 < largest { return (png, "image/png", png) }
-        return nil
+            let fallbackPNG = png ?? bitmap.representation(using: .png, properties: [:])
+            if let fallbackPNG, fallbackPNG.count * 4 / 3 < maxBytes {
+                return (fallbackPNG, "image/png", fallbackPNG)
+            }
+            return nil
+        }.value
     }
 
     private static func imageReply(data: Data, mime: String, rawPNG: Data?, saveTo: String?) -> [String: Any] {
@@ -1837,6 +1892,7 @@ private protocol Target {
     var address: String { get }
     func go(_ url: URL)
     func settled() async
+    func settledIfLoading() async
 }
 
 extension Target {
@@ -1857,12 +1913,22 @@ extension Target {
     /// pages that fill in their stories just after, and so did stopping at
     /// the first pause, one look long, between two of them.
     func settled() async {
+        await settled(initialWaitNs: 250_000_000, tailWaitNs: 300_000_000)
+    }
+
+    func settledIfLoading() async {
+        try? await Task.sleep(nanoseconds: 150_000_000)
+        guard web.isLoading else { return }
+        await settled(initialWaitNs: 100_000_000, tailWaitNs: 200_000_000)
+    }
+
+    private func settled(initialWaitNs: UInt64, tailWaitNs: UInt64) async {
         let limit = Date().addingTimeInterval(15)
-        try? await Task.sleep(nanoseconds: 250_000_000)
+        try? await Task.sleep(nanoseconds: initialWaitNs)
         var last = -1
         var still = 0
         while web.isLoading, Date() < limit {
-            let (state, _) = await run("document.readyState + '|' + (document.body ? document.body.innerText.length : 0)")
+            let (state, _) = await run("document.readyState + '|' + (document.body ? document.body.textContent.length : 0)")
             let parts = (state as? String)?.split(separator: "|") ?? []
             let length = parts.count == 2 ? Int(parts[1]) ?? 0 : 0
             still = length == last ? still + 1 : 0
@@ -1870,7 +1936,7 @@ extension Target {
             last = length
             try? await Task.sleep(nanoseconds: 150_000_000)
         }
-        try? await Task.sleep(nanoseconds: 300_000_000)
+        try? await Task.sleep(nanoseconds: tailWaitNs)
     }
 }
 
@@ -1914,11 +1980,13 @@ private final class Sheet: Target {
         web = WKWebView(frame: room.contentView?.bounds ?? NSRect(x: 0, y: 0, width: 1280, height: 900), configuration: config)
         web.autoresizingMask = [.width, .height]
         room.contentView?.addSubview(web)
-        observations = [
-            web.observe(\.url, options: [.new]) { [weak self] _, _ in MainActor.assumeIsolated { self?.onChange?() } },
-            web.observe(\.title, options: [.new]) { [weak self] _, _ in MainActor.assumeIsolated { self?.onChange?() } },
-            web.observe(\.isLoading, options: [.new]) { [weak self] _, _ in MainActor.assumeIsolated { self?.onChange?() } },
-        ]
+        if !reading {
+            observations = [
+                web.observe(\.url, options: [.new]) { [weak self] _, _ in MainActor.assumeIsolated { self?.onChange?() } },
+                web.observe(\.title, options: [.new]) { [weak self] _, _ in MainActor.assumeIsolated { self?.onChange?() } },
+                web.observe(\.isLoading, options: [.new]) { [weak self] _, _ in MainActor.assumeIsolated { self?.onChange?() } },
+            ]
+        }
     }
 
     var title: String { web.title?.isEmpty == false ? web.title ?? "" : (web.url?.host() ?? id) }

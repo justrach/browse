@@ -1,4 +1,128 @@
 import SwiftUI
+import AppKit
+
+/// Native `NSTextField` wrapper for inline group renaming so both focus transfer
+/// and outside clicks (e.g. clicking non-focusable chrome or `DragStrip`) commit
+/// the rename consistently.
+private struct GroupRenameField: NSViewRepresentable {
+    let placeholder: String
+    let initialText: String
+    let onCommit: (String) -> Void
+    let onCancel: () -> Void
+
+    func makeCoordinator() -> Coordinator {
+        Coordinator(onCommit: onCommit, onCancel: onCancel)
+    }
+
+    func makeNSView(context: Context) -> NSTextField {
+        let field = NSTextField()
+        field.delegate = context.coordinator
+        field.placeholderString = placeholder
+        field.stringValue = initialText
+        field.isBordered = false
+        field.drawsBackground = false
+        field.focusRingType = .none
+        field.font = .systemFont(ofSize: 11, weight: .semibold)
+        field.textColor = Palette.NS.ink
+        field.cell?.usesSingleLineMode = true
+        field.cell?.wraps = false
+        context.coordinator.watch(field)
+        return field
+    }
+
+    func updateNSView(_ field: NSTextField, context: Context) {
+        let coordinator = context.coordinator
+        coordinator.onCommit = onCommit
+        coordinator.onCancel = onCancel
+        guard !coordinator.claimed else { return }
+        coordinator.claimed = true
+        DispatchQueue.main.async {
+            field.window?.makeFirstResponder(field)
+            field.currentEditor()?.selectAll(nil)
+        }
+    }
+
+    func sizeThatFits(_ proposal: ProposedViewSize, nsView: NSTextField, context: Context) -> CGSize? {
+        let h = ceil(nsView.intrinsicContentSize.height)
+        if let w = proposal.width {
+            return CGSize(width: w, height: h)
+        }
+        return CGSize(width: max(56, nsView.intrinsicContentSize.width + 6), height: h)
+    }
+
+    static func dismantleNSView(_ field: NSTextField, coordinator: Coordinator) {
+        coordinator.unwatch()
+    }
+
+    @MainActor
+    final class Coordinator: NSObject, NSTextFieldDelegate {
+        var onCommit: (String) -> Void
+        var onCancel: () -> Void
+        var claimed = false
+        private var finished = false
+        private var watcher: Any?
+
+        init(onCommit: @escaping (String) -> Void, onCancel: @escaping () -> Void) {
+            self.onCommit = onCommit
+            self.onCancel = onCancel
+        }
+
+        func commit(_ field: NSTextField) {
+            guard !finished else { return }
+            finished = true
+            unwatch()
+            onCommit(field.stringValue)
+        }
+
+        func cancel() {
+            guard !finished else { return }
+            finished = true
+            unwatch()
+            onCancel()
+        }
+
+        func control(_ control: NSControl, textView: NSTextView, doCommandBy command: Selector) -> Bool {
+            switch command {
+            case #selector(NSResponder.insertNewline(_:)):
+                if let field = control as? NSTextField { commit(field) }
+                return true
+            case #selector(NSResponder.cancelOperation(_:)):
+                cancel()
+                return true
+            default:
+                return false
+            }
+        }
+
+        func controlTextDidEndEditing(_ note: Notification) {
+            guard !finished, let field = note.object as? NSTextField else { return }
+            DispatchQueue.main.async { [weak self, weak field] in
+                guard let self, let field else { return }
+                self.commit(field)
+            }
+        }
+
+        func watch(_ field: NSTextField) {
+            guard watcher == nil else { return }
+            watcher = NSEvent.addLocalMonitorForEvents(matching: [.leftMouseDown, .rightMouseDown, .otherMouseDown]) { [weak self, weak field] event in
+                guard let self, let field, !self.finished, event.window === field.window else { return event }
+                let local = field.convert(event.locationInWindow, from: nil)
+                if !field.bounds.contains(local) {
+                    DispatchQueue.main.async { [weak self, weak field] in
+                        guard let self, let field else { return }
+                        self.commit(field)
+                    }
+                }
+                return event
+            }
+        }
+
+        func unwatch() {
+            if let watcher { NSEvent.removeMonitor(watcher) }
+            watcher = nil
+        }
+    }
+}
 
 /// Collapsible user-created tab group section for `SideBar`.
 struct UserGroupSection<Row: View>: View {
@@ -9,8 +133,6 @@ struct UserGroupSection<Row: View>: View {
 
     @Environment(\.colorScheme) private var scheme
     @State private var headerHover = false
-    @State private var draft = ""
-    @FocusState private var renameFocused: Bool
 
     private var editing: Bool { browser.editingGroupID == group.id }
     private var tintColor: Color {
@@ -83,16 +205,17 @@ struct UserGroupSection<Row: View>: View {
                 Circle()
                     .fill(tintColor)
                     .frame(width: 7, height: 7)
-                TextField("Group name", text: $draft)
-                    .textFieldStyle(.plain)
-                    .font(.system(size: 11, weight: .semibold))
-                    .focused($renameFocused)
-                    .onSubmit(commitRename)
-                    .onExitCommand { browser.editingGroupID = nil }
-                    .onAppear {
-                        draft = group.name
-                        DispatchQueue.main.async { renameFocused = true }
+                GroupRenameField(
+                    placeholder: "Group name",
+                    initialText: group.name,
+                    onCommit: { name in
+                        browser.renameTabGroup(group.id, to: name)
+                        browser.editingGroupID = nil
+                    },
+                    onCancel: {
+                        browser.editingGroupID = nil
                     }
+                )
             }
         } else {
             Button {
@@ -123,11 +246,6 @@ struct UserGroupSection<Row: View>: View {
             .help(group.collapsed ? "Expand \(group.name)" : "Collapse \(group.name)")
         }
     }
-
-    private func commitRename() {
-        browser.renameTabGroup(group.id, to: draft)
-        browser.editingGroupID = nil
-    }
 }
 
 /// Compact pill for a user-created tab group in `TabBar`.
@@ -137,8 +255,6 @@ struct UserGroupChip: View {
     let count: Int
 
     @Environment(\.colorScheme) private var scheme
-    @State private var draft = ""
-    @FocusState private var renameFocused: Bool
 
     static let chipWidth: CGFloat = 92
 
@@ -151,22 +267,20 @@ struct UserGroupChip: View {
     var body: some View {
         Group {
             if editing {
-                TextField("Group", text: $draft)
-                    .textFieldStyle(.plain)
-                    .font(.system(size: 11, weight: .semibold))
-                    .frame(width: 80)
-                    .focused($renameFocused)
-                    .onSubmit {
-                        browser.renameTabGroup(group.id, to: draft)
+                GroupRenameField(
+                    placeholder: "Group",
+                    initialText: group.name,
+                    onCommit: { name in
+                        browser.renameTabGroup(group.id, to: name)
+                        browser.editingGroupID = nil
+                    },
+                    onCancel: {
                         browser.editingGroupID = nil
                     }
-                    .onExitCommand { browser.editingGroupID = nil }
-                    .onAppear {
-                        draft = group.name
-                        DispatchQueue.main.async { renameFocused = true }
-                    }
-                    .padding(.horizontal, 8)
-                    .frame(height: 24)
+                )
+                .frame(width: 80)
+                .padding(.horizontal, 8)
+                .frame(height: 24)
             } else {
                 Button {
                     withAnimation(Motion.quick) { browser.toggleTabGroup(group.id) }

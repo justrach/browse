@@ -147,11 +147,31 @@ final class Extensions: NSObject, ObservableObject {
             Task { @MainActor [weak self] in
                 guard let self else { return }
                 await forgetWorkersIfChanged()
+                let enabled = installed.filter(\.enabled)
+                // Pre-prepare shims and parse manifests concurrently across all
+                // enabled extensions before loading their WKWebExtensionContexts
+                // sequentially (WebKit still needs staggered background launches).
+                var preloaded: [String: WKWebExtension] = [:]
+                await withTaskGroup(of: (String, WKWebExtension?).self) { group in
+                    for item in enabled {
+                        let id = item.id
+                        let folder = Extensions.folder(for: id)
+                        group.addTask {
+                            try? await Task.detached(priority: .userInitiated) {
+                                try ExtensionShims.prepare(folder)
+                            }.value
+                            let found = try? await WKWebExtension(resourceBaseURL: folder)
+                            return (id, found)
+                        }
+                    }
+                    for await (id, found) in group {
+                        if let found { preloaded[id] = found }
+                    }
+                }
                 // One after another, a moment apart: started all at once, WebKit
                 // fails some of their workers and never tries them again.
-                let enabled = installed.filter(\.enabled)
                 for (n, item) in enabled.enumerated() {
-                    await load(item)
+                    await load(item, preloaded: preloaded[item.id], notify: false)
                     if n < enabled.count - 1, contexts[item.id]?.webExtension.hasBackgroundContent == true {
                         try? await Task.sleep(for: .milliseconds(400))
                     }
@@ -159,6 +179,7 @@ final class Extensions: NSObject, ObservableObject {
                 if let problem = ExtensionProxy.sync(owner: self) {
                     noteError(problem.issue, for: problem.id)
                 }
+                if !enabled.isEmpty { actionsChanged += 1 }
                 markStarted()
                 checkForUpdates()
             }
@@ -251,20 +272,24 @@ final class Extensions: NSObject, ObservableObject {
     private func follow(_ tabs: [Tab]) {
         let now = tabs.filter(seen)
         let ids = now.map(\.id)
-        let gone = order.filter { !ids.contains($0) }
+        let idSet = Set(ids)
+        let orderSet = Set(order)
+        let gone = order.filter { !idSet.contains($0) }
         for id in gone {
             if let adapter = adapters[id] { controller.didCloseTab(adapter, windowIsClosing: false) }
             adapters[id] = nil
             watching[id] = nil
         }
-        for tab in now where !order.contains(tab.id) {
+        for tab in now where !orderSet.contains(tab.id) {
             controller.didOpenTab(adapter(for: tab))
             watch(tab)
         }
         // Moves: anything whose position changed among the ones that stayed.
-        let stayed = order.filter { ids.contains($0) }
-        let newOrder = ids.filter { stayed.contains($0) }
-        for (index, id) in stayed.enumerated() where newOrder.firstIndex(of: id) != index {
+        let stayed = order.filter { idSet.contains($0) }
+        let stayedSet = Set(stayed)
+        let newOrder = ids.filter { stayedSet.contains($0) }
+        let newIndices = Dictionary(uniqueKeysWithValues: newOrder.enumerated().map { ($0.element, $0.offset) })
+        for (index, id) in stayed.enumerated() where newIndices[id] != index {
             if let adapter = adapters[id] { controller.didMoveTab(adapter, from: index, in: window) }
         }
         order = ids
@@ -294,15 +319,24 @@ final class Extensions: NSObject, ObservableObject {
     // MARK: - loading
 
     @discardableResult
-    private func load(_ item: Installed) async -> Bool {
+    private func load(_ item: Installed, preloaded: WKWebExtension? = nil, notify: Bool = true) async -> Bool {
         // The shim this build of Search carries, in place of whatever the
         // build that installed it carried — away from the main thread: the
         // first launch after an update reads and rewrites every script and
         // page each extension ships (Grammarly: 450 ms).
         let folder = Extensions.folder(for: item.id)
-        try? await Task.detached(priority: .userInitiated) { try ExtensionShims.prepare(folder) }.value
+        if preloaded == nil {
+            try? await Task.detached(priority: .userInitiated) { try ExtensionShims.prepare(folder) }.value
+        }
+        ExtensionShims.invalidateAllowed(item.id)
+        cachedPasswordOwner = nil
         do {
-            let found = try await WKWebExtension(resourceBaseURL: Extensions.folder(for: item.id))
+            let found: WKWebExtension
+            if let preloaded {
+                found = preloaded
+            } else {
+                found = try await WKWebExtension(resourceBaseURL: folder)
+            }
             let context = WKWebExtensionContext(for: found)
             context.uniqueIdentifier = item.id
             // The same origin every launch. WebKit picks a fresh one
@@ -343,10 +377,12 @@ final class Extensions: NSObject, ObservableObject {
             if contexts[item.id] == nil, loadsThisRun.contains(item.id) { loadedBefore.insert(item.id) }
             loadsThisRun.insert(item.id)
             contexts[item.id] = context
-            if started, let problem = ExtensionProxy.sync(owner: self) {
-                noteError(problem.issue, for: problem.id)
+            if notify {
+                if started, let problem = ExtensionProxy.sync(owner: self) {
+                    noteError(problem.issue, for: problem.id)
+                }
+                actionsChanged += 1
             }
-            actionsChanged += 1
             return true
         } catch {
             NSLog("Extensions: couldn't load %@: %@", item.id, error.localizedDescription)
@@ -365,10 +401,12 @@ final class Extensions: NSObject, ObservableObject {
         // Its ports read as gone only once WebKit has had a turn.
         DispatchQueue.main.async { ExtensionNative.stopOrphans() }
         contexts[id] = nil
+        cachedPasswordOwner = nil
         actionsChanged += 1
     }
 
     private func save() {
+        cachedPasswordOwner = nil
         try? FileManager.default.createDirectory(at: Extensions.folder, withIntermediateDirectories: true)
         try? JSONEncoder().encode(installed).write(to: Extensions.list, options: .atomic)
     }
@@ -614,6 +652,7 @@ final class Extensions: NSObject, ObservableObject {
         errors[id] = nil
         Extensions.setSettings([:], for: id)
         Store.settings.removeObject(forKey: "extensions.granted.\(id)")
+        ExtensionShims.invalidateAllowed(id)
         loadsThisRun.remove(id)
         loadedBefore.remove(id)
         Store.settings.removeObject(forKey: "extensions.newtab.\(id)")
@@ -658,19 +697,37 @@ final class Extensions: NSObject, ObservableObject {
     }
 
     /// What an extension set through chrome.privacy and chrome.proxy.
+    private static var settingsCache: [String: [String: Any]] = [:]
+    private static var settingsVersion = 0
+    private var cachedPasswordOwner: (version: Int, name: String?)?
+
     static func settings(for id: String) -> [String: Any] {
-        Store.settings.dictionary(forKey: "extensions.settings.\(id)") ?? [:]
+        if let cached = settingsCache[id] { return cached }
+        let loaded = Store.settings.dictionary(forKey: "extensions.settings.\(id)") ?? [:]
+        settingsCache[id] = loaded
+        return loaded
     }
 
     static func setSettings(_ values: [String: Any], for id: String) {
-        if values.isEmpty { Store.settings.removeObject(forKey: "extensions.settings.\(id)") }
-        else { Store.settings.set(values, forKey: "extensions.settings.\(id)") }
+        if values.isEmpty {
+            Store.settings.removeObject(forKey: "extensions.settings.\(id)")
+            settingsCache[id] = [:]
+        } else {
+            Store.settings.set(values, forKey: "extensions.settings.\(id)")
+            settingsCache[id] = values
+        }
+        settingsVersion += 1
     }
 
     /// The extension, on and running, that asked the browser not to offer to
     /// save passwords — a password manager doing the saving itself.
     var passwordSavingTakenBy: String? {
-        installed.first { $0.enabled && Extensions.settings(for: $0.id)["privacy.services.passwordSavingEnabled"] as? Bool == false }?.name
+        if let cached = cachedPasswordOwner, cached.version == Extensions.settingsVersion {
+            return cached.name
+        }
+        let owner = installed.first { $0.enabled && Extensions.settings(for: $0.id)["privacy.services.passwordSavingEnabled"] as? Bool == false }?.name
+        cachedPasswordOwner = (Extensions.settingsVersion, owner)
+        return owner
     }
 
     func setEnabled(_ id: String, _ on: Bool) {

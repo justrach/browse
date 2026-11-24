@@ -97,6 +97,10 @@ struct SideBar: View {
                 // the one on screen and the next one together, the next one
                 // coming in as this one goes, with nothing between them.
                 pages
+                    .animation(Motion.glide, value: browser.activeID)
+                    .animation(Motion.glide, value: browser.editingTab)
+                    .animation(Motion.settle, value: browser.tabs.map(\.id))
+                    .animation(Motion.settle, value: browser.pinnedCount)
 
                 Spacer(minLength: 0)
             }
@@ -151,10 +155,6 @@ struct SideBar: View {
             browser.take(providers)
         }
         .animation(Motion.quick, value: landing)
-        .animation(Motion.glide, value: browser.activeID)
-        .animation(Motion.glide, value: browser.editingTab)
-        .animation(Motion.settle, value: browser.tabs.map(\.id))
-        .animation(Motion.settle, value: browser.pinnedCount)
         // On a dark page — or in Full Screen over the pure black bezel — the
         // column uses dark appearance so its text and icons stay crisp.
         .environment(\.colorScheme, browser.fullScreen ? .dark : (tint.map { $0.dark ? .dark : .light } ?? scheme))
@@ -292,33 +292,24 @@ struct SideBar: View {
                     }
                     // A row too long for the window scrolls between the pins
                     // and the foot, rather than running under the lights at one
-                    // end and the foot at the other. While it fits it stays a
-                    // plain stack, and the space under it is still the
-                    // window's to be dragged by. Inside the page: the swipe
-                    // between spaces moves the page, scroll and all.
-                    ViewThatFits(in: .vertical) {
-                        rows
-                        ScrollViewReader { proxy in
-                            // The scroll view reaches into the margin on
-                            // the right and the rows keep it inside, so the
-                            // system's bar lands in the margin beside them
-                            // rather than over the cross on the tab under the
-                            // pointer. The column's edge lies over that margin
-                            // and answers first, so the bar never fights the
-                            // resize; the wheel and the trackpad still scroll.
-                            ScrollView(.vertical) {
-                                rows.padding(.trailing, 10)
-                            }
-                            .padding(.trailing, -10)
-                            // The tab you go to is the tab you see — ⌘1–⌘9,
-                            // ⇧⌘], a link opening beside the one on screen.
-                            .onChange(of: browser.activeID) { _, id in
-                                guard let id else { return }
-                                withAnimation(Motion.glide) { proxy.scrollTo(id) }
-                            }
-                            .onAppear {
-                                if let id = browser.activeID { proxy.scrollTo(id, anchor: .center) }
-                            }
+                    // end and the foot at the other. Capping maxHeight to
+                    // `rowsContentHeight` shrinks the ScrollView to the rows
+                    // when they fit so empty space below keeps dragging the window.
+                    ScrollViewReader { proxy in
+                        ScrollView(.vertical) {
+                            rows.padding(.trailing, 10)
+                        }
+                        .scrollBounceBehavior(.basedOnSize)
+                        .frame(maxHeight: rowsContentHeight)
+                        .padding(.trailing, -10)
+                        // The tab you go to is the tab you see — ⌘1–⌘9,
+                        // ⇧⌘], a link opening beside the one on screen.
+                        .onChange(of: browser.activeID) { _, id in
+                            guard let id else { return }
+                            withAnimation(Motion.glide) { proxy.scrollTo(id) }
+                        }
+                        .onAppear {
+                            if let id = browser.activeID { proxy.scrollTo(id, anchor: .center) }
                         }
                     }
                 }
@@ -339,13 +330,23 @@ struct SideBar: View {
         let cols = SideBar.pinColumns(pins.count)
         let width = pinWidth(for: pins.count)
         let height = min(SideBar.square, width)
+        let showsIcon = prefs.glyph == .icons
+        let showsReading = prefs.showsReading
         return VStack(alignment: .leading, spacing: 0) {
             if !pins.isEmpty {
                 VStack(spacing: 0) {
                     PinGrid(columns: cols, width: width, height: height, spacing: SideBar.pinGap) {
                         ForEach(pins) { tab in
-                            PinSquare(browser: browser, prefs: prefs, tab: tab, live: tab.id == row.active,
-                                      pill: pill, width: width, height: height)
+                            PinSquare(
+                                browser: browser,
+                                tab: tab,
+                                live: tab.id == row.active,
+                                editingPin: false,
+                                showsIcon: showsIcon,
+                                pill: pill,
+                                width: width,
+                                height: height
+                            )
                         }
                     }
                 }
@@ -354,11 +355,44 @@ struct SideBar: View {
             today(loose: !rest.isEmpty)
             VStack(spacing: SideBar.gap) {
                 ForEach(rest) { tab in
-                    SideRow(browser: browser, prefs: prefs, tab: tab, live: tab.id == row.active, pill: pill, close: {})
+                    SideRow(
+                        browser: browser,
+                        tab: tab,
+                        live: tab.id == row.active,
+                        editing: false,
+                        inSplit: false,
+                        showsIcon: showsIcon,
+                        showsReading: showsReading,
+                        consultingAgent: false,
+                        refusals: 0,
+                        pill: pill,
+                        close: {}
+                    )
                 }
             }
         }
         .allowsHitTesting(false)
+    }
+
+    /// Total intrinsic height of `rows` (agent section, user groups, Today header,
+    /// New Tab row, and loose rows) so the ScrollView collapses to exact content
+    /// height when it fits and keeps empty sidebar space draggable.
+    private var rowsContentHeight: CGFloat {
+        let agentCount = agentTabs.count
+        let agentBlock: CGFloat = agentCount == 0 ? 0 : (
+            SideBar.todayHeight + 4
+            + (browser.agentGroupCollapsed ? 0 : CGFloat(agentCount) * SideBar.row + CGFloat(max(0, agentCount - 1)) * SideBar.gap + 8)
+        )
+        let userGroupsHeight: CGFloat = browser.tabGroups.reduce(0) { sum, group in
+            let count = browser.tabs(inGroup: group.id).count
+            guard count > 0 else { return sum }
+            return sum + 26 + (group.collapsed ? 0 : CGFloat(count) * SideBar.row + CGFloat(max(0, count - 1)) * SideBar.gap + 6)
+        }
+        let looseCount = looseTabs.count
+        let looseBlock: CGFloat = looseCount == 0 ? 0 : (
+            CGFloat(looseCount) * SideBar.row + CGFloat(max(0, looseCount - 1)) * SideBar.gap
+        )
+        return agentBlock + userGroupsHeight + (SideBar.todayHeight + 4) + (SideBar.row + SideBar.gap) + looseBlock
     }
 
     /// Where the rows stop and the window's own drag area starts. Added up
@@ -370,19 +404,7 @@ struct SideBar: View {
         let pinRows = pins == 0 ? 0 : (pins + cols - 1) / cols
         let pinBlock = pinRows == 0 ? 0
             : CGFloat(pinRows) * pinHeight + CGFloat(pinRows - 1) * SideBar.pinGap + 10
-        let agentCount = agentTabs.count
-        let agentBlock: CGFloat = agentCount == 0 ? 0 : (
-            SideBar.todayHeight + 4
-            + (browser.agentGroupCollapsed ? 0 : CGFloat(agentCount) * (SideBar.row + SideBar.gap) + 6)
-        )
-        let userGroupsHeight: CGFloat = browser.tabGroups.reduce(0) { sum, group in
-            let count = browser.tabs(inGroup: group.id).count
-            guard count > 0 else { return sum }
-            return sum + SideBar.todayHeight + 2 + (group.collapsed ? 0 : CGFloat(count) * (SideBar.row + SideBar.gap) + 6)
-        }
-        let loose = CGFloat(looseTabs.count) * (SideBar.row + SideBar.gap)
-        let newRow = SideBar.row + SideBar.gap
-        return Metrics.strip + pinBlock + agentBlock + userGroupsHeight + SideBar.todayHeight + newRow + loose + 8
+        return Metrics.strip + 2 + pinBlock + rowsContentHeight + 6
     }
 
     // MARK: - the pinned squares
@@ -433,14 +455,19 @@ struct SideBar: View {
         // has just been moved to a new cell would otherwise report the drag
         // from where it now is, the target would jump back, and the square
         // would shuttle between two cells for as long as the finger stayed.
+        let showsIcon = prefs.glyph == .icons
+        let editingPin = browser.editingPin
+        let activeID = browser.activeID
+        let talkOnStage = browser.talkOnStage
         return VStack(spacing: 0) { PinGrid(columns: cols, width: width, height: height, spacing: SideBar.pinGap) {
             ForEach(Array(tabs.enumerated()), id: \.element.id) { index, tab in
                 let held = pinDragging == tab.id
                 PinSquare(
                     browser: browser,
-                    prefs: prefs,
                     tab: tab,
-                    live: tab.id == browser.activeID && !browser.talkOnStage,
+                    live: tab.id == activeID && !talkOnStage,
+                    editingPin: editingPin == tab.id,
+                    showsIcon: showsIcon,
                     pill: pill,
                     width: width,
                     height: height
@@ -517,18 +544,36 @@ struct SideBar: View {
 
     // MARK: - the rows
 
-    private var loose: some View {
-        VStack(spacing: SideBar.gap) {
-            // See the grid: the drag is measured in the column's space, not
-            // the row's, so a row that has just moved keeps its bearings.
-            let tops = pairTops
-            ForEach(Array(looseTabs.enumerated()), id: \.element.id) { index, tab in
-                let step = SideBar.row + SideBar.gap
+    private func loose(
+        tabs: [Tab],
+        pinnedCount: Int,
+        agentCount: Int,
+        activeID: Tab.ID?,
+        talkOnStage: Bool,
+        editingTab: Tab.ID?,
+        splitPair: (left: Tab.ID, right: Tab.ID)?,
+        showsIcon: Bool,
+        showsReading: Bool,
+        consultingAgent: Bool,
+        refusals: Int
+    ) -> some View {
+        let step = SideBar.row + SideBar.gap
+        let tops = pairTops(in: tabs)
+        return VStack(spacing: SideBar.gap) {
+            ForEach(Array(tabs.enumerated()), id: \.element.id) { index, tab in
+                let isLive = tab.id == activeID && !talkOnStage
+                let isEditing = editingTab == tab.id
+                let inSplit = splitPair.map { $0.left == tab.id || $0.right == tab.id } ?? false
                 SideRow(
                     browser: browser,
-                    prefs: prefs,
                     tab: tab,
-                    live: tab.id == browser.activeID && !browser.talkOnStage,
+                    live: isLive,
+                    editing: isEditing,
+                    inSplit: inSplit,
+                    showsIcon: showsIcon,
+                    showsReading: showsReading,
+                    consultingAgent: consultingAgent,
+                    refusals: isEditing ? refusals : 0,
                     pill: pill,
                     close: { browser.close(tab) }
                 )
@@ -548,19 +593,8 @@ struct SideBar: View {
                             .transition(.opacity)
                     }
                 }
-                // Positions here are among the loose rows; the pinned block
-                // sits in front of them in the real list. Carried out over
-                // the page, it opens there beside what's on it.
-                .background {
-                    GeometryReader { geo in
-                        Color.clear
-                            .onAppear { rowFrames.rects[tab.id] = geo.frame(in: .named("rows")) }
-                            .onChange(of: geo.frame(in: .named("rows"))) { _, rect in rowFrames.rects[tab.id] = rect }
-                            .onDisappear { rowFrames.rects[tab.id] = nil }
-                    }
-                }
                 .modifier(Carried(
-                    index: index, count: looseTabs.count, step: step, vertical: true, space: "rows",
+                    index: index, count: tabs.count, step: step, vertical: true, space: "rows",
                     outside: { point in
                         let at = CGPoint(x: point.x + rowsOrigin.x, y: point.y + rowsOrigin.y)
                         let out = at.x > prefs.sideWidth + 16
@@ -579,27 +613,17 @@ struct SideBar: View {
                         browser.open(tab, on: onLeft ? .left : .right)
                     }
                 ) {
-                    browser.move(tab, to: $0 + browser.pinnedCount + agentTabs.count)
+                    browser.move(tab, to: $0 + pinnedCount + agentCount)
                 })
-            }
-        }
-        .coordinateSpace(name: "rows")
-        // Where the rows start in the window, to turn a place among them
-        // into a place over the page.
-        .background {
-            GeometryReader { geo in
-                Color.clear
-                    .onAppear { rowsOrigin = geo.frame(in: .global).origin }
-                    .onChange(of: geo.frame(in: .global).origin) { _, new in rowsOrigin = new }
             }
         }
     }
 
     /// The upper row of each pair that sits together in the list — one, as
     /// there's one pair at a time.
-    private var pairTops: Set<Tab.ID> {
+    private func pairTops(in loose: [Tab]) -> Set<Tab.ID> {
         guard let split = browser.split else { return [] }
-        let ids = looseTabs.map(\.id)
+        let ids = loose.map(\.id)
         guard let l = ids.firstIndex(of: split.left), let r = ids.firstIndex(of: split.right),
               abs(l - r) == 1 else { return [] }
         return [ids[min(l, r)]]
@@ -684,12 +708,29 @@ struct SideBar: View {
 
                     VStack(spacing: SideBar.gap) {
                         let step = SideBar.row + SideBar.gap
+                        let activeID = browser.activeID
+                        let talkOnStage = browser.talkOnStage
+                        let editingTab = browser.editingTab
+                        let splitPair = browser.shownSplit.map { ($0.left.id, $0.right.id) }
+                        let showsIcon = prefs.glyph == .icons
+                        let showsReading = prefs.showsReading
+                        let consultingAgent = browser.consulting && prefs.usesAgent
+                        let refusals = browser.refusals
+                        let pinnedCount = browser.pinnedCount
                         ForEach(Array(grouped.enumerated()), id: \.element.id) { index, tab in
+                            let isLive = tab.id == activeID && !talkOnStage
+                            let isEditing = editingTab == tab.id
+                            let inSplit = splitPair.map { $0.0 == tab.id || $0.1 == tab.id } ?? false
                             SideRow(
                                 browser: browser,
-                                prefs: prefs,
                                 tab: tab,
-                                live: tab.id == browser.activeID && !browser.talkOnStage,
+                                live: isLive,
+                                editing: isEditing,
+                                inSplit: inSplit,
+                                showsIcon: showsIcon,
+                                showsReading: showsReading,
+                                consultingAgent: consultingAgent,
+                                refusals: isEditing ? refusals : 0,
                                 pill: pill,
                                 close: { browser.close(tab) }
                             )
@@ -703,7 +744,7 @@ struct SideBar: View {
                                 },
                                 land: { browser.dropOut(tab) }
                             ) {
-                                browser.move(tab, to: $0 + browser.pinnedCount)
+                                browser.move(tab, to: $0 + pinnedCount)
                             })
                         }
                     }
@@ -725,30 +766,146 @@ struct SideBar: View {
 
     /// The loose tabs and the Arc-style "+ New Tab" row, which scroll as one.
     private var rows: some View {
-        VStack(alignment: .leading, spacing: 0) {
-            if !agentTabs.isEmpty {
+        let agentList = agentTabs
+        let looseList = looseTabs
+        let pinnedCount = browser.pinnedCount
+        let activeID = browser.activeID
+        let talkOnStage = browser.talkOnStage
+        let editingTab = browser.editingTab
+        let splitPair = browser.shownSplit.map { (left: $0.left.id, right: $0.right.id) }
+        let showsIcon = prefs.glyph == .icons
+        let showsReading = prefs.showsReading
+        let consultingAgent = browser.consulting && prefs.usesAgent
+        let refusals = browser.refusals
+        let step = SideBar.row + SideBar.gap
+        let rowWidth = max(0, prefs.sideWidth - 20)
+        rowFrames.resolver = { [weak browser] in
+            Self.computeRowRects(browser: browser, width: rowWidth)
+        }
+
+        return VStack(alignment: .leading, spacing: 0) {
+            if !agentList.isEmpty {
                 agentGroupSection
             }
             ForEach(browser.tabGroups) { group in
                 let members = browser.tabs(inGroup: group.id)
                 if !members.isEmpty {
+                    let indexByID = Dictionary(uniqueKeysWithValues: members.enumerated().map { ($0.element.id, $0.offset) })
                     UserGroupSection(browser: browser, group: group, members: members) { tab in
+                        let isLive = tab.id == activeID && !talkOnStage
+                        let isEditing = editingTab == tab.id
+                        let inSplit = splitPair.map { $0.left == tab.id || $0.right == tab.id } ?? false
+                        let groupIndex = indexByID[tab.id] ?? 0
                         SideRow(
                             browser: browser,
-                            prefs: prefs,
                             tab: tab,
-                            live: tab.id == browser.activeID && !browser.talkOnStage,
+                            live: isLive,
+                            editing: isEditing,
+                            inSplit: inSplit,
+                            showsIcon: showsIcon,
+                            showsReading: showsReading,
+                            consultingAgent: consultingAgent,
+                            refusals: isEditing ? refusals : 0,
                             pill: pill,
                             close: { browser.close(tab) }
                         )
+                        .modifier(Carried(
+                            index: groupIndex,
+                            count: members.count,
+                            step: step,
+                            vertical: true,
+                            space: "rows",
+                            outside: { point in
+                                let at = CGPoint(x: point.x + rowsOrigin.x, y: point.y + rowsOrigin.y)
+                                let out = at.x > prefs.sideWidth + 16
+                                browser.dragOut(tab, at: out ? at : nil)
+                                return out
+                            },
+                            land: { browser.dropOut(tab) },
+                            rowFrames: rowFrames,
+                            draggingTab: tab,
+                            browserID: ObjectIdentifier(browser),
+                            onMerge: { targetID, onLeft in
+                                guard let target = browser.tabs.first(where: { $0.id == targetID }),
+                                      !target.isBlank
+                                else { return }
+                                if browser.activeID != target.id { browser.select(target) }
+                                browser.open(tab, on: onLeft ? .left : .right)
+                            }
+                        ) { targetGroupIndex in
+                            guard members.indices.contains(targetGroupIndex) else { return }
+                            let targetTab = members[targetGroupIndex]
+                            if let realIndex = browser.tabs.firstIndex(where: { $0.id == targetTab.id }) {
+                                browser.move(tab, to: realIndex)
+                            }
+                        })
                     }
                 }
             }
-            today(loose: !looseTabs.isEmpty)
+            today(loose: !looseList.isEmpty)
             NewTabRow(browser: browser)
                 .padding(.bottom, SideBar.gap)
-            loose
+            loose(
+                tabs: looseList,
+                pinnedCount: pinnedCount,
+                agentCount: agentList.count,
+                activeID: activeID,
+                talkOnStage: talkOnStage,
+                editingTab: editingTab,
+                splitPair: splitPair,
+                showsIcon: showsIcon,
+                showsReading: showsReading,
+                consultingAgent: consultingAgent,
+                refusals: refusals
+            )
         }
+        .coordinateSpace(name: "rows")
+        // Single origin probe for all draggable rows in `"rows"`; individual row
+        // frames are computed mathematically on demand during a drag.
+        .background {
+            GeometryReader { geo in
+                Color.clear
+                    .onAppear { rowsOrigin = geo.frame(in: .global).origin }
+                    .onChange(of: geo.frame(in: .global).origin) { _, new in rowsOrigin = new }
+            }
+        }
+    }
+
+    /// Computes exact `"rows"` coordinate-space hit boxes for uncollapsed tabs on demand
+    /// during drag-to-split so idle sidebar rows allocate zero `GeometryReader`s.
+    private static func computeRowRects(browser: Browser?, width: CGFloat) -> [Tab.ID: CGRect] {
+        guard let browser, width > 0 else { return [:] }
+        var rects: [Tab.ID: CGRect] = [:]
+        let step = SideBar.row + SideBar.gap
+        var y: CGFloat = 0
+
+        let agentList = browser.agentTabs
+        if !agentList.isEmpty {
+            y += SideBar.todayHeight + 4
+            if !browser.agentGroupCollapsed {
+                y += CGFloat(agentList.count) * SideBar.row + CGFloat(max(0, agentList.count - 1)) * SideBar.gap + 8
+            }
+        }
+
+        for group in browser.tabGroups {
+            let members = browser.tabs(inGroup: group.id)
+            guard !members.isEmpty else { continue }
+            y += 26
+            if !group.collapsed {
+                let insetWidth = max(0, width - 8)
+                for (i, tab) in members.enumerated() {
+                    rects[tab.id] = CGRect(x: 8, y: y + CGFloat(i) * step, width: insetWidth, height: SideBar.row)
+                }
+                y += CGFloat(members.count) * SideBar.row + CGFloat(max(0, members.count - 1)) * SideBar.gap + 6
+            }
+        }
+
+        y += (SideBar.todayHeight + 4) + step
+
+        for (i, tab) in browser.personalLooseTabs.enumerated() {
+            rects[tab.id] = CGRect(x: 0, y: y + CGFloat(i) * step, width: width, height: SideBar.row)
+        }
+        return rects
     }
 
     /// The foot's door and its margin beneath.
@@ -877,10 +1034,11 @@ private struct PinGrid: Layout {
 /// its row asks for, but never taller than the classic square, so a row with
 /// room to spare turns into a wide, short button rather than a bigger icon.
 private struct PinSquare: View {
-    @ObservedObject var browser: Browser
-    @ObservedObject var prefs: Preferences
+    let browser: Browser
     @ObservedObject var tab: Tab
     let live: Bool
+    let editingPin: Bool
+    let showsIcon: Bool
     let pill: Namespace.ID
     var width: CGFloat = 34
     var height: CGFloat = 34
@@ -894,9 +1052,9 @@ private struct PinSquare: View {
 
     var body: some View {
         Group {
-            if browser.editingPin == tab.id {
+            if editingPin {
                 PinField(browser: browser, tab: tab)
-            } else if prefs.glyph == .icons, let icon = tab.icon {
+            } else if showsIcon, let icon = tab.icon {
                 // In full colour asleep or awake: a pinned tile is mostly
                 // asleep, and a row of faded icons reads as switched off.
                 Mark(icon: icon, letter: tab.pin ?? "", size: scale * 16 / 34, dim: false)
@@ -978,17 +1136,20 @@ private struct NewTabRow: View {
 
 /// One tab, as a line in the column.
 private struct SideRow: View {
-    @ObservedObject var browser: Browser
-    @ObservedObject var prefs: Preferences
+    let browser: Browser
     @ObservedObject var tab: Tab
     let live: Bool
+    let editing: Bool
+    let inSplit: Bool
+    let showsIcon: Bool
+    let showsReading: Bool
+    let consultingAgent: Bool
+    let refusals: Int
     let pill: Namespace.ID
     let close: () -> Void
 
     @State private var hovering = false
     @State private var shake: CGFloat = 0
-
-    private var editing: Bool { browser.editingTab == tab.id }
 
     /// The ring or the speaker, which stay for as long as the page loads or
     /// plays (or is muted) and so keep a place of their own at the end of the
@@ -999,12 +1160,15 @@ private struct SideRow: View {
     private var speaker: Bool { !tab.loading && (tab.noisy || tab.muted) }
 
     var body: some View {
+        let showBadge = live && !tab.isBlank && consultingAgent && !status
+        let fadeTrailing = (hovering || showBadge) && !editing && !status
+
         HStack(spacing: 9) {
             if editing {
                 TabAddressField(browser: browser)
                     .frame(height: 16)
             } else {
-                if prefs.glyph == .icons, !tab.isBlank {
+                if showsIcon, !tab.isBlank {
                     Mark(icon: tab.icon, letter: tab.monogram, size: 16, dim: tab.asleep)
                 }
                 if tab.bench {
@@ -1013,7 +1177,7 @@ private struct SideRow: View {
                         .font(.system(size: 9))
                         .foregroundStyle(colour.opacity(0.7))
                 }
-                if browser.split?.has(tab.id) == true {
+                if inSplit {
                     // One of a pair side by side (Split.swift).
                     Image(systemName: "rectangle.split.2x1")
                         .font(.system(size: 9.5))
@@ -1052,21 +1216,9 @@ private struct SideRow: View {
         .padding(.trailing, status ? 7 : 10)
         .frame(height: SideBar.row)
         .frame(maxWidth: .infinity, alignment: .leading)
-        // The title keeps its length under the pointer and fades out
-        // beneath the cross (or the active graff connection mark), rather than
-        // being cut shorter, so its end doesn't jump as the pointer passes.
-        .mask {
-            let showBadge = live && !tab.isBlank && browser.consulting && prefs.usesAgent && !status
-            ZStack {
-                Rectangle().opacity((hovering || showBadge) && !editing && !status ? 0 : 1)
-                HStack(spacing: 0) {
-                    Rectangle()
-                    LinearGradient(colors: [.black, .clear], startPoint: .leading, endPoint: .trailing)
-                        .frame(width: 16)
-                    Color.clear.frame(width: 26)
-                }
-            }
-        }
+        // Fade the trailing edge only on the row being hovered or showing the
+        // agent mark so idle rows pay zero offscreen mask compositing passes.
+        .modifier(TrailingFadeMask(active: fadeTrailing))
         .overlay(alignment: .trailing) {
             if !editing {
                 ZStack {
@@ -1077,7 +1229,7 @@ private struct SideRow: View {
                             .frame(width: 15, height: 15)
                             .background(Palette.ink.opacity(0.07), in: Circle())
                             .transition(.opacity)
-                    } else if live && !tab.isBlank && browser.consulting && prefs.usesAgent && !status {
+                    } else if showBadge {
                         AgentTabBadge(agent: browser.agent)
                             .transition(.opacity)
                     }
@@ -1111,7 +1263,7 @@ private struct SideRow: View {
         .help(rowHelp)
         .animation(Motion.quick, value: hovering)
         .animation(Motion.glide, value: editing)
-        .onChange(of: browser.refusals) { _, _ in
+        .onChange(of: refusals) { _, _ in
             guard editing else { return }
             shake = 0
             withAnimation(.easeOut(duration: 0.5)) { shake = 1 }
@@ -1124,7 +1276,7 @@ private struct SideRow: View {
         if live {
             ZStack(alignment: .leading) {
                 Raised(corner: 9)
-                if prefs.showsReading {
+                if showsReading {
                     GeometryReader { geo in
                         ReadingFill(meter: tab.meter, width: geo.size.width)
                     }
@@ -1147,7 +1299,7 @@ private struct SideRow: View {
     }
 
     /// The other half of the pair on screen.
-    private var paired: Bool { !live && browser.showing(inSplit: tab) }
+    private var paired: Bool { !live && inSplit }
 
     private var rowHelp: String {
         let host = tab.address.map { Address.pretty($0) }
@@ -1160,6 +1312,26 @@ private struct SideRow: View {
     private var colour: Color {
         if live || hovering || paired { return Palette.ink }
         return Palette.ink.opacity(tab.asleep ? 0.62 : 0.78)
+    }
+}
+
+private struct TrailingFadeMask: ViewModifier {
+    let active: Bool
+
+    @ViewBuilder
+    func body(content: Content) -> some View {
+        if active {
+            content.mask {
+                HStack(spacing: 0) {
+                    Rectangle()
+                    LinearGradient(colors: [.black, .clear], startPoint: .leading, endPoint: .trailing)
+                        .frame(width: 16)
+                    Color.clear.frame(width: 26)
+                }
+            }
+        } else {
+            content
+        }
     }
 }
 

@@ -44,6 +44,14 @@ enum ExtensionShims {
     nonisolated static let version: String = {
         SHA256.hash(data: Data((script + PasskeyRelay.page + preparation).utf8)).prefix(8).map { String(format: "%02x", $0) }.joined() + (Store.testing ? "-test" : "")
     }()
+    nonisolated private static let eventPattern = try! NSRegularExpression(pattern: #"\.([a-zA-Z]+)\.(on[A-Z][A-Za-z]+)\b"#)
+    private static let isoDateFormatter = ISO8601DateFormatter()
+    private static var allowedCache: [String: Set<String>] = [:]
+
+    static func invalidateAllowed(_ id: String? = nil) {
+        if let id { allowedCache.removeValue(forKey: id) }
+        else { allowedCache.removeAll() }
+    }
 
     /// `fresh`: a package just unpacked or copied in. What only Search writes
     /// beside an extension — which permissions it added, which shim it
@@ -61,7 +69,7 @@ enum ExtensionShims {
         guard var manifest = try JSONSerialization.jsonObject(with: Data(contentsOf: manifestURL)) as? [String: Any]
         else { throw Crx.Refused.unpack }
 
-        let script = shim(for: folder)
+        let script = scanAndShim(for: folder, patchHTML: true)
         try script.write(to: folder.appendingPathComponent(file), atomically: true, encoding: .utf8)
         try PasskeyRelay.page.write(to: folder.appendingPathComponent(passkeys), atomically: true, encoding: .utf8)
 
@@ -145,26 +153,6 @@ enum ExtensionShims {
 
         let data = try JSONSerialization.data(withJSONObject: manifest, options: [.prettyPrinted, .withoutEscapingSlashes])
         try data.write(to: manifestURL, options: .atomic)
-
-        // Every page it ships — popup, options, background page, side panel.
-        let walker = files.enumerator(at: folder, includingPropertiesForKeys: [.isSymbolicLinkKey])
-        let signature: [UInt8] = [0xEF, 0xBB, 0xBF]
-        while let url = walker?.nextObject() as? URL {
-            guard (try? url.resourceValues(forKeys: [.isSymbolicLinkKey]).isSymbolicLink) != true,
-                  ["html", "htm"].contains(url.pathExtension.lowercased()),
-                  let bytes = try? Data(contentsOf: url),
-                  let page = String(data: bytes, encoding: .utf8)
-            else { continue }
-            let hasBOM = page.hasPrefix("\u{FEFF}") || bytes.starts(with: signature)
-            let base = page.hasPrefix("\u{FEFF}") || !bytes.starts(with: signature) ? page : "\u{FEFF}" + page
-            let patched = ExtensionShims.withShim(base)
-            var out = Data(patched.utf8)
-            if hasBOM, !out.starts(with: signature) {
-                out.insert(contentsOf: signature, at: 0)
-            }
-            guard out != bytes else { continue }
-            try? out.write(to: url, options: .atomic)
-        }
     }
 
     /// Places the shim script tag first in `<head>` (ignoring `<header>`), or
@@ -216,32 +204,68 @@ enum ExtensionShims {
     /// — `chrome.tabs.onUpdated`, `e.runtime.onInstalled` — so its worker
     /// can take their listeners late (see the end of the script).
     nonisolated static func shim(for folder: URL) -> String {
+        scanAndShim(for: folder, patchHTML: false)
+    }
+
+    /// Single-pass directory walk collecting `.js` event hooks and shipped
+    /// script paths (with a fast `fileSize == 0` empty check) while optionally
+    /// injecting the shim `<script>` tag into `.html`/`.htm` pages.
+    nonisolated private static func scanAndShim(for folder: URL, patchHTML: Bool) -> String {
         var found = Set<String>()
-        let pattern = try! NSRegularExpression(pattern: #"\.([a-zA-Z]+)\.(on[A-Z][A-Za-z]+)\b"#)
-        let walker = FileManager.default.enumerator(at: folder, includingPropertiesForKeys: nil)
+        var scripts: [String] = []
+        let basePrefixCount = folder.standardizedFileURL.path.count
+        let htmlSignature: [UInt8] = [0xEF, 0xBB, 0xBF]
+        let keys: [URLResourceKey] = patchHTML ? [.isSymbolicLinkKey, .fileSizeKey] : [.fileSizeKey]
+        let walker = FileManager.default.enumerator(at: folder, includingPropertiesForKeys: keys)
         while let url = walker?.nextObject() as? URL {
-            guard url.pathExtension == "js", url.lastPathComponent != file,
-                  var text = try? String(contentsOf: url, encoding: .utf8) else { continue }
+            let ext = url.pathExtension.lowercased()
+            if patchHTML, ext == "html" || ext == "htm" {
+                guard (try? url.resourceValues(forKeys: [.isSymbolicLinkKey]).isSymbolicLink) != true,
+                      let bytes = try? Data(contentsOf: url),
+                      let page = String(data: bytes, encoding: .utf8)
+                else { continue }
+                let hasBOM = page.hasPrefix("\u{FEFF}") || bytes.starts(with: htmlSignature)
+                let base = page.hasPrefix("\u{FEFF}") || !bytes.starts(with: htmlSignature) ? page : "\u{FEFF}" + page
+                let patched = ExtensionShims.withShim(base)
+                var out = Data(patched.utf8)
+                if hasBOM, !out.starts(with: htmlSignature) {
+                    out.insert(contentsOf: htmlSignature, at: 0)
+                }
+                if out != bytes {
+                    try? out.write(to: url, options: .atomic)
+                }
+                continue
+            }
+            guard ext == "js" else { continue }
+            let path = String(url.standardizedFileURL.path.dropFirst(basePrefixCount))
+            let size = (try? url.resourceValues(forKeys: [.fileSizeKey]).fileSize) ?? -1
+            if size == 0 {
+                scripts.append("-" + path)
+                continue
+            }
+            if url.lastPathComponent == file {
+                scripts.append(path)
+                continue
+            }
+            guard var text = try? String(contentsOf: url, encoding: .utf8) else {
+                scripts.append(path)
+                continue
+            }
+            let empty = text.allSatisfy(\.isWhitespace)
+            scripts.append((empty ? "-" : "") + path)
+            if empty { continue }
             // Not the shim's own words, in a worker that already carries it.
-            if text.hasPrefix(marker), let end = text.range(of: ender) { text = String(text[end.upperBound...]) }
+            if text.hasPrefix(marker), let end = text.range(of: ender) {
+                text = String(text[end.upperBound...])
+            }
             let range = NSRange(text.startIndex..., in: text)
-            for match in pattern.matches(in: text, range: range) {
-                guard let a = Range(match.range(at: 1), in: text), let b = Range(match.range(at: 2), in: text) else { continue }
+            for match in eventPattern.matches(in: text, range: range) {
+                guard let a = Range(match.range(at: 1), in: text),
+                      let b = Range(match.range(at: 2), in: text) else { continue }
                 found.insert("\(text[a]).\(text[b])")
             }
         }
         let list = (try? JSONSerialization.data(withJSONObject: found.sorted())).flatMap { String(data: $0, encoding: .utf8) } ?? "[]"
-        // And the scripts it ships, so its worker can be told at once that
-        // one isn't there (see importScripts in the script).
-        var scripts: [String] = []
-        let all = FileManager.default.enumerator(at: folder, includingPropertiesForKeys: nil)
-        while let url = all?.nextObject() as? URL {
-            guard url.pathExtension == "js" else { continue }
-            let path = String(url.standardizedFileURL.path.dropFirst(folder.standardizedFileURL.path.count))
-            // An empty one is marked: there is nothing to run in it.
-            let empty = ((try? String(contentsOf: url, encoding: .utf8)) ?? "x").trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
-            scripts.append((empty ? "-" : "") + path)
-        }
         let shipped = (try? JSONSerialization.data(withJSONObject: scripts.sorted())).flatMap { String(data: $0, encoding: .utf8) } ?? "[]"
         return script.replacingOccurrences(of: "__SEARCH_EVENTS__", with: list)
             .replacingOccurrences(of: "__SEARCH_SCRIPTS__", with: shipped)
@@ -334,8 +358,11 @@ enum ExtensionShims {
     /// so the one that counts is here. The manifest is the one WebKit
     /// already holds, not the file read again on every call.
     static func allowed(_ id: String, context: WKWebExtensionContext) -> Set<String> {
+        if let cached = allowedCache[id] { return cached }
         let asked = (context.webExtension.manifest["permissions"] as? [Any] ?? []).compactMap { $0 as? String }
-        return Set(asked + (Store.settings.stringArray(forKey: "extensions.granted.\(id)") ?? []))
+        let granted = Set(asked + (Store.settings.stringArray(forKey: "extensions.granted.\(id)") ?? []))
+        allowedCache[id] = granted
+        return granted
     }
 
     private static func run(_ api: String, _ args: [Any], context: WKWebExtensionContext, owner: Extensions) async throws -> Any? {
@@ -492,7 +519,7 @@ enum ExtensionShims {
             return browser.loot.kept.enumerated().map { index, keep in
                 ["id": index + 1, "url": keep.url.absoluteString, "finalUrl": keep.url.absoluteString,
                  "filename": keep.path, "state": "complete", "exists": keep.stillThere,
-                 "startTime": ISO8601DateFormatter().string(from: keep.date), "mime": ""] as [String: Any]
+                 "startTime": isoDateFormatter.string(from: keep.date), "mime": ""] as [String: Any]
             }
         case "downloads.open", "downloads.show":
             guard let index = first as? Int, browser.loot.kept.indices.contains(index - 1) else { return nil }
@@ -809,11 +836,13 @@ enum ExtensionShims {
             guard yes else { return false }
             let had = Store.settings.stringArray(forKey: "extensions.granted.\(id)") ?? []
             Store.settings.set(Array(Set(had + wanted)).sorted(), forKey: "extensions.granted.\(id)")
+            invalidateAllowed(id)
             return true
         case "permissions.remove":
             let gone = Set((first as? [String]) ?? [])
             let had = Store.settings.stringArray(forKey: "extensions.granted.\(id)") ?? []
             Store.settings.set(had.filter { !gone.contains($0) }, forKey: "extensions.granted.\(id)")
+            invalidateAllowed(id)
             return true
 
         // MARK: tabs, by where they are in the row
@@ -1199,8 +1228,14 @@ enum ExtensionShims {
         }
     }
 
-    private static func find(_ key: String, in nodes: [Bookmark]) -> Hit? {
-        flat(nodes).first { $0.node.id.uuidString == key }
+    private static func find(_ key: String, in nodes: [Bookmark], parent: String = "1") -> Hit? {
+        for (index, n) in nodes.enumerated() {
+            if n.id.uuidString == key { return (n, parent, index) }
+            if let children = n.children, let hit = find(key, in: children, parent: n.id.uuidString) {
+                return hit
+            }
+        }
+        return nil
     }
 
     private static func node(_ n: Bookmark, parent: String, index: Int, deep: Bool) -> [String: Any] {

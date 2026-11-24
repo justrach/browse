@@ -108,6 +108,7 @@ extension Browser {
             tab.dropCover()
         }
         TabPreviewCache.shared.trim()
+        Favicons.shared.trim()
 
         if critical {
             URLCache.shared.removeAllCachedResponses()
@@ -134,6 +135,7 @@ extension Browser {
         URLCache.shared.removeAllCachedResponses()
         for tab in tabs + parkedTabs where tab.asleep { tab.dropCover() }
         TabPreviewCache.shared.trim()
+        Favicons.shared.trim()
         AgentTools.shared.reapIdlePages(olderThan: 60)
         if !eligible.isEmpty {
             announce("Put \(eligible.count) inactive tab\(eligible.count == 1 ? "" : "s") to sleep")

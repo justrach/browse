@@ -101,22 +101,35 @@ enum SiteCardPanel {
         panel.hasShadow = true
         panel.becomesKeyOnlyIfNeeded = true
         panel.hidesOnDeactivate = true
-        // Under the address, lined up with the tab's own edge.
+        // Under the address, lined up with the tab's own edge — flipping above
+        // when bottom space is tight so the card stays onscreen and anchored.
         let spot = window.convertToScreen(field.convert(field.bounds, to: nil))
+        var flippedAbove = false
         var origin = NSPoint(x: spot.minX - 12, y: spot.minY - 12 - size.height)
         if let screen = window.screen?.visibleFrame {
             origin.x = min(max(origin.x, screen.minX + 8), screen.maxX - size.width - 8)
-            origin.y = max(origin.y, screen.minY + 8)
+            if origin.y < screen.minY + 8, spot.maxY + 12 + size.height <= screen.maxY - 8 {
+                origin.y = spot.maxY + 12
+                flippedAbove = true
+            } else {
+                origin.y = max(origin.y, screen.minY + 8)
+            }
         }
         panel.setFrameOrigin(origin)
         window.addChildWindow(panel, ordered: .above)
-        // Its size follows the card, keeping the top edge under the address.
+        // Its size follows the card, keeping the attached edge pinned beside the field.
         host.onResize = { [weak panel] fitted in
             guard let panel, fitted.width > 0, fitted.height > 0,
                   panel.frame.size != fitted else { return }
             var frame = panel.frame
-            frame.origin.y += frame.height - fitted.height
+            if !flippedAbove {
+                frame.origin.y += frame.height - fitted.height
+            }
             frame.size = fitted
+            if let screen = panel.parent?.screen?.visibleFrame {
+                frame.origin.x = min(max(frame.origin.x, screen.minX + 8), screen.maxX - fitted.width - 8)
+                frame.origin.y = min(max(frame.origin.y, screen.minY + 8), screen.maxY - fitted.height - 8)
+            }
             panel.setFrame(frame, display: true)
         }
         self.panel = panel
@@ -160,7 +173,7 @@ enum SiteCardPanel {
 /// that belong to this page rather than to the browser. The connection's line
 /// goes a step further in, to what it means and the certificate behind it.
 struct SiteCard: View {
-    let browser: Browser
+    @ObservedObject var browser: Browser
     @ObservedObject var tab: Tab
     let close: () -> Void
     @ObservedObject private var shield = Shield.shared
@@ -213,8 +226,32 @@ struct SiteCard: View {
         return host.hasPrefix("www.") ? String(host.dropFirst(4)) : host
     }
 
+    private var siteOrigin: String? {
+        guard let url = tab.pageAddress,
+              let scheme = url.scheme?.lowercased(), scheme == "https" || scheme == "http",
+              let host = url.host()?.lowercased(), !host.isEmpty else { return nil }
+        if let port = url.port,
+           !((scheme == "https" && port == 443) || (scheme == "http" && port == 80)) {
+            return "\(scheme)://\(host):\(port)"
+        }
+        return "\(scheme)://\(host)"
+    }
+
+    private var sitePermissions: [Browser.SavedPermission] {
+        _ = browser.permissionsRevision
+        guard let host = tab.pageAddress?.host()?.lowercased(), !host.isEmpty else { return [] }
+        let origin = siteOrigin
+        return browser.savedCaptureChoices().filter { choice in
+            let savedOrigin = choice.origin.lowercased()
+            if savedOrigin.contains("://") { return savedOrigin == origin }
+            return savedOrigin == host
+        }
+    }
+
     private var front: some View {
-        VStack(alignment: .leading, spacing: 0) {
+        let permissions = sitePermissions
+        let veils = browser.hereVeils
+        return VStack(alignment: .leading, spacing: 0) {
             if let url = tab.pageAddress {
                 Header(title: SiteCard.site(url))
             }
@@ -229,6 +266,20 @@ struct SiteCard: View {
                         browser.reload()
                     }
                 }
+            }
+            if !permissions.isEmpty || !veils.isEmpty {
+                Separator()
+                ForEach(permissions) { choice in
+                    Row("Reset \(choice.kind)", keys: choice.allowed ? "Allowed" : "Blocked") {
+                        browser.resetCaptureChoice(key: choice.key)
+                    }
+                }
+                if !veils.isEmpty {
+                    Row("Hidden on This Site (\(veils.count))") {
+                        after { browser.reviewing = true }
+                    }
+                }
+                Separator()
             }
             Row("Copy Address", keys: "⇧⌘C") { after { browser.copyAddress() } }
             Separator()

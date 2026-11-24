@@ -253,6 +253,23 @@ private struct ChatRow: View {
     let open: () -> Void
     @State private var hovering = false
 
+    private static let previewLimit = 128
+    private static var previewCache: [String: AttributedString] = [:]
+    private static var previewRing: [String?] = Array(repeating: nil, count: 128)
+    private static var previewCursor = 0
+
+    private static func cachedRich(_ text: String) -> AttributedString {
+        if let hit = previewCache[text] { return hit }
+        let rendered = Agent.rich(text)
+        if let evicted = previewRing[previewCursor] {
+            previewCache.removeValue(forKey: evicted)
+        }
+        previewRing[previewCursor] = text
+        previewCursor = (previewCursor + 1) % previewLimit
+        previewCache[text] = rendered
+        return rendered
+    }
+
     private static let ago: RelativeDateTimeFormatter = {
         let formatter = RelativeDateTimeFormatter()
         formatter.unitsStyle = .abbreviated
@@ -271,7 +288,7 @@ private struct ChatRow: View {
                         .font(.system(size: 13, weight: .medium))
                         .foregroundStyle(Palette.ink)
                         .lineLimit(1)
-                    Text(Agent.rich(chat.failed ?? Self.preview(chat.gist)))
+                    Text(Self.cachedRich(chat.failed ?? Self.preview(chat.gist)))
                         .font(.system(size: 12))
                         .foregroundStyle(chat.failed == nil ? Palette.muted : .red.opacity(0.85))
                         .lineLimit(1)

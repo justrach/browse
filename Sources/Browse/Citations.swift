@@ -40,28 +40,226 @@ enum Citations {
 
     private static let link = try! NSRegularExpression(pattern: #"\[([^\]\n]+)\]\((https?://[^)\s]+)\)"#)
 
+    private final class MarkCache: @unchecked Sendable {
+        struct Anchor {
+            let prefix: String
+            let utf8Count: Int
+            let rewrittenPrefix: String
+            let sources: [Source]
+            let numbers: [String: Int]
+            let inCode: Bool
+            let inMath: Bool
+        }
+
+        private let lock = NSLock()
+        private let exactLimit = 128
+        private var exact: [String: (text: String, sources: [Source])] = [:]
+        private var exactRing: [String?] = Array(repeating: nil, count: 128)
+        private var exactCursor = 0
+        private var lastInput: String?
+        private var lastOutput: (text: String, sources: [Source])?
+        private var anchors: [Anchor] = []
+
+        func exactHit(_ text: String) -> (text: String, sources: [Source])? {
+            lock.lock()
+            defer { lock.unlock() }
+            if let last = lastInput, last == text, let out = lastOutput {
+                storeExactLocked(text, out)
+                return out
+            }
+            return exact[text]
+        }
+
+        func matchingAnchor(for text: String) -> Anchor? {
+            lock.lock()
+            defer { lock.unlock() }
+            let count = text.utf8.count
+            var best: Anchor?
+            for anchor in anchors where count >= anchor.utf8Count && anchor.utf8Count > 0 {
+                if let current = best, anchor.utf8Count <= current.utf8Count { continue }
+                if text.utf8.prefix(anchor.utf8Count).elementsEqual(anchor.prefix.utf8) {
+                    best = anchor
+                }
+            }
+            return best
+        }
+
+        func updateAnchor(
+            oldUTF8Count: Int?,
+            newPrefix: String,
+            rewrittenPrefix: String,
+            sources: [Source],
+            numbers: [String: Int],
+            inCode: Bool,
+            inMath: Bool
+        ) {
+            lock.lock()
+            defer { lock.unlock() }
+            let updated = Anchor(
+                prefix: newPrefix,
+                utf8Count: newPrefix.utf8.count,
+                rewrittenPrefix: rewrittenPrefix,
+                sources: sources,
+                numbers: numbers,
+                inCode: inCode,
+                inMath: inMath
+            )
+            if let oldUTF8Count, let idx = anchors.firstIndex(where: { $0.utf8Count == oldUTF8Count && newPrefix.utf8.prefix(oldUTF8Count).elementsEqual($0.prefix.utf8) }) {
+                anchors[idx] = updated
+            } else {
+                if anchors.count >= 4 { anchors.removeFirst() }
+                anchors.append(updated)
+            }
+        }
+
+        func recordLast(text: String, result: (text: String, sources: [Source]), cacheExact: Bool = false) {
+            lock.lock()
+            defer { lock.unlock() }
+            lastInput = text
+            lastOutput = result
+            if cacheExact {
+                storeExactLocked(text, result)
+            }
+        }
+
+        private func storeExactLocked(_ text: String, _ result: (text: String, sources: [Source])) {
+            if exact[text] != nil {
+                exact[text] = result
+                return
+            }
+            if let evicted = exactRing[exactCursor] {
+                exact.removeValue(forKey: evicted)
+            }
+            exactRing[exactCursor] = text
+            exactCursor = (exactCursor + 1) % exactLimit
+            exact[text] = result
+        }
+    }
+
+    private static let markCache = MarkCache()
+
     /// The reply with every citation turned into a numbered marker, and the
     /// sources in the order they were first cited.
     static func mark(_ text: String) -> (text: String, sources: [Source]) {
+        if let hit = markCache.exactHit(text) {
+            return hit
+        }
+
+        if let anchor = markCache.matchingAnchor(for: text) {
+            let suffixStart = text.utf8.index(text.startIndex, offsetBy: anchor.utf8Count)
+            let tail = text[suffixStart...]
+            var sources = anchor.sources
+            var numbers = anchor.numbers
+            var inCode = anchor.inCode
+            var inMath = anchor.inMath
+
+            if let lastNL = tail.lastIndex(of: "\n") {
+                var stableOut = anchor.rewrittenPrefix
+                stableOut.reserveCapacity(anchor.rewrittenPrefix.count + tail.count)
+                let completedSlice = tail[..<lastNL]
+                for lineSub in completedSlice.split(separator: "\n", omittingEmptySubsequences: false) {
+                    stableOut += processLine(String(lineSub), sources: &sources, numbers: &numbers, inCode: &inCode, inMath: &inMath)
+                    stableOut.append("\n")
+                }
+                let afterNL = tail.index(after: lastNL)
+                markCache.updateAnchor(
+                    oldUTF8Count: anchor.utf8Count,
+                    newPrefix: String(text[..<afterNL]),
+                    rewrittenPrefix: stableOut,
+                    sources: sources,
+                    numbers: numbers,
+                    inCode: inCode,
+                    inMath: inMath
+                )
+                let rewrittenTail = processLine(String(text[afterNL...]), sources: &sources, numbers: &numbers, inCode: &inCode, inMath: &inMath)
+                let result = (stableOut + rewrittenTail, sources)
+                markCache.recordLast(text: text, result: result)
+                return result
+            } else {
+                let rewrittenTail = processLine(String(tail), sources: &sources, numbers: &numbers, inCode: &inCode, inMath: &inMath)
+                let result = (anchor.rewrittenPrefix + rewrittenTail, sources)
+                markCache.recordLast(text: text, result: result)
+                return result
+            }
+        }
+
         var sources: [Source] = []
         var numbers: [String: Int] = [:]
         var inCode = false
         var inMath = false
-        let lines = text.components(separatedBy: "\n").map { line -> String in
-            let trimmed = line.trimmingCharacters(in: .whitespaces)
-            if trimmed.hasPrefix("```") { inCode.toggle(); return line }
-            if inCode { return line }
-            if trimmed == "$$" || trimmed == "\\[" || trimmed == "\\]" { inMath.toggle(); return line }
-            if inMath || trimmed.hasPrefix("$$") || trimmed.hasPrefix("\\[") { return line }
-            // Keep pipe table rows untouched so links inside table cells stay
-            // clean clickable links instead of losing their closing parenthesis.
-            if trimmed.hasPrefix("|") { return line }
-            return rewrite(line, sources: &sources, numbers: &numbers)
+
+        if let lastNL = text.lastIndex(of: "\n") {
+            var stableOut = ""
+            stableOut.reserveCapacity(text.count)
+            for lineSub in text[..<lastNL].split(separator: "\n", omittingEmptySubsequences: false) {
+                stableOut += processLine(String(lineSub), sources: &sources, numbers: &numbers, inCode: &inCode, inMath: &inMath)
+                stableOut.append("\n")
+            }
+            let afterNL = text.index(after: lastNL)
+            markCache.updateAnchor(
+                oldUTF8Count: nil,
+                newPrefix: String(text[..<afterNL]),
+                rewrittenPrefix: stableOut,
+                sources: sources,
+                numbers: numbers,
+                inCode: inCode,
+                inMath: inMath
+            )
+            let rewrittenTail = processLine(String(text[afterNL...]), sources: &sources, numbers: &numbers, inCode: &inCode, inMath: &inMath)
+            let result = (stableOut + rewrittenTail, sources)
+            markCache.recordLast(text: text, result: result, cacheExact: true)
+            return result
         }
-        return (lines.joined(separator: "\n"), sources)
+
+        let rewritten = processLine(text, sources: &sources, numbers: &numbers, inCode: &inCode, inMath: &inMath)
+        let result = (rewritten, sources)
+        markCache.recordLast(text: text, result: result, cacheExact: true)
+        return result
+    }
+
+    private static func processLine(
+        _ line: String,
+        sources: inout [Source],
+        numbers: inout [String: Int],
+        inCode: inout Bool,
+        inMath: inout Bool
+    ) -> String {
+        let trimmed = line.trimmingCharacters(in: .whitespaces)
+        if trimmed.hasPrefix("```") { inCode.toggle(); return line }
+        if inCode { return line }
+        if trimmed == "$$" || trimmed == "\\[" || trimmed == "\\]" { inMath.toggle(); return line }
+        if inMath || trimmed.hasPrefix("$$") || trimmed.hasPrefix("\\[") { return line }
+        // Keep pipe table rows untouched so links inside table cells stay
+        // clean clickable links instead of losing their closing parenthesis.
+        if trimmed.hasPrefix("|") { return line }
+        return rewrite(line, sources: &sources, numbers: &numbers)
+    }
+
+    private static func stripListMark(_ s: String) -> Substring {
+        guard let first = s.first else { return s[...] }
+        var idx = s.startIndex
+        if first == "-" || first == "*" || first == "•" || first == "+" {
+            idx = s.index(after: idx)
+        } else if first.isNumber {
+            var digitsEnd = idx
+            while digitsEnd < s.endIndex, s[digitsEnd].isNumber {
+                digitsEnd = s.index(after: digitsEnd)
+            }
+            guard digitsEnd < s.endIndex, s[digitsEnd] == "." || s[digitsEnd] == ")" else {
+                return s[...]
+            }
+            idx = s.index(after: digitsEnd)
+        } else {
+            return s[...]
+        }
+        while idx < s.endIndex, s[idx].isWhitespace {
+            idx = s.index(after: idx)
+        }
+        return s[idx...]
     }
 
     private static func rewrite(_ line: String, sources: inout [Source], numbers: inout [String: Int]) -> String {
+        guard line.contains("](") else { return line }
         let whole = line as NSString
         let matches = link.matches(in: line, range: NSRange(location: 0, length: whole.length))
         guard !matches.isEmpty else { return line }
@@ -75,8 +273,8 @@ enum Citations {
             let address = whole.substring(with: match.range(at: 2))
             // What the line says before the link, less a list's own mark: a
             // line that is only a bulleted link is a link, not a citation.
-            let prefix = (out + before).trimmingCharacters(in: .whitespaces)
-                .replacingOccurrences(of: #"^([-*•+]|\d+[.)])\s*"#, with: "", options: .regularExpression)
+            let trimmedPrefix = (out + before).trimmingCharacters(in: .whitespaces)
+            let prefix = stripListMark(trimmedPrefix)
             let endsSentence = prefix.last.map { ".!?;:)(—–".contains($0) } ?? false
             let restIsBare = after.trimmingCharacters(in: CharacterSet.whitespaces.union(.punctuationCharacters)).isEmpty
             guard endsSentence, restIsBare, let url = URL(string: address) else {

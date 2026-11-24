@@ -44,7 +44,7 @@ enum Web {
     /// engine can't run.
     static let userAgentName = "Version/\(safariVersion) Safari/605.1.15"
 
-    private static var safariVersion: String {
+    private static let safariVersion: String = {
         for path in ["/System/Cryptexes/App/System/Applications/Safari.app", "/Applications/Safari.app"] {
             if let version = Bundle(path: path)?.infoDictionary?["CFBundleShortVersionString"] as? String {
                 return version
@@ -61,13 +61,13 @@ enum Web {
         // From macOS 26 Safari shares its number; before, it was 3 ahead (14 -> 17, 15 -> 18).
         let os = ProcessInfo.processInfo.operatingSystemVersion.majorVersion
         return os >= 26 ? "\(os).0" : "\(os + 3).0"
-    }
+    }()
 
     /// `space`: the space the tab belongs to, when it is not the one on
     /// screen — a parked row made ahead of time (see Spaces.swift).
     /// `store`: a shy tab's own, for one opened from it — a link followed
     /// out of a private page is still signed in to whatever that page was.
-    static func configuration(shy: Bool = false, space: UUID? = nil, store: WKWebsiteDataStore? = nil) -> WKWebViewConfiguration {
+    static func configuration(shy: Bool = false, space: UUID? = nil, store: WKWebsiteDataStore? = nil, extensionsInPrivate: Bool? = nil) -> WKWebViewConfiguration {
         let config = WKWebViewConfiguration()
         // The real store, not the ephemeral one: staying signed in between
         // launches is the difference between a browser and a preview pane. A
@@ -78,7 +78,8 @@ enum Web {
         // Chrome extensions see every page but a private one, unless Settings
         // › Extensions says they may. The controller has to be there when the
         // view is made; it can't be added after.
-        if #available(macOS 15.4, *), !shy || Store.settings.bool(forKey: "extensions.private") {
+        let allowPrivateExtensions = extensionsInPrivate ?? Store.settings.bool(forKey: "extensions.private")
+        if #available(macOS 15.4, *), !shy || allowPrivateExtensions {
             MainActor.assumeIsolated {
                 Extensions.attach(config)
                 if shy, !ExtensionProxy.current.isEmpty {
@@ -185,7 +186,11 @@ final class Tab: ObservableObject, Identifiable {
     /// The web view if there is one yet, for the callers that must not be
     /// the reason there is.
     private(set) var built: PageView?
-    private let configuration: WKWebViewConfiguration
+    private let storedConfiguration: WKWebViewConfiguration?
+    private let spaceHint: UUID?
+    private let allowPrivateExtensions: Bool
+    private lazy var configuration: WKWebViewConfiguration = storedConfiguration
+        ?? Web.configuration(shy: shy, space: spaceHint, extensionsInPrivate: shy ? allowPrivateExtensions : nil)
     let extensionReturn = ExtensionReturnNavigation()
 
     /// Whether its page was made with the extension controller in it — every
@@ -205,6 +210,21 @@ final class Tab: ObservableObject, Identifiable {
     }
     /// The stylesheet a page not yet built is to be armed with.
     private var veils = ""
+    private var armedSignature: ArmedSignature?
+    private var wakeToken: UInt64 = 0
+    private var wakeCommitted = false
+
+    private struct ArmedSignature: Equatable {
+        let scrollRelay: Bool
+        let autoScroll: Bool
+        let videoKeys: Bool
+        let syncsSplitScroll: Bool
+        let bench: Bool
+        let hoveredLink: Bool
+        let windowFullScreen: Bool
+        let passkeysOffered: Bool
+        let css: String
+    }
 
     @Published private(set) var title = ""
     @Published private(set) var address: URL?
@@ -217,6 +237,7 @@ final class Tab: ObservableObject, Identifiable {
     var pageAddress: URL? { committed ?? address }
 
     func didCommit() {
+        wakeCommitted = true
         // A new document: whatever the old one waited for under its field
         // went with it.
         if let built { Passkeys.shared.forget(built) }
@@ -527,10 +548,12 @@ final class Tab: ObservableObject, Identifiable {
         return "New Tab"
     }
 
-    init(shy: Bool = false, bench: Bool = false, configuration: WKWebViewConfiguration? = nil) {
+    init(shy: Bool = false, bench: Bool = false, configuration: WKWebViewConfiguration? = nil, space: UUID? = nil) {
         self.shy = shy
         self.bench = bench
-        self.configuration = configuration ?? Web.configuration(shy: shy)
+        self.storedConfiguration = configuration
+        self.spaceHint = space
+        self.allowPrivateExtensions = configuration == nil && shy ? Store.settings.bool(forKey: "extensions.private") : false
     }
 
     private func build() -> PageView {
@@ -727,103 +750,90 @@ final class Tab: ObservableObject, Identifiable {
     /// pointing mode, and this site's stylesheet of things you have hidden. The
     /// stylesheet goes in before the document has a body, so nothing is ever
     /// seen arriving and then leaving again.
+    @MainActor
+    private enum Scripts {
+        static let scrollRelay = WKUserScript(source: ScrollRelay.script, injectionTime: .atDocumentEnd, forMainFrameOnly: true, in: Web.world)
+        static let veilingPicker = WKUserScript(source: Veiling.picker, injectionTime: .atDocumentStart, forMainFrameOnly: true, in: Web.world)
+        static let formRelay = WKUserScript(source: FormRelay.script, injectionTime: .atDocumentEnd, forMainFrameOnly: true, in: Web.world)
+        static let autoScroll = WKUserScript(source: AutoScroll.script, injectionTime: .atDocumentEnd, forMainFrameOnly: true, in: Web.world)
+        static let videoKeys = WKUserScript(source: VideoKeys.script, injectionTime: .atDocumentStart, forMainFrameOnly: false, in: Web.world)
+        static let splitScrollSync = WKUserScript(source: SplitScrollSyncRelay.script, injectionTime: .atDocumentEnd, forMainFrameOnly: true, in: Web.world)
+        static let benchTiming = WKUserScript(source: "performance.setResourceTimingBufferSize(100000)", injectionTime: .atDocumentStart, forMainFrameOnly: true, in: Web.world)
+        static let imageRelay = WKUserScript(source: ImageRelay.watch, injectionTime: .atDocumentStart, forMainFrameOnly: false, in: Web.world)
+        @available(macOS 15.4, *)
+        static let storeRelay = WKUserScript(source: StoreRelay.script, injectionTime: .atDocumentEnd, forMainFrameOnly: true, in: Web.world)
+        static let hoveredLink = WKUserScript(source: HoveredLink.script, injectionTime: .atDocumentStart, forMainFrameOnly: false, in: .defaultClient)
+        static let middleRelay = WKUserScript(source: MiddleRelay.watch, injectionTime: .atDocumentStart, forMainFrameOnly: true, in: Web.world)
+        static let windowFullScreenPage = WKUserScript(source: WindowFullScreen.page, injectionTime: .atDocumentStart, forMainFrameOnly: false, in: .page)
+        static let windowFullScreenBridge = WKUserScript(source: WindowFullScreen.bridge, injectionTime: .atDocumentStart, forMainFrameOnly: true, in: Web.world)
+        static let selectionRelay = WKUserScript(source: SelectionRelay.script, injectionTime: .atDocumentEnd, forMainFrameOnly: true, in: Web.world)
+        static let withoutPasskeys = WKUserScript(source: FormRelay.withoutPasskeys, injectionTime: .atDocumentStart, forMainFrameOnly: false, in: .page)
+        static let passkeyPage = WKUserScript(source: PasskeyRelay.page, injectionTime: .atDocumentStart, forMainFrameOnly: false, in: .page)
+        static let passkeyBridge = WKUserScript(source: PasskeyRelay.bridge, injectionTime: .atDocumentStart, forMainFrameOnly: false, in: Web.world)
+        static let webNotificationsPage = WKUserScript(source: WebNotifications.page, injectionTime: .atDocumentStart, forMainFrameOnly: true, in: .page)
+        static let webNotificationsBridge = WKUserScript(source: WebNotifications.bridge, injectionTime: .atDocumentStart, forMainFrameOnly: true, in: Web.world)
+    }
+
     func arm(hiding css: String) {
         veils = css
         guard let built else { return }
+        let signature = ArmedSignature(
+            scrollRelay: ScrollRelay.on,
+            autoScroll: AutoScroll.on,
+            videoKeys: VideoKeys.on,
+            syncsSplitScroll: syncsSplitScroll,
+            bench: bench,
+            hoveredLink: HoveredLink.on,
+            windowFullScreen: WindowFullScreen.on,
+            passkeysOffered: FormRelay.passkeysOffered,
+            css: css
+        )
+        guard armedSignature != signature else { return }
+        armedSignature = signature
         let controller = built.configuration.userContentController
         controller.removeAllUserScripts()
-        if ScrollRelay.on {
-            controller.addUserScript(
-                WKUserScript(source: ScrollRelay.script, injectionTime: .atDocumentEnd, forMainFrameOnly: true, in: Web.world)
-            )
-        }
-        controller.addUserScript(
-            WKUserScript(source: Veiling.picker, injectionTime: .atDocumentStart, forMainFrameOnly: true, in: Web.world)
-        )
-        controller.addUserScript(
-            WKUserScript(source: FormRelay.script, injectionTime: .atDocumentEnd, forMainFrameOnly: true, in: Web.world)
-        )
-        if AutoScroll.on {
-            controller.addUserScript(
-                WKUserScript(source: AutoScroll.script, injectionTime: .atDocumentEnd, forMainFrameOnly: true, in: Web.world)
-            )
-        }
-        if VideoKeys.on {
-            controller.addUserScript(
-                WKUserScript(source: VideoKeys.script, injectionTime: .atDocumentStart, forMainFrameOnly: false, in: Web.world)
-            )
-        }
-        if syncsSplitScroll {
-            controller.addUserScript(
-                WKUserScript(source: SplitScrollSyncRelay.script, injectionTime: .atDocumentEnd, forMainFrameOnly: true, in: Web.world)
-            )
-        }
+        if signature.scrollRelay { controller.addUserScript(Scripts.scrollRelay) }
+        controller.addUserScript(Scripts.veilingPicker)
+        controller.addUserScript(Scripts.formRelay)
+        if signature.autoScroll { controller.addUserScript(Scripts.autoScroll) }
+        if signature.videoKeys { controller.addUserScript(Scripts.videoKeys) }
+        if signature.syncsSplitScroll { controller.addUserScript(Scripts.splitScrollSync) }
         // A bench tab keeps every request it made, not WebKit's first 250,
         // for benchmarks/shield_check.py to count.
-        if bench {
-            controller.addUserScript(WKUserScript(
-                source: "performance.setResourceTimingBufferSize(100000)",
-                injectionTime: .atDocumentStart, forMainFrameOnly: true, in: Web.world
-            ))
-        }
+        if signature.bench { controller.addUserScript(Scripts.benchTiming) }
         // Google's sign-in card without a white box round it (Frames.swift).
         controller.addUserScript(Frames.userScript)
-        controller.addUserScript(
-            WKUserScript(source: ImageRelay.watch, injectionTime: .atDocumentStart, forMainFrameOnly: false, in: Web.world)
-        )
+        controller.addUserScript(Scripts.imageRelay)
         // The store's "Add to Search" only where Search can add extensions.
         // Before macOS 15.4 it was drawn all the same, and pressing it did
         // nothing at all; Settings › Extensions says what they need instead.
         if #available(macOS 15.4, *) {
-            controller.addUserScript(
-                WKUserScript(source: StoreRelay.script, injectionTime: .atDocumentEnd, forMainFrameOnly: true, in: Web.world)
-            )
+            controller.addUserScript(Scripts.storeRelay)
         }
         // Only while Settings says so: off, pages get nothing at all.
-        if HoveredLink.on {
-            controller.addUserScript(WKUserScript(
-                source: HoveredLink.script, injectionTime: .atDocumentStart,
-                forMainFrameOnly: false, in: .defaultClient
-            ))
+        if signature.hoveredLink {
+            controller.addUserScript(Scripts.hoveredLink)
         }
         // The main frame only: a middle-click on a link inside an ad iframe is
         // that frame's own business, and its link is not this tab's to open.
-        controller.addUserScript(
-            WKUserScript(source: MiddleRelay.watch, injectionTime: .atDocumentStart, forMainFrameOnly: true, in: Web.world)
-        )
-        if WindowFullScreen.on {
-            controller.addUserScript(
-                WKUserScript(source: WindowFullScreen.page, injectionTime: .atDocumentStart, forMainFrameOnly: false, in: .page)
-            )
-            controller.addUserScript(
-                WKUserScript(source: WindowFullScreen.bridge, injectionTime: .atDocumentStart, forMainFrameOnly: true, in: Web.world)
-            )
+        controller.addUserScript(Scripts.middleRelay)
+        if signature.windowFullScreen {
+            controller.addUserScript(Scripts.windowFullScreenPage)
+            controller.addUserScript(Scripts.windowFullScreenBridge)
         }
-        controller.addUserScript(
-            WKUserScript(source: SelectionRelay.script, injectionTime: .atDocumentEnd, forMainFrameOnly: true, in: Web.world)
-        )
+        controller.addUserScript(Scripts.selectionRelay)
         // Passkeys stand in the page's own world — they replace the page's
         // functions — and reach Search through a bridge in Search's, off or on:
         // an extension's page script can carry the patch either way (see
         // Passkeys.swift and ExtensionShims.passkeys).
-        if !FormRelay.passkeysOffered {
-            controller.addUserScript(
-                WKUserScript(source: FormRelay.withoutPasskeys, injectionTime: .atDocumentStart, forMainFrameOnly: false, in: .page)
-            )
+        if !signature.passkeysOffered {
+            controller.addUserScript(Scripts.withoutPasskeys)
         } else {
-            controller.addUserScript(
-                WKUserScript(source: PasskeyRelay.page, injectionTime: .atDocumentStart, forMainFrameOnly: false, in: .page)
-            )
+            controller.addUserScript(Scripts.passkeyPage)
         }
-        controller.addUserScript(
-            WKUserScript(source: PasskeyRelay.bridge, injectionTime: .atDocumentStart, forMainFrameOnly: false, in: Web.world)
-        )
-        controller.addUserScript(
-            WKUserScript(source: WebNotifications.page, injectionTime: .atDocumentStart, forMainFrameOnly: true, in: .page)
-        )
-        controller.addUserScript(
-            WKUserScript(source: WebNotifications.bridge, injectionTime: .atDocumentStart, forMainFrameOnly: true, in: Web.world)
-        )
+        controller.addUserScript(Scripts.passkeyBridge)
+        controller.addUserScript(Scripts.webNotificationsPage)
+        controller.addUserScript(Scripts.webNotificationsBridge)
         guard !css.isEmpty else { return }
         controller.addUserScript(
             WKUserScript(source: Veiling.style(css), injectionTime: .atDocumentStart, forMainFrameOnly: true, in: Web.world)
@@ -984,6 +994,8 @@ final class Tab: ObservableObject, Identifiable {
         immersed = false
         // Sent somewhere new, a sleeping tab is simply awake again — with
         // nothing of where it was before to bring back.
+        wakeToken &+= 1
+        built?.onMoveToWindow = nil
         pending = nil
         memory = nil
         picture = nil
@@ -1014,6 +1026,7 @@ final class Tab: ObservableObject, Identifiable {
     /// pin you are not reading costs a line in a file and nothing else.
     func rest() {
         guard let url = address else { return }
+        wakeToken &+= 1
         pending = url
         memory = nil
         picture = nil
@@ -1038,6 +1051,7 @@ final class Tab: ObservableObject, Identifiable {
     /// that can't come back, which is why the browser asks `unsaved` first.
     func sleep(picture: Data?) {
         guard let url = address, let built else { return }
+        wakeToken &+= 1
         memory = built.interactionState
         self.picture = picture
         pending = url
@@ -1172,7 +1186,7 @@ final class Tab: ObservableObject, Identifiable {
     /// take — no error, no navigation, just a view that goes on sitting on
     /// about:blank with nothing left to say so. Still there, or still
     /// answering for a process that's already gone, is asked once more.
-    private func loadAndVerify(_ url: URL, state: Any? = nil, tries: Int = 0) {
+    private func loadAndVerify(_ url: URL, state: Any? = nil) {
         // Wait for the stage to take the view back before loading into it. A
         // page loaded while its view is off any window boots as a hidden tab,
         // and a site that holds everything until it is shown — x.com does,
@@ -1180,38 +1194,52 @@ final class Tab: ObservableObject, Identifiable {
         // moment later and sit on its placeholder for good. Coming back to a
         // pinned tab after ⌘W is exactly that: select() asks for the view back
         // and wakes the page in the same breath, one synchronous step ahead of
-        // SwiftUI actually putting the view on screen. Bounded at about a
-        // second, so a wake with no stage waiting for it still loads rather
-        // than hanging on one that will never come.
+        // SwiftUI actually putting the view on screen. Driven directly from
+        // PageView.viewDidMoveToWindow, with a 1s fallback if no stage attaches.
+        wakeToken &+= 1
+        let token = wakeToken
+        wakeCommitted = false
         let view = web
-        if view.window == nil, tries < 50 {
-            DispatchQueue.main.asyncAfter(deadline: .now() + 0.02) { [weak self] in
-                self?.loadAndVerify(url, state: state, tries: tries + 1)
+        var loaded = false
+        let startLoad = { [weak self, weak view] in
+            guard let self, !loaded, self.wakeToken == token else { return }
+            loaded = true
+            self.wakeCommitted = false
+            view?.onMoveToWindow = nil
+            let target = view ?? self.web
+            // A tab that slept has its own history to go back to — the page, its
+            // back list and its scroll position, in one. Anything else starts
+            // from the address.
+            if let state {
+                target.interactionState = state
+            } else {
+                target.open(url)
             }
-            return
-        }
-        // A tab that slept has its own history to go back to — the page, its
-        // back list and its scroll position, in one. Anything else starts
-        // from the address.
-        if let state {
-            view.interactionState = state
-        } else {
-            view.open(url)
-        }
-        DispatchQueue.main.asyncAfter(deadline: .now() + 1.5) { [weak self] in
-            guard let self else { return }
-            guard built?.url?.absoluteString != "about:blank" else {
-                web.open(url)
-                return
-            }
-            web.evaluateJavaScript("document.readyState") { [weak self] _, error in
-                MainActor.assumeIsolated {
-                    guard let self, let error = error as NSError? else { return }
-                    guard error.domain == WKErrorDomain,
-                          error.code == WKError.webContentProcessTerminated.rawValue
-                    else { return }
+            DispatchQueue.main.asyncAfter(deadline: .now() + 1.5) { [weak self] in
+                guard let self, self.wakeToken == token, !self.wakeCommitted else { return }
+                guard self.built?.url?.absoluteString != "about:blank" else {
                     self.web.open(url)
+                    return
                 }
+                self.web.evaluateJavaScript("document.readyState") { [weak self] _, error in
+                    MainActor.assumeIsolated {
+                        guard let self, self.wakeToken == token, !self.wakeCommitted,
+                              let error = error as NSError?
+                        else { return }
+                        guard error.domain == WKErrorDomain,
+                              error.code == WKError.webContentProcessTerminated.rawValue
+                        else { return }
+                        self.web.open(url)
+                    }
+                }
+            }
+        }
+        if view.window != nil {
+            startLoad()
+        } else {
+            view.onMoveToWindow = startLoad
+            DispatchQueue.main.asyncAfter(deadline: .now() + 1.0) {
+                startLoad()
             }
         }
     }
@@ -1369,12 +1397,15 @@ final class Tab: ObservableObject, Identifiable {
     /// back-forward cache. The tab keeps its address; `web` builds again the
     /// next time anyone asks for it.
     private func discard() {
+        wakeToken &+= 1
+        armedSignature = nil
         watch = []
         ears.stop()
         notifications.tab = nil
         notifications.onRequest = nil
         guard let web = built else { return }
         built = nil
+        web.onMoveToWindow = nil
         Passkeys.shared.forget(web)
         let controller = web.configuration.userContentController
         Web.release(controller)
@@ -1519,6 +1550,15 @@ final class MiddleRelay: NSObject, WKScriptMessageHandler {
 
 /// A web view that reads the two-finger swipe for itself.
 final class PageView: WKWebView {
+    var onMoveToWindow: (() -> Void)?
+
+    override func viewDidMoveToWindow() {
+        super.viewDidMoveToWindow()
+        if window != nil {
+            onMoveToWindow?()
+        }
+    }
+
     /// True while a Split View divider is being dragged or animated, so
     /// WebKit's drawing area treats frame updates as an asynchronous live
     /// resize instead of blocking the main thread on DidUpdateGeometry IPC.

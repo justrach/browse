@@ -33,9 +33,11 @@ enum Reader {
             );
             var top = null, mark = 0;
             for (var i = 0; i < candidates.length; i++) {
-              if (candidates[i].id === 'office-reader-root') continue;
-              var score = prose(candidates[i]);
-              if (score > mark) { mark = score; top = candidates[i]; }
+              var el = candidates[i];
+              if (el.id === 'office-reader-root') continue;
+              var semantic = /^(ARTICLE|MAIN)$/i.test(el.tagName) || el.getAttribute('role') === 'main';
+              var score = prose(el) * (semantic ? 1.5 : 1);
+              if (score > mark) { mark = score; top = el; }
             }
             return top;
           }
@@ -54,6 +56,7 @@ enum Reader {
           var livePics = article.querySelectorAll('img');
           var resolvedSrcs = [];
           var resolvedSets = [];
+          var inlineSmall = [];
           for (var i = 0; i < livePics.length; i++) {
             var picture = livePics[i];
             var real = picture.currentSrc || picture.getAttribute('src') || '';
@@ -63,8 +66,13 @@ enum Reader {
                 if (kept) { real = kept; break; }
               }
             }
+            var attrW = parseInt(picture.getAttribute('width'), 10) || 0;
+            var attrH = parseInt(picture.getAttribute('height'), 10) || 0;
+            var isSmall = (picture.naturalWidth > 0 && picture.naturalWidth <= 48 && picture.naturalHeight <= 48)
+              || (attrW > 0 && attrW <= 48 && (attrH === 0 || attrH <= 48));
             resolvedSrcs.push(real);
             resolvedSets.push(picture.getAttribute('data-srcset') || picture.getAttribute('srcset') || '');
+            inlineSmall.push(isSmall);
           }
 
           var clone = article.cloneNode(true);
@@ -73,13 +81,17 @@ enum Reader {
             clonePics[i].setAttribute('loading', 'eager');
             if (resolvedSrcs[i]) clonePics[i].setAttribute('src', resolvedSrcs[i]);
             if (resolvedSets[i]) clonePics[i].setAttribute('srcset', resolvedSets[i]);
+            if (inlineSmall[i]) clonePics[i].classList.add('office-inline');
           }
 
           var clutter = clone.querySelectorAll(
             'script,style,noscript,form,nav,aside,footer,button,input,select,textarea,' +
+            '.comments,#comments,[role="dialog"],' +
             '[role="complementary"],[role="navigation"],[role="banner"],[aria-hidden="true"]'
           );
-          for (var c = 0; c < clutter.length; c++) clutter[c].remove();
+          for (var c = 0; c < clutter.length; c++) {
+            if (clutter[c] !== clone) clutter[c].remove();
+          }
 
           var players = /youtube|youtu\\.be|vimeo|dailymotion|loom\\.com|streamable|wistia|ted\\.com/i;
           var frames = clone.querySelectorAll('iframe');
@@ -100,8 +112,13 @@ enum Reader {
             if (!src || src.indexOf('data:image') === 0) keptImgs[g].remove();
           }
 
-          var heading = document.querySelector('h1');
-          var title = (heading && heading.innerText.trim()) || document.title;
+          var heading = article.querySelector('h1') || document.querySelector('h1');
+          var title = (heading && (heading.innerText || heading.textContent || '').trim()) || document.title;
+          var norm = function (s) { return (s || '').replace(/\\s+/g, ' ').trim().toLowerCase(); };
+          var firstH1 = clone.querySelector('h1');
+          if (firstH1 && norm(firstH1.textContent) === norm(title)) {
+            firstH1.remove();
+          }
           var rawWords = (clone.textContent || '').trim().split(/\\s+/).filter(Boolean).length;
           var mins = Math.max(1, Math.round(rawWords / 225));
 
@@ -127,15 +144,24 @@ enum Reader {
             '#office-reader .office-from{font:400 12px/1 -apple-system,sans-serif;color:var(--r-muted);',
             'margin:0 0 40px;text-transform:uppercase;letter-spacing:.06em}',
             '#office-reader p{margin:0 0 1.35em}',
+            '#office-reader ul,#office-reader ol{margin:0 0 1.35em;padding-left:1.5em}',
+            '#office-reader li{margin:.35em 0}',
             '#office-reader img,#office-reader video,#office-reader iframe{max-width:100%;',
             'height:auto;border-radius:6px;margin:1.6em 0;display:block}',
+            '#office-reader img.office-inline{display:inline-block;margin:0 .2em;vertical-align:text-bottom;border-radius:0}',
             '#office-reader iframe{width:100%;aspect-ratio:16/9;height:auto;border:0}',
             '#office-reader figure{margin:1.8em 0}',
             '#office-reader figcaption{font:400 13px/1.5 -apple-system,sans-serif;color:var(--r-muted);margin-top:.6em}',
             '#office-reader a{color:var(--r-link);text-underline-offset:3px}',
             '#office-reader h2,#office-reader h3{font:600 20px/1.3 -apple-system,sans-serif;margin:2em 0 .6em;color:var(--r-fg)}',
             '#office-reader pre,#office-reader code{font-family:ui-monospace,monospace;font-size:0.86em}',
+            '#office-reader code{background:var(--r-code);padding:.15em .35em;border-radius:4px}',
             '#office-reader pre{background:var(--r-code);padding:14px;border-radius:8px;overflow:auto}',
+            '#office-reader pre code{background:none;padding:0;font-size:inherit}',
+            '#office-reader table{border-collapse:collapse;width:100%;margin:1.6em 0;font-size:.92em}',
+            '#office-reader th,#office-reader td{border:1px solid var(--r-border);padding:8px 10px;text-align:left;vertical-align:top}',
+            '#office-reader th{background:var(--r-code);font-weight:600}',
+            '#office-reader hr{border:0;border-top:1px solid var(--r-border);margin:2em 0}',
             '#office-reader blockquote{margin:1.6em 0;padding-left:1.2em;border-left:2px solid var(--r-border);color:var(--r-muted)}'
           ].join('');
 
@@ -162,6 +188,27 @@ enum Reader {
           document.documentElement.classList.add('office-reading');
           document.documentElement.appendChild(root);
           root.scrollTop = 0;
+
+          var mh = window.webkit && window.webkit.messageHandlers && window.webkit.messageHandlers.officeScroll;
+          if (mh) {
+            var scrollTimer = null;
+            var lastPct = -1;
+            var tellReaderScroll = function () {
+              if (scrollTimer !== null) { clearTimeout(scrollTimer); scrollTimer = null; }
+              var y = root.scrollTop || 0;
+              var ceiling = Math.max(1, (root.scrollHeight || 0) - root.clientHeight);
+              var pct = Math.round(Math.min(1, Math.max(0, y / ceiling)) * 100);
+              if (lastPct >= 0 && pct !== 0 && pct !== 100 && Math.abs(pct - lastPct) < 2) return;
+              lastPct = pct;
+              mh.postMessage({ y: y, max: ceiling });
+            };
+            root.addEventListener('scroll', function () {
+              if (scrollTimer !== null) clearTimeout(scrollTimer);
+              scrollTimer = setTimeout(tellReaderScroll, 180);
+            }, { passive: true });
+            root.addEventListener('scrollend', tellReaderScroll, { passive: true });
+            tellReaderScroll();
+          }
           return 'read';
         })();
         """

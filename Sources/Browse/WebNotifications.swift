@@ -209,6 +209,8 @@ enum WebNotifications {
     """
 
     #if !WEB_NOTIFICATIONS_STANDALONE
+    @MainActor private static var cachedAuthorized: Bool?
+
     @MainActor
     static func installCenterDelegate() {
         guard hasAppBundle else { return }
@@ -254,7 +256,14 @@ enum WebNotifications {
         let tabRef = tab
         let web = tab.built
         Task { @MainActor in
-            let ok = (try? await center.requestAuthorization(options: [.alert, .sound])) ?? false
+            let ok: Bool
+            if cachedAuthorized == true {
+                ok = true
+            } else {
+                let granted = (try? await center.requestAuthorization(options: [.alert, .sound])) ?? false
+                cachedAuthorized = granted ? true : nil
+                ok = granted
+            }
             guard ok else {
                 dispatchToPage(tabRef.built ?? web, payload: ["op": "event", "notifId": notifID, "type": "error"])
                 return
@@ -263,6 +272,7 @@ enum WebNotifications {
                 try await center.add(UNNotificationRequest(identifier: identifier, content: content, trigger: nil))
                 dispatchToPage(tabRef.built ?? web, payload: ["op": "event", "notifId": notifID, "type": "show"])
             } catch {
+                cachedAuthorized = nil
                 dispatchToPage(tabRef.built ?? web, payload: ["op": "event", "notifId": notifID, "type": "error"])
             }
         }
@@ -313,8 +323,10 @@ final class WebNotificationRelay: NSObject, WKScriptMessageHandler {
         let key = WebNotifications.permissionKey(for: origin)
         switch op {
         case "query":
-            let saved = Store.settings.object(forKey: key) as? Bool
-            let perm = saved == true ? "granted" : (saved == false ? "denied" : "default")
+            // Page script starts with `currentPermission = 'default'`, so skip
+            // the round-trip evaluateInSearch when no site override is saved.
+            guard let saved = Store.settings.object(forKey: key) as? Bool else { return }
+            let perm = saved ? "granted" : "denied"
             WebNotifications.dispatchToPage(tab?.built, payload: ["op": "permission", "permission": perm])
 
         case "request":

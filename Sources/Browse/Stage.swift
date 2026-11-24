@@ -74,15 +74,97 @@ struct BackdropShadowView: NSViewRepresentable {
 
     final class LayerView: NSView {
         var corner: CGFloat = 0
+        var dynamicFill: NSColor?
+        private var lastBounds: CGRect = .zero
+        private var lastCorner: CGFloat = -1
+        private var lastFillCG: CGColor?
+        private var lastOpacity: Swift.Float = -1
+        private var lastRadius: CGFloat = -1
+        private var lastOffset: CGSize = CGSize(width: CGFloat.greatestFiniteMagnitude, height: CGFloat.greatestFiniteMagnitude)
         /// Opaque inner CALayer inset by the corner radius so macOS WindowServer
         /// can cull behind-window `NSVisualEffectView` Gaussian blur for ~98% of
         /// the WKWebView viewport pixels during 120 Hz scrolling.
         let opaqueOcclusion = CALayer()
+
         override func layout() {
             super.layout()
             updateShadowPath()
         }
+
+        override func viewDidChangeEffectiveAppearance() {
+            super.viewDidChangeEffectiveAppearance()
+            applyResolvedFill()
+        }
+
+        func apply(
+            corner: CGFloat,
+            fill: NSColor,
+            shadowOpacity: Swift.Float,
+            shadowRadius: CGFloat,
+            shadowOffset: CGSize
+        ) {
+            self.dynamicFill = fill
+            let resolved = resolveFillColor(fill)
+            let cornerChanged = self.corner != corner
+            let fillChanged = lastFillCG != resolved
+            let shadowChanged = lastOpacity != shadowOpacity
+                || lastRadius != shadowRadius
+                || lastOffset != shadowOffset
+
+            guard cornerChanged || fillChanged || shadowChanged || bounds != lastBounds || corner != lastCorner else {
+                return
+            }
+
+            CATransaction.begin()
+            CATransaction.setDisableActions(true)
+
+            if cornerChanged {
+                self.corner = corner
+                layer?.cornerRadius = corner
+            }
+            if fillChanged {
+                lastFillCG = resolved
+                layer?.backgroundColor = resolved
+                opaqueOcclusion.backgroundColor = resolved
+            }
+            if shadowChanged {
+                lastOpacity = shadowOpacity
+                lastRadius = shadowRadius
+                lastOffset = shadowOffset
+                layer?.shadowOpacity = shadowOpacity
+                layer?.shadowRadius = shadowRadius
+                layer?.shadowOffset = shadowOffset
+            }
+
+            CATransaction.commit()
+            updateShadowPath()
+        }
+
+        private func applyResolvedFill() {
+            guard let dynamicFill else { return }
+            let resolved = resolveFillColor(dynamicFill)
+            guard lastFillCG != resolved else { return }
+            lastFillCG = resolved
+            CATransaction.begin()
+            CATransaction.setDisableActions(true)
+            layer?.backgroundColor = resolved
+            opaqueOcclusion.backgroundColor = resolved
+            CATransaction.commit()
+        }
+
+        private func resolveFillColor(_ color: NSColor) -> CGColor {
+            var cg: CGColor?
+            effectiveAppearance.performAsCurrentDrawingAppearance {
+                cg = color.cgColor
+            }
+            return cg ?? color.cgColor
+        }
+
         func updateShadowPath() {
+            guard bounds != lastBounds || corner != lastCorner else { return }
+            lastBounds = bounds
+            lastCorner = corner
+
             guard bounds.width > 0, bounds.height > 0 else {
                 layer?.shadowPath = nil
                 opaqueOcclusion.frame = .zero
@@ -91,39 +173,50 @@ struct BackdropShadowView: NSViewRepresentable {
             let r = min(corner, min(bounds.width, bounds.height) / 2)
             layer?.shadowPath = CGPath(roundedRect: bounds, cornerWidth: r, cornerHeight: r, transform: nil)
             let inset = ceil(r)
+            CATransaction.begin()
+            CATransaction.setDisableActions(true)
             if bounds.width > inset * 2, bounds.height > inset * 2 {
-                CATransaction.begin()
-                CATransaction.setDisableActions(true)
                 opaqueOcclusion.frame = bounds.insetBy(dx: inset, dy: inset)
-                CATransaction.commit()
             } else {
                 opaqueOcclusion.frame = .zero
             }
+            CATransaction.commit()
         }
     }
 
     func makeNSView(context: Context) -> LayerView {
+        let noAnim: [String: CAAction] = [
+            "bounds": NSNull(),
+            "position": NSNull(),
+            "frame": NSNull(),
+            "shadowPath": NSNull(),
+            "cornerRadius": NSNull(),
+            "backgroundColor": NSNull(),
+            "shadowOpacity": NSNull(),
+            "shadowRadius": NSNull(),
+            "shadowOffset": NSNull(),
+        ]
         let view = LayerView()
         view.wantsLayer = true
         view.layer?.cornerCurve = .continuous
         view.layer?.masksToBounds = false
         view.layer?.shadowColor = NSColor.black.cgColor
+        view.layer?.actions = noAnim
         view.opaqueOcclusion.isOpaque = true
+        view.opaqueOcclusion.actions = noAnim
         view.layer?.addSublayer(view.opaqueOcclusion)
         updateNSView(view, context: context)
         return view
     }
 
     func updateNSView(_ view: LayerView, context: Context) {
-        view.corner = corner
-        view.layer?.cornerRadius = corner
-        let cg = fill.cgColor
-        view.layer?.backgroundColor = cg
-        view.opaqueOcclusion.backgroundColor = cg
-        view.layer?.shadowOpacity = shadowOpacity
-        view.layer?.shadowRadius = shadowRadius
-        view.layer?.shadowOffset = shadowOffset
-        view.updateShadowPath()
+        view.apply(
+            corner: corner,
+            fill: fill,
+            shadowOpacity: shadowOpacity,
+            shadowRadius: shadowRadius,
+            shadowOffset: shadowOffset
+        )
     }
 }
 
@@ -194,16 +287,15 @@ private struct PageProgressBar: View {
     let progress: Double
 
     var body: some View {
-        GeometryReader { geo in
-            let fraction = CGFloat(max(0.08, min(1.0, progress)))
-            Rectangle()
-                .fill(Palette.accent.opacity(0.85))
-                .frame(width: geo.size.width * fraction, height: 2)
-                .animation(.easeOut(duration: 0.16), value: progress)
-        }
-        .frame(height: 2)
-        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
-        .allowsHitTesting(false)
+        let fraction = CGFloat(max(0.08, min(1.0, progress)))
+        Rectangle()
+            .fill(Palette.accent.opacity(0.85))
+            .frame(maxWidth: .infinity)
+            .frame(height: 2)
+            .scaleEffect(x: fraction, y: 1, anchor: .leading)
+            .animation(.easeOut(duration: 0.16), value: fraction)
+            .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+            .allowsHitTesting(false)
     }
 }
 
@@ -262,10 +354,27 @@ struct WebStage: NSViewRepresentable {
     let page: NSView?
     var corner: CGFloat = 0
 
+    final class Coordinator {
+        weak var lastPage: NSView?
+        var lastCorner: CGFloat = -1
+        var hasUpdated = false
+    }
+
+    func makeCoordinator() -> Coordinator { Coordinator() }
+
     func makeNSView(context: Context) -> StageView { StageView() }
 
     func updateNSView(_ view: StageView, context: Context) {
-        view.round(corner)
+        let coord = context.coordinator
+        let cornerChanged = !coord.hasUpdated || coord.lastCorner != corner
+        let pageChanged = !coord.hasUpdated || coord.lastPage !== page || (page != nil && page?.superview !== view)
+        guard cornerChanged || pageChanged else { return }
+        coord.hasUpdated = true
+        if cornerChanged {
+            coord.lastCorner = corner
+            view.round(corner)
+        }
+        coord.lastPage = page
         view.show(page)
     }
 }
@@ -342,7 +451,22 @@ final class StageView: NSView {
                 dock.removeFromSuperview()
             }
         }
+        let unchanged = (wanted === page)
         wanted = page
+        if unchanged {
+            if let page {
+                if page.superview === self, window != nil, subviews.count == 1 {
+                    if let web = page as? WKWebView, web.fullscreenState != .notInFullscreen { return }
+                    let target = pinnedSlideWidth.map {
+                        CGRect(x: 0, y: 0, width: $0, height: bounds.height)
+                    } ?? bounds
+                    if page.frame != target { page.frame = target }
+                    return
+                }
+            } else if subviews.isEmpty {
+                return
+            }
+        }
         settle()
     }
 

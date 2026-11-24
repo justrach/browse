@@ -1034,8 +1034,10 @@ final class BookmarkMenu: NSObject, NSMenuDelegate {
             let empty = NSMenuItem(title: "Empty", action: nil, keyEquivalent: "")
             empty.isEnabled = false
             menu.addItem(empty)
+        } else {
+            for item in made { menu.addItem(item) }
+            appendOpenAllIfAppropriate(for: nodes, title: title, to: menu)
         }
-        for item in made { menu.addItem(item) }
         menu.popUp(positioning: nil, at: NSEvent.mouseLocation, in: nil)
     }
 
@@ -1052,6 +1054,12 @@ final class BookmarkMenu: NSObject, NSMenuDelegate {
                 item = NSMenuItem(title: node.title, action: #selector(open(_:)), keyEquivalent: "")
                 item.target = self
                 item.representedObject = url
+                if let host = url.host()?.lowercased(),
+                   let cached = Favicons.shared.cached(host),
+                   let icon = cached.copy() as? NSImage {
+                    icon.size = NSSize(width: 16, height: 16)
+                    item.image = icon
+                }
             } else {
                 return nil
             }
@@ -1069,13 +1077,33 @@ final class BookmarkMenu: NSObject, NSMenuDelegate {
             let empty = NSMenuItem(title: "Empty", action: nil, keyEquivalent: "")
             empty.isEnabled = false
             menu.addItem(empty)
+        } else {
+            for item in made { menu.addItem(item) }
+            appendOpenAllIfAppropriate(for: kids, title: menu.title, to: menu)
         }
-        for item in made { menu.addItem(item) }
+    }
+
+    private func appendOpenAllIfAppropriate(for nodes: [Bookmark], title: String, to menu: NSMenu) {
+        let urls = Bookmarks.urls(nodes)
+        guard urls.count >= 2 else { return }
+        let sep = NSMenuItem.separator()
+        sep.tag = Self.mark
+        menu.addItem(sep)
+        let openAllItem = NSMenuItem(title: "Open All in New Tabs", action: #selector(openAll(_:)), keyEquivalent: "")
+        openAllItem.target = self
+        openAllItem.representedObject = Bookmark(title: title, url: nil, children: nodes)
+        openAllItem.tag = Self.mark
+        menu.addItem(openAllItem)
     }
 
     @objc private func open(_ item: NSMenuItem) {
         guard let url = item.representedObject as? URL else { return }
-        browser?.visit(url)
+        browser?.pickBookmark(url)
+    }
+
+    @objc private func openAll(_ item: NSMenuItem) {
+        guard let folder = item.representedObject as? Bookmark else { return }
+        browser?.openAll(folder)
     }
 
     /// SwiftUI's delegate, with the bookmarks put in after its update.

@@ -334,6 +334,66 @@ final class ShortcutStore: ObservableObject {
     /// Last status note for global hotkey registration.
     @Published var globalNote: String?
 
+    private var activeRecorderToken: UUID?
+    private var activeRecorderCancel: (() -> Void)?
+    private weak var activeRecorderView: NSView?
+    private var clickOutsideMonitor: Any?
+    private var resignObservers: [NSObjectProtocol] = []
+
+    @MainActor
+    func beginRecording(ownerView: NSView?, cancel: @escaping () -> Void) -> UUID {
+        if let activeRecorderCancel {
+            self.activeRecorderCancel = nil
+            self.activeRecorderToken = nil
+            activeRecorderCancel()
+        }
+        let token = UUID()
+        activeRecorderToken = token
+        activeRecorderCancel = cancel
+        activeRecorderView = ownerView
+        recording = true
+        if clickOutsideMonitor == nil {
+            clickOutsideMonitor = NSEvent.addLocalMonitorForEvents(matching: [.leftMouseDown, .rightMouseDown]) { [weak self] event in
+                guard let self, self.recording else { return event }
+                if let view = self.activeRecorderView, let win = view.window, event.window === win {
+                    let pt = view.convert(event.locationInWindow, from: nil)
+                    if view.bounds.contains(pt) { return event }
+                }
+                self.stopRecording()
+                return event
+            }
+        }
+        if resignObservers.isEmpty {
+            let center = NotificationCenter.default
+            resignObservers = [
+                center.addObserver(forName: NSApplication.didResignActiveNotification, object: nil, queue: .main) { [weak self] _ in
+                    MainActor.assumeIsolated { self?.stopRecording() }
+                },
+                center.addObserver(forName: NSWindow.didResignKeyNotification, object: nil, queue: .main) { [weak self] _ in
+                    MainActor.assumeIsolated { self?.stopRecording() }
+                },
+            ]
+        }
+        return token
+    }
+
+    @MainActor
+    func stopRecording(token: UUID? = nil) {
+        if let token, activeRecorderToken != token { return }
+        let cancel = activeRecorderCancel
+        activeRecorderCancel = nil
+        activeRecorderToken = nil
+        activeRecorderView = nil
+        if let clickOutsideMonitor {
+            NSEvent.removeMonitor(clickOutsideMonitor)
+            self.clickOutsideMonitor = nil
+        }
+        resignObservers.forEach(NotificationCenter.default.removeObserver)
+        resignObservers.removeAll()
+        recording = false
+        cancel?()
+    }
+
     private let defaults: UserDefaults
 
     init(defaults: UserDefaults = Store.settings) {
@@ -791,6 +851,8 @@ private struct KeyRecorderBox: View {
 
     @State private var listening = false
     @State private var monitor: Any?
+    @State private var token: UUID?
+    @State private var anchorView: NSView?
 
     var body: some View {
         Button {
@@ -808,12 +870,17 @@ private struct KeyRecorderBox: View {
                 )
         }
         .buttonStyle(.plain)
+        .background(RecorderAnchor(view: $anchorView))
         .onDisappear { stop() }
     }
 
     private func start() {
+        let cancel = {
+            MainActor.assumeIsolated { stopLocal() }
+        }
+        let assigned = store.beginRecording(ownerView: anchorView, cancel: cancel)
+        token = assigned
         listening = true
-        store.recording = true
         notice = nil
         monitor = NSEvent.addLocalMonitorForEvents(matching: .keyDown) { event in
             if event.keyCode == 53 {
@@ -844,11 +911,19 @@ private struct KeyRecorderBox: View {
         }
     }
 
-    private func stop() {
+    private func stopLocal() {
         if let monitor { NSEvent.removeMonitor(monitor) }
         monitor = nil
+        token = nil
         listening = false
-        store.recording = false
+    }
+
+    private func stop() {
+        let activeToken = token
+        stopLocal()
+        if let activeToken {
+            store.stopRecording(token: activeToken)
+        }
     }
 }
 
@@ -858,6 +933,8 @@ private struct GlobalKeyRecorder: View {
 
     @State private var listening = false
     @State private var monitor: Any?
+    @State private var token: UUID?
+    @State private var anchorView: NSView?
 
     var body: some View {
         HStack(spacing: 6) {
@@ -876,6 +953,7 @@ private struct GlobalKeyRecorder: View {
                     )
             }
             .buttonStyle(.plain)
+            .background(RecorderAnchor(view: $anchorView))
             if store.globalHotKey != nil && !listening {
                 Button {
                     store.clearGlobal()
@@ -893,8 +971,12 @@ private struct GlobalKeyRecorder: View {
     }
 
     private func start() {
+        let cancel = {
+            MainActor.assumeIsolated { stopLocal() }
+        }
+        let assigned = store.beginRecording(ownerView: anchorView, cancel: cancel)
+        token = assigned
         listening = true
-        store.recording = true
         notice = nil
         monitor = NSEvent.addLocalMonitorForEvents(matching: .keyDown) { event in
             if event.keyCode == 53 {
@@ -912,10 +994,32 @@ private struct GlobalKeyRecorder: View {
         }
     }
 
-    private func stop() {
+    private func stopLocal() {
         if let monitor { NSEvent.removeMonitor(monitor) }
         monitor = nil
+        token = nil
         listening = false
-        store.recording = false
+    }
+
+    private func stop() {
+        let activeToken = token
+        stopLocal()
+        if let activeToken {
+            store.stopRecording(token: activeToken)
+        }
+    }
+}
+
+private struct RecorderAnchor: NSViewRepresentable {
+    @Binding var view: NSView?
+    func makeNSView(context: Context) -> NSView {
+        let v = NSView()
+        DispatchQueue.main.async { view = v }
+        return v
+    }
+    func updateNSView(_ nsView: NSView, context: Context) {
+        if view !== nsView {
+            DispatchQueue.main.async { view = nsView }
+        }
     }
 }

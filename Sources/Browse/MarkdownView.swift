@@ -42,39 +42,137 @@ enum MarkdownBlock: Equatable {
 }
 
 enum MarkdownParser {
+    private struct StreamAnchor {
+        let safePrefix: String
+        let safeUTF8Count: Int
+        let safeBlocks: [MarkdownBlock]
+    }
+
     private static let cacheLock = NSLock()
-    private static var cache: [String: [MarkdownBlock]] = [:]
-    private static var cacheOrder: [String] = []
     private static let cacheLimit = 128
+    private static var cache: [String: [MarkdownBlock]] = [:]
+    private static var cacheRing: [String?] = Array(repeating: nil, count: 128)
+    private static var cacheCursor = 0
+    private static var lastInput: String?
+    private static var lastOutput: [MarkdownBlock]?
+    private static var streamAnchors: [StreamAnchor] = []
+
+    private static func storeFinalLocked(_ text: String, _ blocks: [MarkdownBlock]) {
+        if cache[text] != nil {
+            cache[text] = blocks
+            return
+        }
+        if let evicted = cacheRing[cacheCursor] {
+            cache.removeValue(forKey: evicted)
+        }
+        cacheRing[cacheCursor] = text
+        cacheCursor = (cacheCursor + 1) % cacheLimit
+        cache[text] = blocks
+    }
 
     static func parse(_ text: String) -> [MarkdownBlock] {
         cacheLock.lock()
+        if let lastInput, lastInput == text, let lastOutput {
+            storeFinalLocked(text, lastOutput)
+            cacheLock.unlock()
+            return lastOutput
+        }
         if let hit = cache[text] {
             cacheLock.unlock()
             return hit
         }
-        cacheLock.unlock()
-
-        let parsed = parseUncached(text)
-
-        cacheLock.lock()
-        if cache[text] == nil {
-            cache[text] = parsed
-            cacheOrder.append(text)
-            if cacheOrder.count > cacheLimit, let oldest = cacheOrder.first {
-                cacheOrder.removeFirst()
-                cache.removeValue(forKey: oldest)
+        var bestAnchor: StreamAnchor?
+        let utf8Count = text.utf8.count
+        for anchor in streamAnchors where utf8Count >= anchor.safeUTF8Count && anchor.safeUTF8Count > 0 {
+            if let cur = bestAnchor, anchor.safeUTF8Count <= cur.safeUTF8Count { continue }
+            if text.utf8.prefix(anchor.safeUTF8Count).elementsEqual(anchor.safePrefix.utf8) {
+                bestAnchor = anchor
             }
         }
+        cacheLock.unlock()
+
+        if let anchor = bestAnchor {
+            let tailStart = text.utf8.index(text.startIndex, offsetBy: anchor.safeUTF8Count)
+            let tailText = String(text[tailStart...])
+            let (tailBlocks, tailSafeEnd, tailSafeCount) = parseUncachedDetailed(tailText)
+            let combined = anchor.safeBlocks + tailBlocks
+
+            cacheLock.lock()
+            if let tailSafeEnd, !tailText.utf8.contains(0x0D) {
+                let addedPrefix = String(tailText[..<tailSafeEnd])
+                let newPrefix = anchor.safePrefix + addedPrefix
+                let updated = StreamAnchor(
+                    safePrefix: newPrefix,
+                    safeUTF8Count: newPrefix.utf8.count,
+                    safeBlocks: Array(combined.prefix(anchor.safeBlocks.count + tailSafeCount))
+                )
+                if let idx = streamAnchors.firstIndex(where: { $0.safeUTF8Count == anchor.safeUTF8Count && $0.safePrefix == anchor.safePrefix }) {
+                    streamAnchors[idx] = updated
+                } else {
+                    if streamAnchors.count >= 4 { streamAnchors.removeFirst() }
+                    streamAnchors.append(updated)
+                }
+            }
+            lastInput = text
+            lastOutput = combined
+            cacheLock.unlock()
+            return combined
+        }
+
+        let (parsed, safeEnd, safeCount) = parseUncachedDetailed(text)
+
+        cacheLock.lock()
+        if let safeEnd, !text.utf8.contains(0x0D) {
+            let prefix = String(text[..<safeEnd])
+            let anchor = StreamAnchor(
+                safePrefix: prefix,
+                safeUTF8Count: prefix.utf8.count,
+                safeBlocks: Array(parsed.prefix(safeCount))
+            )
+            if streamAnchors.count >= 4 { streamAnchors.removeFirst() }
+            streamAnchors.append(anchor)
+        } else {
+            storeFinalLocked(text, parsed)
+        }
+        lastInput = text
+        lastOutput = parsed
         cacheLock.unlock()
         return parsed
     }
 
     private static func parseUncached(_ text: String) -> [MarkdownBlock] {
-        let lines = text.replacingOccurrences(of: "\r\n", with: "\n").components(separatedBy: "\n")
+        parseUncachedDetailed(text).blocks
+    }
+
+    private static func parseUncachedDetailed(_ text: String) -> (blocks: [MarkdownBlock], safeEnd: String.Index?, safeCount: Int) {
+        let hasCR = text.utf8.contains(0x0D)
+        let normalized = hasCR ? text.replacingOccurrences(of: "\r\n", with: "\n") : text
+        var lines: [String] = []
+        var lineStarts: [String.Index] = []
+        var lineEnds: [String.Index] = []
+        lines.reserveCapacity(32)
+        lineStarts.reserveCapacity(32)
+        lineEnds.reserveCapacity(32)
+
+        var pos = normalized.startIndex
+        while true {
+            lineStarts.append(pos)
+            if let nl = normalized[pos...].firstIndex(of: "\n") {
+                lines.append(String(normalized[pos..<nl]))
+                lineEnds.append(nl)
+                pos = normalized.index(after: nl)
+            } else {
+                lines.append(String(normalized[pos...]))
+                lineEnds.append(normalized.endIndex)
+                break
+            }
+        }
+
         var out: [MarkdownBlock] = []
         var para: [String] = []
         var i = 0
+        var safeEnd: String.Index?
+        var safeCount = 0
 
         func flushPara() {
             guard !para.isEmpty else { return }
@@ -165,9 +263,14 @@ enum MarkdownParser {
                 continue
             }
 
-            // Empty line ends paragraph.
+            // Empty line ends paragraph and marks a safe incremental boundary
+            // when terminated by a newline in the input.
             if trimmed.isEmpty {
                 flushPara()
+                if !hasCR && i + 1 < lines.count {
+                    safeEnd = normalized.index(after: lineEnds[i])
+                    safeCount = out.count
+                }
                 i += 1
                 continue
             }
@@ -231,24 +334,9 @@ enum MarkdownParser {
             // List item (unordered, task checkbox, or ordered).
             let leadingSpaces = raw.prefix { $0 == " " || $0 == "\t" }.reduce(0) { $0 + ($1 == "\t" ? 2 : 1) }
             let depth = min(4, leadingSpaces / 2)
-            if let match = trimmed.range(of: #"^[-*•+]\s+\[([ xX])\]\s+"#, options: .regularExpression) {
+            if let item = parseListItem(trimmed, depth: depth) {
                 flushPara()
-                let prefix = String(trimmed[match])
-                let checked = prefix.contains("[x]") || prefix.contains("[X]")
-                out.append(.listItem(text: String(trimmed[match.upperBound...]), mark: "•", depth: depth, checked: checked))
-                i += 1
-                continue
-            }
-            if let match = trimmed.range(of: #"^[-*•+]\s+"#, options: .regularExpression) {
-                flushPara()
-                out.append(.listItem(text: String(trimmed[match.upperBound...]), mark: "•", depth: depth, checked: nil))
-                i += 1
-                continue
-            }
-            if let match = trimmed.range(of: #"^\d+[.)]\s+"#, options: .regularExpression) {
-                flushPara()
-                let mark = trimmed[..<match.upperBound].trimmingCharacters(in: .whitespaces)
-                out.append(.listItem(text: String(trimmed[match.upperBound...]), mark: mark, depth: depth, checked: nil))
+                out.append(item)
                 i += 1
                 continue
             }
@@ -258,7 +346,68 @@ enum MarkdownParser {
         }
 
         flushPara()
-        return out
+        return (out, safeEnd, safeCount)
+    }
+
+    private static func parseListItem(_ trimmed: String, depth: Int) -> MarkdownBlock? {
+        guard let first = trimmed.first else { return nil }
+        if first == "-" || first == "*" || first == "•" || first == "+" {
+            var idx = trimmed.index(after: trimmed.startIndex)
+            var wsCount = 0
+            while idx < trimmed.endIndex, trimmed[idx].isWhitespace {
+                idx = trimmed.index(after: idx)
+                wsCount += 1
+            }
+            guard wsCount > 0 else { return nil }
+            // Task checkbox: -[ws][x|X| ][ws]...
+            if idx < trimmed.endIndex, trimmed[idx] == "[" {
+                let markIdx = trimmed.index(after: idx)
+                if markIdx < trimmed.endIndex {
+                    let mark = trimmed[markIdx]
+                    let closeIdx = trimmed.index(after: markIdx)
+                    if (mark == " " || mark == "x" || mark == "X"),
+                       closeIdx < trimmed.endIndex, trimmed[closeIdx] == "]" {
+                        var bodyIdx = trimmed.index(after: closeIdx)
+                        var bodyWs = 0
+                        while bodyIdx < trimmed.endIndex, trimmed[bodyIdx].isWhitespace {
+                            bodyIdx = trimmed.index(after: bodyIdx)
+                            bodyWs += 1
+                        }
+                        if bodyWs > 0 {
+                            return .listItem(
+                                text: String(trimmed[bodyIdx...]),
+                                mark: "•",
+                                depth: depth,
+                                checked: mark == "x" || mark == "X"
+                            )
+                        }
+                    }
+                }
+            }
+            return .listItem(text: String(trimmed[idx...]), mark: "•", depth: depth, checked: nil)
+        }
+        if first.isNumber {
+            var idx = trimmed.startIndex
+            while idx < trimmed.endIndex, trimmed[idx].isNumber {
+                idx = trimmed.index(after: idx)
+            }
+            guard idx < trimmed.endIndex, trimmed[idx] == "." || trimmed[idx] == ")" else { return nil }
+            let afterSep = trimmed.index(after: idx)
+            var bodyIdx = afterSep
+            var wsCount = 0
+            while bodyIdx < trimmed.endIndex, trimmed[bodyIdx].isWhitespace {
+                bodyIdx = trimmed.index(after: bodyIdx)
+                wsCount += 1
+            }
+            guard wsCount > 0 else { return nil }
+            return .listItem(
+                text: String(trimmed[bodyIdx...]),
+                mark: String(trimmed[..<afterSep]),
+                depth: depth,
+                checked: nil
+            )
+        }
+        return nil
     }
 
     private static func isHorizontalRule(_ trimmed: String) -> Bool {
@@ -525,23 +674,46 @@ enum MathTex {
         return true
     }
 
+    private struct InlineCacheKey: Hashable {
+        let text: String
+        let size: CGFloat
+    }
+
+    @MainActor private static let inlineCacheLimit = 512
+    @MainActor private static var inlineCache: [InlineCacheKey: AttributedString] = [:]
+    @MainActor private static var inlineRing: [InlineCacheKey?] = Array(repeating: nil, count: 512)
+    @MainActor private static var inlineCursor = 0
+
     /// Renders a Markdown string with inline math (`$...$`, `\(...\)`) and
     /// Citations into a single selectable SwiftUI `AttributedString`.
     @MainActor
     static func inlineRich(_ text: String, size: CGFloat) -> AttributedString {
+        let key = InlineCacheKey(text: text, size: size)
+        if let hit = inlineCache[key] {
+            return hit
+        }
         let segments = splitInline(text)
+        let result: AttributedString
         if segments.count == 1, case .markdown(let raw) = segments[0] {
-            return Citations.style(Agent.rich(YouTubeHelper.linkTimestamps(in: raw)), size: size)
-        }
-        var result = AttributedString()
-        for segment in segments {
-            switch segment {
-            case .markdown(let raw):
-                result.append(Citations.style(Agent.rich(YouTubeHelper.linkTimestamps(in: raw)), size: size))
-            case .math(let tex):
-                result.append(renderInlineMath(tex, size: size))
+            result = Citations.style(Agent.rich(YouTubeHelper.linkTimestamps(in: raw)), size: size)
+        } else {
+            var built = AttributedString()
+            for segment in segments {
+                switch segment {
+                case .markdown(let raw):
+                    built.append(Citations.style(Agent.rich(YouTubeHelper.linkTimestamps(in: raw)), size: size))
+                case .math(let tex):
+                    built.append(renderInlineMath(tex, size: size))
+                }
             }
+            result = built
         }
+        if let evicted = inlineRing[inlineCursor] {
+            inlineCache.removeValue(forKey: evicted)
+        }
+        inlineRing[inlineCursor] = key
+        inlineCursor = (inlineCursor + 1) % inlineCacheLimit
+        inlineCache[key] = result
         return result
     }
 
@@ -669,13 +841,40 @@ struct MathParser {
     private let chars: [Character]
     private var i = 0
 
+    private static let parseLock = NSLock()
+    private static let parseCacheLimit = 256
+    private static var parseCache: [String: MathNode] = [:]
+    private static var parseCacheRing: [String?] = Array(repeating: nil, count: 256)
+    private static var parseCacheCursor = 0
+
     init(_ tex: String) {
         self.chars = Array(tex)
     }
 
     static func parse(_ tex: String) -> MathNode {
+        parseLock.lock()
+        if let hit = parseCache[tex] {
+            parseLock.unlock()
+            return hit
+        }
+        parseLock.unlock()
+
         var parser = MathParser(tex)
-        return parser.parseSequence(stopAt: nil)
+        let node = parser.parseSequence(stopAt: nil)
+
+        if tex.utf8.count <= 8_192 {
+            parseLock.lock()
+            if parseCache[tex] == nil {
+                if let victim = parseCacheRing[parseCacheCursor] {
+                    parseCache.removeValue(forKey: victim)
+                }
+                parseCacheRing[parseCacheCursor] = tex
+                parseCacheCursor = (parseCacheCursor + 1) % parseCacheLimit
+                parseCache[tex] = node
+            }
+            parseLock.unlock()
+        }
+        return node
     }
 
     private var atEnd: Bool { i >= chars.count }
@@ -945,12 +1144,16 @@ struct MathParser {
 
 // MARK: - SwiftUI Display Math Renderer
 
-struct DisplayMathView: View {
+struct DisplayMathView: View, Equatable {
     let tex: String
     var size: CGFloat = 14
 
     @State private var hovering = false
     @State private var copied = false
+
+    static func == (lhs: Self, rhs: Self) -> Bool {
+        lhs.tex == rhs.tex && lhs.size == rhs.size
+    }
 
     var body: some View {
         let root = MathParser.parse(tex)
@@ -1131,9 +1334,13 @@ private struct MathNodeView: View {
 
 // MARK: - Rich Markdown Reply View
 
-struct MarkdownReplyView: View {
+struct MarkdownReplyView: View, Equatable {
     let text: String
     var size: CGFloat = 13
+
+    static func == (lhs: Self, rhs: Self) -> Bool {
+        lhs.text == rhs.text && lhs.size == rhs.size
+    }
 
     var body: some View {
         let marked = Citations.mark(text)
@@ -1141,63 +1348,7 @@ struct MarkdownReplyView: View {
 
         VStack(alignment: .leading, spacing: size * 0.72) {
             ForEach(Array(blocks.enumerated()), id: \.offset) { _, block in
-                switch block {
-                case .paragraph(let words):
-                    Text(MathTex.inlineRich(words, size: size))
-                        .lineSpacing(size * 0.22)
-
-                case .heading(let level, let words):
-                    let hSize: CGFloat = level == 1 ? size + 4.5 : (level == 2 ? size + 2.5 : (level == 3 ? size + 1 : size))
-                    Text(MathTex.inlineRich(words, size: hSize))
-                        .font(.system(size: hSize, weight: level <= 2 ? .semibold : .medium))
-                        .padding(.top, level <= 2 ? 4 : 2)
-
-                case .listItem(let words, let mark, let depth, let checked):
-                    HStack(alignment: .firstTextBaseline, spacing: 7) {
-                        if let checked {
-                            Image(systemName: checked ? "checkmark.square.fill" : "square")
-                                .font(.system(size: size - 1))
-                                .foregroundStyle(checked ? Palette.accent : Palette.muted)
-                                .frame(minWidth: 14, alignment: .trailing)
-                        } else {
-                            Text(mark)
-                                .foregroundStyle(Palette.muted)
-                                .frame(minWidth: 12, alignment: .trailing)
-                        }
-                        Text(MathTex.inlineRich(words, size: size))
-                            .lineSpacing(size * 0.22)
-                    }
-                    .padding(.leading, 2 + CGFloat(depth) * 14)
-
-                case .blockquote(let lines):
-                    HStack(alignment: .top, spacing: 10) {
-                        RoundedRectangle(cornerRadius: 1.5, style: .continuous)
-                            .fill(Palette.accent.opacity(0.45))
-                            .frame(width: 2.5)
-                        Text(MathTex.inlineRich(lines.joined(separator: "\n"), size: size))
-                            .foregroundStyle(Palette.ink.opacity(0.86))
-                            .lineSpacing(size * 0.22)
-                    }
-                    .padding(.vertical, 4)
-                    .padding(.horizontal, 8)
-                    .frame(maxWidth: .infinity, alignment: .leading)
-                    .background(Palette.wash.opacity(0.45), in: RoundedRectangle(cornerRadius: 7, style: .continuous))
-
-                case .code(let language, let code):
-                    CodeBlockCard(language: language, code: code, size: size)
-
-                case .table(let headers, let alignments, let rows):
-                    MarkdownTableCard(headers: headers, alignments: alignments, rows: rows, size: size)
-
-                case .mathBlock(let tex):
-                    DisplayMathView(tex: tex, size: size)
-
-                case .rule:
-                    Rectangle()
-                        .fill(Palette.hairline)
-                        .frame(height: 1)
-                        .padding(.vertical, 2)
-                }
+                MarkdownBlockRow(block: block, size: size).equatable()
             }
             if !marked.sources.isEmpty {
                 SourcesRow(sources: marked.sources, size: size)
@@ -1211,12 +1362,81 @@ struct MarkdownReplyView: View {
     }
 }
 
-private struct CodeBlockCard: View {
+private struct MarkdownBlockRow: View, Equatable {
+    let block: MarkdownBlock
+    let size: CGFloat
+
+    var body: some View {
+        switch block {
+        case .paragraph(let words):
+            Text(MathTex.inlineRich(words, size: size))
+                .lineSpacing(size * 0.22)
+
+        case .heading(let level, let words):
+            let hSize: CGFloat = level == 1 ? size + 4.5 : (level == 2 ? size + 2.5 : (level == 3 ? size + 1 : size))
+            Text(MathTex.inlineRich(words, size: hSize))
+                .font(.system(size: hSize, weight: level <= 2 ? .semibold : .medium))
+                .padding(.top, level <= 2 ? 4 : 2)
+
+        case .listItem(let words, let mark, let depth, let checked):
+            HStack(alignment: .firstTextBaseline, spacing: 7) {
+                if let checked {
+                    Image(systemName: checked ? "checkmark.square.fill" : "square")
+                        .font(.system(size: size - 1))
+                        .foregroundStyle(checked ? Palette.accent : Palette.muted)
+                        .frame(minWidth: 14, alignment: .trailing)
+                } else {
+                    Text(mark)
+                        .foregroundStyle(Palette.muted)
+                        .frame(minWidth: 12, alignment: .trailing)
+                }
+                Text(MathTex.inlineRich(words, size: size))
+                    .lineSpacing(size * 0.22)
+            }
+            .padding(.leading, 2 + CGFloat(depth) * 14)
+
+        case .blockquote(let lines):
+            HStack(alignment: .top, spacing: 10) {
+                RoundedRectangle(cornerRadius: 1.5, style: .continuous)
+                    .fill(Palette.accent.opacity(0.45))
+                    .frame(width: 2.5)
+                Text(MathTex.inlineRich(lines.joined(separator: "\n"), size: size))
+                    .foregroundStyle(Palette.ink.opacity(0.86))
+                    .lineSpacing(size * 0.22)
+            }
+            .padding(.vertical, 4)
+            .padding(.horizontal, 8)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .background(Palette.wash.opacity(0.45), in: RoundedRectangle(cornerRadius: 7, style: .continuous))
+
+        case .code(let language, let code):
+            CodeBlockCard(language: language, code: code, size: size)
+
+        case .table(let headers, let alignments, let rows):
+            MarkdownTableCard(headers: headers, alignments: alignments, rows: rows, size: size)
+
+        case .mathBlock(let tex):
+            DisplayMathView(tex: tex, size: size)
+
+        case .rule:
+            Rectangle()
+                .fill(Palette.hairline)
+                .frame(height: 1)
+                .padding(.vertical, 2)
+        }
+    }
+}
+
+private struct CodeBlockCard: View, Equatable {
     let language: String?
     let code: String
     let size: CGFloat
 
     @State private var copied = false
+
+    static func == (lhs: Self, rhs: Self) -> Bool {
+        lhs.language == rhs.language && lhs.code == rhs.code && lhs.size == rhs.size
+    }
 
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
@@ -1261,7 +1481,7 @@ private struct CodeBlockCard: View {
     }
 }
 
-private struct MarkdownTableCard: View {
+private struct MarkdownTableCard: View, Equatable {
     let headers: [String]
     let alignments: [MarkdownBlock.Alignment]
     let rows: [[String]]

@@ -140,7 +140,12 @@ final class Float {
                 self?.controls?.playing = playing
             }
         }
-        controls.onSkip = { [weak self] seconds in self?.onSkip?(seconds) }
+        controls.onSkip = { [weak self] seconds in
+            self?.onSkip?(seconds)
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.05) {
+                self?.pollProgress()
+            }
+        }
         controls.onSeek = { [weak self] fraction in self?.onSeek?(fraction) }
         controls.onToggleMute = { [weak self] in
             self?.onToggleMute? { muted in
@@ -157,6 +162,7 @@ final class Float {
 
         panel.contentView = ground
         panel.orderFrontRegardless()
+        panel.makeFirstResponder(controls)
         self.panel = panel
 
         ticker = Timer.scheduledTimer(withTimeInterval: 0.5, repeats: true) { [weak self] _ in
@@ -173,13 +179,17 @@ final class Float {
                     return
                 }
 
-                self.onProgress? { through, playing, muted, rate in
-                    self.controls?.syncProgress(through)
-                    self.controls?.playing = playing
-                    self.controls?.muted = muted
-                    self.controls?.rate = rate
-                }
+                self.pollProgress()
             }
+        }
+    }
+
+    private func pollProgress() {
+        onProgress? { [weak self] through, playing, muted, rate in
+            self?.controls?.syncProgress(through)
+            self?.controls?.playing = playing
+            self?.controls?.muted = muted
+            self?.controls?.rate = rate
         }
     }
 
@@ -296,10 +306,19 @@ final class Float {
             dress(forward, "goforward.15", 15, round: 19, action: #selector(pressedForward))
             dress(mute, "speaker.wave.2.fill", 11, round: 14, action: #selector(pressedMute))
 
+            close.toolTip = "Close floating video (Esc)"
+            back.toolTip = "Return to tab (Return)"
+            rewind.toolTip = "Rewind 15s (←)"
+            pause.toolTip = "Play / Pause (Space)"
+            forward.toolTip = "Forward 15s (→)"
+            mute.toolTip = "Mute / Unmute (M)"
+
             rateButton.isBordered = false
             rateButton.bezelStyle = .regularSquare
+            rateButton.refusesFirstResponder = true
             rateButton.target = self
             rateButton.action = #selector(pressedRate)
+            rateButton.toolTip = "Playback speed"
             rateButton.wantsLayer = true
             rateButton.layer?.backgroundColor = NSColor(white: 0.1, alpha: 0.55).cgColor
             rateButton.layer?.cornerRadius = 12
@@ -341,6 +360,7 @@ final class Float {
             button.isBordered = false
             button.bezelStyle = .regularSquare
             button.imagePosition = .imageOnly
+            button.refusesFirstResponder = true
             button.target = self
             button.action = action
             button.wantsLayer = true
@@ -371,10 +391,10 @@ final class Float {
             rewind.frame = NSRect(x: bounds.midX - 25 - 54, y: middle + 6, width: 38, height: 38)
             forward.frame = NSRect(x: bounds.midX + 25 + 16, y: middle + 6, width: 38, height: 38)
 
-            mute.frame = NSRect(x: 14, y: 18, width: 28, height: 28)
-            rateButton.frame = NSRect(x: 48, y: 20, width: 42, height: 24)
+            mute.frame = NSRect(x: 14, y: 22, width: 28, height: 28)
+            rateButton.frame = NSRect(x: 48, y: 24, width: 42, height: 24)
 
-            line.frame = NSRect(x: 0, y: 0, width: max(0, bounds.width - 24), height: 14)
+            line.frame = NSRect(x: 14, y: 4, width: max(0, bounds.width - 38), height: 14)
         }
 
         override func updateTrackingAreas() {
@@ -407,6 +427,24 @@ final class Float {
         }
 
         override func acceptsFirstMouse(for event: NSEvent?) -> Bool { true }
+        override var acceptsFirstResponder: Bool { true }
+
+        override func keyDown(with event: NSEvent) {
+            let chars = event.charactersIgnoringModifiers?.lowercased() ?? ""
+            switch event.keyCode {
+            case 49: pressedPause()          // Space
+            case 123: pressedRewind()        // ←
+            case 124: pressedForward()       // →
+            case 36, 76: pressedReturn()     // Return / Enter
+            case 53: pressedClose()          // Esc
+            default:
+                if chars == "m" {
+                    pressedMute()
+                } else {
+                    super.keyDown(with: event)
+                }
+            }
+        }
 
         /// Everything reaches this layer.
         ///
@@ -463,6 +501,7 @@ final class Float {
 
         override func mouseDown(with event: NSEvent) {
             guard let window else { return }
+            window.makeFirstResponder(self)
             stopGlide()
             let pt = convert(event.locationInWindow, from: nil)
             if atScrubber(pt) {
@@ -728,16 +767,21 @@ final class Float {
 
             override func draw(_ dirty: NSRect) {
                 let trackHeight: CGFloat = expanded ? 5 : 3
-                let track = NSRect(x: 0, y: 0, width: bounds.width, height: trackHeight)
+                let trackY = (bounds.height - trackHeight) / 2
+                let radius = trackHeight / 2
+                let track = NSRect(x: 0, y: trackY, width: bounds.width, height: trackHeight)
                 NSColor(white: 1, alpha: 0.24).setFill()
-                track.fill()
+                NSBezierPath(roundedRect: track, xRadius: radius, yRadius: radius).fill()
                 let fillWidth = max(0, min(bounds.width, bounds.width * CGFloat(through)))
-                NSColor(white: 1, alpha: 0.90).setFill()
-                NSRect(x: 0, y: 0, width: fillWidth, height: trackHeight).fill()
+                if fillWidth > 0 {
+                    NSColor(white: 1, alpha: 0.90).setFill()
+                    let fillRect = NSRect(x: 0, y: trackY, width: fillWidth, height: trackHeight)
+                    NSBezierPath(roundedRect: fillRect, xRadius: radius, yRadius: radius).fill()
+                }
                 if expanded {
                     let thumbSize: CGFloat = 10
                     let x = max(thumbSize / 2, min(bounds.width - thumbSize / 2, fillWidth)) - thumbSize / 2
-                    let thumbRect = NSRect(x: x, y: trackHeight / 2 - thumbSize / 2 + 2, width: thumbSize, height: thumbSize)
+                    let thumbRect = NSRect(x: x, y: bounds.midY - thumbSize / 2, width: thumbSize, height: thumbSize)
                     NSColor.white.setFill()
                     NSBezierPath(ovalIn: thumbRect).fill()
                 }
@@ -885,7 +929,7 @@ enum Isolate {
           var video = document.querySelector('[data-office-float]')
             || document.querySelector('video');
           if (!video) return false;
-          video.currentTime = Math.max(0, video.currentTime + (\(seconds)));
+          video.currentTime = Math.min(isFinite(video.duration) ? video.duration : Infinity, Math.max(0, video.currentTime + (\(seconds))));
           return true;
         })();
         """
