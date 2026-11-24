@@ -64,7 +64,7 @@ final class Sync: ObservableObject {
         return made
     }()
 
-    private var state = State.load()
+    private lazy var state = State.load()
     private var running = false
     private var clock: Timer?
     private var soon: DispatchWorkItem?

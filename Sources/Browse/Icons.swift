@@ -1,3 +1,4 @@
+import ImageIO
 import SwiftUI
 import WebKit
 
@@ -17,11 +18,109 @@ final class Favicons {
     /// that host can put it on at once.
     var arrived: ((String, NSImage) -> Void)?
 
-    private var memory: [String: NSImage] = [:]
+    private let memory: NSCache<NSString, NSImage> = {
+        let cache = NSCache<NSString, NSImage>()
+        cache.countLimit = 512
+        return cache
+    }()
     private var busy: Set<String> = []
     private var missing: Set<String> = []
-    /// Keys with no file on disk, as far as `known` has looked.
+    /// Keys with no file on disk or unreadable images, as far as `known` has looked.
     private var absent: Set<String> = []
+    /// In-memory directory & mtime index populated asynchronously at startup so
+    /// `cached(_:)` and `fresh(_:)` avoid blocking `stat`/`NSImage` calls on misses.
+    private var fileMtimes: [String: Date] = [:]
+    private var indexLoaded = false
+    private var indexGeneration = 0
+    private var deferredWarm: Set<String> = []
+    /// Hosts confirmed during this session to declare no `prefers-color-scheme: dark` icon.
+    private var noDarkHosts: Set<String> = []
+
+    private static let session: URLSession = {
+        let config = URLSessionConfiguration.ephemeral
+        config.timeoutIntervalForRequest = 8
+        return URLSession(configuration: config)
+    }()
+
+    private init() {
+        loadIndex()
+    }
+
+    private func loadIndex() {
+        let gen = indexGeneration
+        let dir = Favicons.folder
+        Task.detached(priority: .utility) { [weak self] in
+            var scanned: [String: Date] = [:]
+            if let urls = try? FileManager.default.contentsOfDirectory(
+                at: dir,
+                includingPropertiesForKeys: [.contentModificationDateKey],
+                options: [.skipsHiddenFiles]
+            ) {
+                for url in urls where url.pathExtension == "png" {
+                    let stem = url.deletingPathExtension().lastPathComponent
+                    let mtime = (try? url.resourceValues(forKeys: [.contentModificationDateKey]).contentModificationDate) ?? .distantPast
+                    scanned[stem] = mtime
+                }
+            }
+            let result = scanned
+            await MainActor.run { [weak self] in
+                guard let self, self.indexGeneration == gen else { return }
+                for (stem, mtime) in result where self.fileMtimes[stem] == nil {
+                    self.fileMtimes[stem] = mtime
+                }
+                self.indexLoaded = true
+                self.warmDeferred()
+            }
+        }
+    }
+
+    private func warmDeferred() {
+        let hosts = deferredWarm
+        deferredWarm.removeAll()
+        guard !hosts.isEmpty else { return }
+        let dark = Favicons.dark
+        var targets: [(host: String, key: String, file: URL)] = []
+        for host in hosts {
+            let candidates = host.hasPrefix("www.")
+                ? [host, String(host.dropFirst(4))]
+                : [host, "www." + host]
+            var matchedKey: String?
+            for base in candidates {
+                if dark, fileMtimes[Favicons.key(base, dark: true)] != nil {
+                    matchedKey = Favicons.key(base, dark: true)
+                    break
+                }
+                if fileMtimes[base] != nil {
+                    matchedKey = base
+                    break
+                }
+            }
+            if let matchedKey, memory.object(forKey: matchedKey as NSString) == nil {
+                targets.append((host, matchedKey, Favicons.file(matchedKey)))
+            }
+        }
+        guard !targets.isEmpty else { return }
+        let gen = indexGeneration
+        Task.detached(priority: .utility) { [weak self] in
+            var loaded: [(host: String, key: String, cg: CGImage)] = []
+            for target in targets {
+                guard let src = CGImageSourceCreateWithURL(target.file as CFURL, nil),
+                      let cg = CGImageSourceCreateImageAtIndex(src, 0, nil)
+                else { continue }
+                loaded.append((target.host, target.key, cg))
+            }
+            guard !loaded.isEmpty else { return }
+            let decoded = loaded
+            await MainActor.run { [weak self] in
+                guard let self, self.indexGeneration == gen else { return }
+                for item in decoded {
+                    let image = NSImage(cgImage: item.cg, size: NSSize(width: 64, height: 64))
+                    self.memory.setObject(image, forKey: item.key as NSString)
+                    self.arrived?(item.host, image)
+                }
+            }
+        }
+    }
 
     private static var folder: URL { Store.folder.appendingPathComponent("icons", isDirectory: true) }
 
@@ -29,8 +128,18 @@ final class Favicons {
     /// theirs until they are closed.
     func forgetAll() {
         try? FileManager.default.removeItem(at: Favicons.folder)
+        indexGeneration &+= 1
+        memory.removeAllObjects()
+        fileMtimes.removeAll()
+        deferredWarm.removeAll()
+        noDarkHosts.removeAll()
         missing.removeAll()
         absent.removeAll()
+    }
+
+    /// Release decoded favicon bitmaps under memory pressure.
+    func trim() {
+        memory.removeAllObjects()
     }
     private static func file(_ key: String) -> URL { folder.appendingPathComponent(key + ".png") }
 
@@ -49,39 +158,45 @@ final class Favicons {
     /// variant when there is one, the ordinary icon otherwise.
     func cached(_ host: String) -> NSImage? {
         let normalized = host.lowercased()
-        if let hit = match(normalized) { return hit }
+        if let hit = match(normalized, warmHost: normalized) { return hit }
         if normalized.hasPrefix("www.") {
             let bare = String(normalized.dropFirst(4))
-            if let hit = match(bare) { return hit }
+            if let hit = match(bare, warmHost: normalized) { return hit }
         } else {
             let www = "www." + normalized
-            if let hit = match(www) { return hit }
+            if let hit = match(www, warmHost: normalized) { return hit }
         }
         return nil
     }
 
-    private func match(_ key: String) -> NSImage? {
-        if Favicons.dark, let hit = known(Favicons.key(key, dark: true)) { return hit }
-        return known(key)
+    private func match(_ key: String, warmHost: String? = nil) -> NSImage? {
+        if Favicons.dark, let hit = known(Favicons.key(key, dark: true), warmHost: warmHost) { return hit }
+        return known(key, warmHost: warmHost)
     }
 
-    private func known(_ key: String) -> NSImage? {
-        if let hit = memory[key] { return hit }
-        // A host with no icon on disk is looked for there once, not on every
-        // line of every list that shows it: the History panel asked for two
-        // thousand of them each time it drew. One that arrives later goes
-        // into `memory`, which is asked first.
+    private func known(_ key: String, warmHost: String? = nil) -> NSImage? {
+        if let hit = memory.object(forKey: key as NSString) { return hit }
         if absent.contains(key) { return nil }
+        if !indexLoaded {
+            if let warmHost { deferredWarm.insert(warmHost) }
+            return nil
+        }
+        // Only read from disk when the preloaded directory index confirms a file exists.
+        guard fileMtimes[key] != nil else { return nil }
         guard let image = NSImage(contentsOf: Favicons.file(key)) else {
             absent.insert(key)
             return nil
         }
-        memory[key] = image
+        memory.setObject(image, forKey: key as NSString)
         return image
     }
 
-    private static func fresh(_ key: String) -> Bool {
-        guard let stamp = try? file(key).resourceValues(forKeys: [.contentModificationDateKey]).contentModificationDate
+    private func fresh(_ key: String) -> Bool {
+        if indexLoaded {
+            guard let stamp = fileMtimes[key] else { return false }
+            return Date().timeIntervalSince(stamp) < 7 * 86_400
+        }
+        guard let stamp = try? Favicons.file(key).resourceValues(forKeys: [.contentModificationDateKey]).contentModificationDate
         else { return false }
         return Date().timeIntervalSince(stamp) < 7 * 86_400
     }
@@ -101,8 +216,8 @@ final class Favicons {
     /// kept as if the site had handed it over, unless one is already here.
     func adopt(_ data: Data, for host: String) async {
         guard cached(host) == nil, let image = await Favicons.square(data) else { return }
-        memory[host] = image
-        Favicons.keep(image, for: host)
+        memory.setObject(image, forKey: host as NSString)
+        keep(image, for: host)
         arrived?(host, image)
     }
 
@@ -125,10 +240,14 @@ final class Favicons {
         else { return }
 
         let dark = Favicons.dark
+        if dark && noDarkHosts.contains(host), fresh(host), let known = known(host) {
+            if tab.address?.host()?.lowercased() == host { tab.icon = known }
+            return
+        }
         // Fresh and right for this look: nothing to do. In the dark, a fresh
         // light icon is not enough on its own — the site may offer a dark
         // one that has never been asked for — so the page is asked.
-        if Favicons.fresh(Favicons.key(host, dark: dark)), let known = known(Favicons.key(host, dark: dark)) {
+        if fresh(Favicons.key(host, dark: dark)), let known = known(Favicons.key(host, dark: dark)) {
             if tab.address?.host()?.lowercased() == host { tab.icon = known }
             return
         }
@@ -149,10 +268,13 @@ final class Favicons {
                 let declared = (result?["icons"] as? [[String: String]]) ?? []
                 let offersDark = declared.contains { Favicons.media($0["media"]) == .dark }
                 let wantDark = dark && offersDark
+                if dark && !offersDark {
+                    self.noDarkHosts.insert(host)
+                }
                 let key = Favicons.key(host, dark: wantDark)
                 // No dark variant here after all, and the ordinary one is
                 // fresh: it is the one to wear.
-                if !wantDark, Favicons.fresh(key), let known = self.known(key) {
+                if !wantDark, self.fresh(key), let known = self.known(key) {
                     if tab.address?.host()?.lowercased() == host {
                         tab.icon = known
                     }
@@ -179,19 +301,14 @@ final class Favicons {
 
     private func download(_ candidates: [URL], host: String, key: String, shy: Bool) async {
         defer { busy.remove(host) }
-        let session = URLSession(configuration: {
-            let config = URLSessionConfiguration.ephemeral
-            config.timeoutIntervalForRequest = 8
-            return config
-        }())
         for candidate in candidates {
-            guard let (data, response) = try? await session.data(from: candidate),
+            guard let (data, response) = try? await Favicons.session.data(from: candidate),
                   (response as? HTTPURLResponse).map({ (200..<300).contains($0.statusCode) }) ?? true,
                   data.count > 60, data.count < 2_000_000
             else { continue }
             guard let image = await Favicons.square(data) else { continue }
-            memory[key] = image
-            if !shy { Favicons.keep(image, for: key) }
+            memory.setObject(image, forKey: key as NSString)
+            if !shy { keep(image, for: key) }
             arrived?(host, image)
             return
         }
@@ -225,16 +342,19 @@ final class Favicons {
         }.value
     }
 
-    private static func keep(_ image: NSImage, for key: String) {
-        guard let tiff = image.tiffRepresentation,
-              let rep = NSBitmapImageRep(data: tiff),
-              let png = rep.representation(using: .png, properties: [:])
-        else { return }
+    private func keep(_ image: NSImage, for key: String) {
+        guard let cg = image.cgImage(forProposedRect: nil, context: nil, hints: nil) else { return }
+        fileMtimes[key] = Date()
+        absent.remove(key)
         let file = Favicons.file(key)
-        let dir = folder
+        let dir = Favicons.folder
         DispatchQueue.global(qos: .utility).async {
+            let data = NSMutableData()
+            guard let dest = CGImageDestinationCreateWithData(data, "public.png" as CFString, 1, nil) else { return }
+            CGImageDestinationAddImage(dest, cg, nil)
+            guard CGImageDestinationFinalize(dest) else { return }
             try? FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
-            try? png.write(to: file, options: .atomic)
+            try? (data as Data).write(to: file, options: .atomic)
         }
     }
 

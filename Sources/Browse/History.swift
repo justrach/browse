@@ -191,6 +191,7 @@ final class History: ObservableObject {
     func forget() {
         Sync.shared.forgotAll()
         visits = [:]
+        try? FileManager.default.removeItem(at: History.stampFile)
         save()
     }
 
@@ -487,11 +488,43 @@ final class History: ObservableObject {
 
     private static var folder: URL { Store.folder }
     private static var file: URL { Store.file("history.json") }
+    private static var stampFile: URL { Store.file("history.stamp") }
+    private nonisolated static let keyFormatVersion = 2
+
+    nonisolated private static func fileStamp(for file: URL, dataCount: Int) -> String? {
+        guard let stamp = try? file.resourceValues(forKeys: [.contentModificationDateKey]).contentModificationDate else {
+            return nil
+        }
+        return "\(keyFormatVersion):\(dataCount):\(stamp.timeIntervalSinceReferenceDate.bitPattern)"
+    }
 
     private func load() {
-        guard let data = try? Data(contentsOf: History.file) else { return }
+        let file = History.file
+        guard let data = try? Data(contentsOf: file) else { return }
         guard let list = try? JSONDecoder().decode([Visit].self, from: data) else {
-            Store.quarantine(History.file)
+            Store.quarantine(file)
+            return
+        }
+        let currentStamp = History.fileStamp(for: file, dataCount: data.count)
+        let savedStamp = try? String(contentsOf: History.stampFile, encoding: .utf8)
+        if let currentStamp, currentStamp == savedStamp {
+            var loaded: [String: Visit] = [:]
+            loaded.reserveCapacity(list.count)
+            for visit in list {
+                if var existing = loaded[visit.key] {
+                    if visit.last > existing.last {
+                        var kept = visit
+                        kept.count = existing.count + visit.count
+                        loaded[visit.key] = kept
+                    } else {
+                        existing.count += visit.count
+                        loaded[visit.key] = existing
+                    }
+                } else {
+                    loaded[visit.key] = visit
+                }
+            }
+            visits = loaded
             return
         }
         // Keys written by an older Search can meet under the new rule:
@@ -505,6 +538,12 @@ final class History: ObservableObject {
             kept.count = a.count + b.count
             return kept
         })
+        if let currentStamp {
+            let stampURL = History.stampFile
+            DispatchQueue.global(qos: .utility).async {
+                try? currentStamp.write(to: stampURL, atomically: true, encoding: .utf8)
+            }
+        }
     }
 
     /// Coalesced: a busy minute of browsing writes the file once, not thirty
@@ -520,6 +559,7 @@ final class History: ObservableObject {
             let all = Array(self.visits.values)
             let folder = History.folder
             let file = History.file
+            let stampURL = History.stampFile
             DispatchQueue.global(qos: .utility).async {
                 // A cap, so the file can't grow without end: room for another
                 // browser's history brought in whole. What goes is what has
@@ -536,6 +576,9 @@ final class History: ObservableObject {
                     at: folder, withIntermediateDirectories: true
                 )
                 try? data.write(to: file, options: .atomic)
+                if let stamp = History.fileStamp(for: file, dataCount: data.count) {
+                    try? stamp.write(to: stampURL, atomically: true, encoding: .utf8)
+                }
             }
         }
     }

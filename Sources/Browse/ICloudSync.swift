@@ -176,12 +176,13 @@ final class ICloudSync: ObservableObject {
     @Published private(set) var problem: String?
     @Published private(set) var others: [String: DeviceTabs] = [:]
 
-    let available: Bool
+    var available: Bool { !Store.testing && ICloudSync.entitled }
 
     private weak var browser: Browser?
     private let defaults: UserDefaults
     private let file: URL
     private var ledger = ICloudLedger()
+    private var ledgerLoaded = false
     private var engine: CloudKitEngine?
     private var applying = false
     private var tabTimer: Timer?
@@ -190,7 +191,7 @@ final class ICloudSync: ObservableObject {
 
     /// True only when this signed binary actually holds CloudKit entitlements
     /// for `containerID`. Touching `CKContainer` without them aborts the app.
-    nonisolated static let entitled: Bool = {
+    private nonisolated static let checkEntitled: Bool = {
         var code: SecCode?
         guard SecCodeCopySelf([], &code) == errSecSuccess, let code else { return false }
         var staticCode: SecStaticCode?
@@ -205,11 +206,17 @@ final class ICloudSync: ObservableObject {
         return containers.contains(containerID) && services.contains("CloudKit")
     }()
 
+    nonisolated static var entitled: Bool { checkEntitled }
+
     private init(defaults: UserDefaults = Store.settings, file: URL = Store.file("icloud.json")) {
         self.defaults = defaults
         self.file = file
-        self.available = !Store.testing && ICloudSync.entitled
         self.on = defaults.bool(forKey: ICloudSync.onKey)
+    }
+
+    private func ensureLedger() {
+        guard !ledgerLoaded else { return }
+        ledgerLoaded = true
         if let data = try? Data(contentsOf: file),
            let saved = try? JSONDecoder().decode(ICloudLedger.self, from: data) {
             ledger = saved
@@ -223,11 +230,13 @@ final class ICloudSync: ObservableObject {
 
     private func startIfNeeded() {
         guard on, available, engine == nil, browser?.prefs.sync != true else { return }
+        ensureLedger()
         bootEngine()
     }
 
     func turnOn() {
         guard available, !on, browser?.prefs.sync != true else { return }
+        ensureLedger()
         on = true
         problem = nil
         defaults.set(true, forKey: ICloudSync.onKey)
@@ -244,6 +253,7 @@ final class ICloudSync: ObservableObject {
 
     func syncNow() {
         guard on, let engine else { return }
+        ensureLedger()
         problem = nil
         let sync = self
         Task.detached {
@@ -260,6 +270,7 @@ final class ICloudSync: ObservableObject {
     }
 
     func erase() {
+        ensureLedger()
         let activeEngine = engine
         on = false
         defaults.removeObject(forKey: ICloudSync.onKey)

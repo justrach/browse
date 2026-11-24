@@ -79,7 +79,7 @@ final class Browser: NSObject, ObservableObject {
             pageSelection = nil
             activeHue = active?.hue
             if prefs.agentDrafts { agent.moveDraft(to: active) }
-            guess()
+            if fieldShowing || summoning { guess() }
             // Another tab picked, opened or come to the front while the talk
             // fills the stage is a page wanted: the stage goes back to it.
             if talkOnStage { leaveStage() }
@@ -563,6 +563,7 @@ final class Browser: NSObject, ObservableObject {
         didSet {
             if editing {
                 dismissOverlays(keeping: .address)
+                if oldValue != editing { guess() }
                 return
             }
             openingNewTab = false
@@ -586,7 +587,7 @@ final class Browser: NSObject, ObservableObject {
         get { omnibox.typed }
         set {
             omnibox.typed = newValue
-            guess()
+            if fieldShowing || summoning { guess() }
         }
     }
 
@@ -1683,7 +1684,7 @@ final class Browser: NSObject, ObservableObject {
         // No dialog and no waiting cursor: the letter is taken from the
         // address and applied. Changing it is a separate act, for the day it
         // matters — which is why it is not folded into this one.
-        writeSession(now: true)
+        writeSession()
     }
 
     /// Change Letter, or a double-click on the square itself.
@@ -1704,13 +1705,13 @@ final class Browser: NSObject, ObservableObject {
     func endPinEdit() {
         guard editingPin != nil else { return }
         editingPin = nil
-        writeSession(now: true)
+        writeSession()
     }
 
     func unpin(_ tab: Tab) {
         if editingPin == tab.id { editingPin = nil }
         tab.pin = nil
-        defer { writeSession(now: true) }
+        defer { writeSession() }
         // Back out of the pinned block, to the head of the loose tabs.
         if let here = tabs.firstIndex(where: { $0.id == tab.id }) {
             let home = pinnedCount
@@ -1761,7 +1762,7 @@ final class Browser: NSObject, ObservableObject {
             }
             tab.name = typed.isEmpty ? nil : typed
             cancelTabEdit()
-            writeSession(now: true)
+            writeSession()
             return
         }
         guard let url = destination(for: tabDraft) else {
@@ -1934,7 +1935,10 @@ final class Browser: NSObject, ObservableObject {
                         prefs.$googleSuggestions.map { _ in () }.eraseToAnyPublisher()] {
             changed.dropFirst().sink { [weak self] in
                 self?.cancelGoogleSuggestions()
-                DispatchQueue.main.async { [weak self] in self?.guess() }
+                DispatchQueue.main.async { [weak self] in
+                    guard let self, self.fieldShowing || self.summoning else { return }
+                    self.guess()
+                }
             }.store(in: &bag)
         }
         bookmarks.objectWillChange
@@ -2050,7 +2054,9 @@ final class Browser: NSObject, ObservableObject {
             Spaces.current = last
         }
         restoreSession()
-        if prefs.usesSpaces { preloadSpaces() }
+        if prefs.usesSpaces {
+            Links.onceShown { [weak self] in self?.preloadSpaces() }
+        }
     }
 
     /// The row of tabs the space on screen had last time, or one empty tab.
@@ -2469,6 +2475,10 @@ final class Browser: NSObject, ObservableObject {
         // From one half of a pair to the other, the page left is still on
         // screen: nothing of it floats off.
         if !showing(inSplit: tab) { leaving() }
+        if finding { active?.built?.evaluateJavaScript("window.getSelection().removeAllRanges()") }
+        if editing { editing = false }
+        if !omnibox.typed.isEmpty { omnibox.typed = "" }
+        let wasAsleep = tab.asleep
         activeID = tab.id
         sidePanelFollows(tab)
         tab.touch()
@@ -2477,6 +2487,15 @@ final class Browser: NSObject, ObservableObject {
         // wake is this the other case, one whose page quietly died while you
         // were elsewhere, which revive() checks for on its own.
         if !tab.wake() { tab.revive() }
+        if finding {
+            findMatches = 0
+            findIndex = 0
+            missed = false
+            if !tab.isBlank, !wasAsleep, !needle.isEmpty {
+                countFindMatches()
+                look(forward: true, resetIndex: true)
+            }
+        }
         // Its other half, when it has one, is on screen too — and the keys go
         // to the half now in front, not the one left.
         wakePair()
@@ -2485,8 +2504,6 @@ final class Browser: NSObject, ObservableObject {
             window.makeFirstResponder(web)
         }
         rememberSession()
-        editing = false
-        typed = ""
     }
 
     /// ⌘W, or the cross on the tab. Closing the last one leaves a blank tab
@@ -2523,7 +2540,7 @@ final class Browser: NSObject, ObservableObject {
             } else {
                 newTab(immediate: true)
             }
-            writeSession(now: true)
+            writeSession()
             return
         }
 
@@ -2956,7 +2973,7 @@ final class Browser: NSObject, ObservableObject {
         var row: [Tab] = []
         for entry in saved.tabs {
             guard let url = URL(string: entry.url) else { continue }
-            let tab = Tab(configuration: Web.configuration(space: space))
+            let tab = Tab(space: space)
             prepare(tab)
             tab.restore(url: url, title: entry.title, name: entry.name)
             tab.pin = entry.pin
@@ -3695,6 +3712,18 @@ final class Browser: NSObject, ObservableObject {
         closeTabFromSwitcher(target)
     }
 
+    private var cachedCustomEngine: String?
+    private var cachedEngineTemplates: [String] = []
+
+    private func engineTemplates() -> [String] {
+        let custom = prefs.customEngine
+        if cachedCustomEngine != custom || cachedEngineTemplates.isEmpty {
+            cachedCustomEngine = custom
+            cachedEngineTemplates = Engine.allCases.map { $0.template(custom: custom) }
+        }
+        return cachedEngineTemplates
+    }
+
     private func guess() {
         cancelGoogleSuggestions()
         guard !summoning else {
@@ -3706,7 +3735,7 @@ final class Browser: NSObject, ObservableObject {
             return
         }
 
-        let engines = Engine.allCases.map { $0.template(custom: prefs.customEngine) }
+        let engines = engineTemplates()
         let privateTab = active?.shy == true
         guard !typed.trimmingCharacters(in: .whitespaces).isEmpty else {
             offers = prefs.recentSearches && !privateTab
@@ -3990,9 +4019,9 @@ final class Browser: NSObject, ObservableObject {
         summoning = false
         openingNewTab = false
         typed = active?.address?.absoluteString ?? ""
+        editing = true
         ending = nil
         picked = nil
-        editing = true
         focusRequest += 1
     }
 

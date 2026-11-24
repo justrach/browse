@@ -197,7 +197,7 @@ extension Browser {
         if !makingSpace { spaceStep = to > (spaces.firstIndex { $0.id == spaceID } ?? 0) ? 1 : -1 }
         cancelTabEdit()
         if floater.showing { land() }
-        writeSession(now: true)
+        writeSession()
 
         // The row on screen is parked as it is, sound and all: music or a
         // stream keeps playing in the space you left, as it does in a tab
@@ -357,7 +357,7 @@ extension Browser {
             moved.agentGroup = nil
             moved.userGroupID = nil
         } else {
-            moved = Tab(configuration: Web.configuration(space: targetID))
+            moved = Tab(space: targetID)
             prepare(moved)
             moved.pin = tab.pin
             moved.name = tab.name
@@ -388,7 +388,7 @@ extension Browser {
             showRow(remaining, active: nextActive)
         }
 
-        writeSession(now: true)
+        writeSession()
         writeParkedSession(space: targetID, row: destination)
         announce("Moved to \(targetSpace.name)")
     }
@@ -411,7 +411,7 @@ extension Browser {
                 groupID: (tab.pin == nil && !tab.isAgentTab) ? tab.userGroupID : nil
             ))
         }
-        Session.write(now: true, space: space, .init(
+        Session.write(now: false, space: space, .init(
             tabs: entries,
             active: activeIndex,
             split: nil,

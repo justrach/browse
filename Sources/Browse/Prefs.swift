@@ -534,7 +534,9 @@ final class Preferences: ObservableObject {
         } else {
             passkeys = store.object(forKey: "passkeys") as? Bool ?? entitled
         }
-        store.set(entitled, forKey: "passkeys.entitled")
+        if store.object(forKey: "passkeys.entitled") as? Bool != entitled {
+            store.set(entitled, forKey: "passkeys.entitled")
+        }
         // A test run downloads into its own folder: ~/Downloads would have
         // macOS stop it to ask for access, with a dialog on the screen of
         // whoever is working beside it.
@@ -611,14 +613,17 @@ final class Preferences: ObservableObject {
         FrameRate.fast = fast
         // Left behind by the Web Inspector's switch, from before it was
         // always there.
-        store.removeObject(forKey: "inspector")
+        if store.object(forKey: "inspector") != nil {
+            store.removeObject(forKey: "inspector")
+        }
         let corrects = store.bool(forKey: "autocorrect")
         autocorrect = corrects
         // Before the first web view exists: WebKit reads these once.
         Preferences.tellWebKit(autocorrect: corrects)
         pageZoom = store.object(forKey: "pageZoom") as? Double ?? 1
         // Left behind by an assistant this browser no longer has.
-        for key in ["mind.model", "mind.effort", "mind.acting", "mind.width", "mind.open"] {
+        for key in ["mind.model", "mind.effort", "mind.acting", "mind.width", "mind.open"]
+        where store.object(forKey: key) != nil {
             store.removeObject(forKey: key)
         }
     }
@@ -629,8 +634,14 @@ final class Preferences: ObservableObject {
     /// browser they are wrong in every code field and wanted in almost none.
     static func tellWebKit(autocorrect: Bool) {
         let defaults = UserDefaults.standard
-        defaults.set(autocorrect, forKey: "WebAutomaticSpellingCorrectionEnabled")
-        defaults.set(false, forKey: "WebAutomaticQuoteSubstitutionEnabled")
-        defaults.set(false, forKey: "WebAutomaticDashSubstitutionEnabled")
+        if defaults.object(forKey: "WebAutomaticSpellingCorrectionEnabled") as? Bool != autocorrect {
+            defaults.set(autocorrect, forKey: "WebAutomaticSpellingCorrectionEnabled")
+        }
+        if defaults.object(forKey: "WebAutomaticQuoteSubstitutionEnabled") as? Bool != false {
+            defaults.set(false, forKey: "WebAutomaticQuoteSubstitutionEnabled")
+        }
+        if defaults.object(forKey: "WebAutomaticDashSubstitutionEnabled") as? Bool != false {
+            defaults.set(false, forKey: "WebAutomaticDashSubstitutionEnabled")
+        }
     }
 }

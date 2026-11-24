@@ -246,6 +246,9 @@ extension Browser: WKNavigationDelegate, WKUIDelegate {
         tab.popup = windowFeatures.width != nil || windowFeatures.height != nil
             || windowFeatures.toolbarsVisibility?.boolValue == false
         tab.agentGroup = sourceTab?.agentGroup
+        if tab.pin == nil && tab.agentGroup == nil && sourceTab?.pin == nil {
+            tab.userGroupID = sourceTab?.userGroupID
+        }
         adopt(tab)
         tab.opener = from
         let background = action.modifierFlags.contains(.command) && action.modifierFlags.contains(.shift)

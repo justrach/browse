@@ -162,6 +162,7 @@ enum Disk {
     private static let lock = NSLock()
     /// The newest write asked for, by file.
     nonisolated(unsafe) private static var newest: [URL: Int] = [:]
+    nonisolated(unsafe) private static var fileLocks: [URL: NSLock] = [:]
     nonisolated(unsafe) private static var count = 0
 
     /// `encode` runs where the write does. `now` writes on the calling
@@ -171,13 +172,28 @@ enum Disk {
         count += 1
         let turn = count
         newest[file] = turn
+        let fileLock: NSLock
+        if let existing = fileLocks[file] {
+            fileLock = existing
+        } else {
+            let made = NSLock()
+            fileLocks[file] = made
+            fileLock = made
+        }
         lock.unlock()
         let put: @Sendable () -> Void = {
-            guard let data = encode() else { return }
             lock.lock()
-            defer { lock.unlock() }
+            let currentBeforeEncode = newest[file]
+            lock.unlock()
+            guard currentBeforeEncode == turn else { return }
+            guard let data = encode() else { return }
+            fileLock.lock()
+            defer { fileLock.unlock() }
+            lock.lock()
+            let currentBeforeWrite = newest[file]
+            lock.unlock()
             // Overtaken: something newer of this file was asked for since.
-            guard newest[file] == turn else { return }
+            guard currentBeforeWrite == turn else { return }
             try? FileManager.default.createDirectory(at: file.deletingLastPathComponent(), withIntermediateDirectories: true)
             try? data.write(to: file, options: .atomic)
         }
