@@ -1644,6 +1644,16 @@ final class Browser: NSObject, ObservableObject {
         announce("Permission reset — site will ask next time")
     }
 
+    func requestNotificationPermission(host: String, origin: String, done: @escaping (Bool) -> Void) {
+        guard decide == nil else {
+            done(false)
+            return
+        }
+        decide = { done($0 == .grant) }
+        askedAbout = "\(origin)|notifications"
+        asking = CaptureAsk(host: host, wants: "notifications")
+    }
+
     // MARK: - pinning
 
     /// The pinned tab whose letter is being typed over, in place. There is no
@@ -3100,6 +3110,9 @@ final class Browser: NSObject, ObservableObject {
         // From a private tab, the new one is private too, as for ⌘-click.
         tab.onMiddleClick = { [weak self] tab, url in self?.open(url, foreground: false, from: tab) }
         tab.onCross = { [weak self] tab, url in self?.replace(tab, going: url) }
+        tab.onNotificationPermission = { [weak self] host, origin, done in
+            self?.requestNotificationPermission(host: host, origin: origin, done: done)
+        }
 
         // The caret in a sign-in box: the accounts kept for this site hang
         // from the box, and go when the caret does. Nothing is filled on

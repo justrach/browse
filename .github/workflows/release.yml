@@ -83,7 +83,7 @@ jobs:
       - name: Build an unsigned release candidate
         if: steps.done.outputs.skip != 'true' && steps.signing.outputs.available == 'false'
         run: |
-          ./build.sh release
+          SEARCH_UNIVERSAL=1 ./build.sh release
           codesign --verify --deep --strict build/browse.app
           mkdir -p "$RUNNER_TEMP/release-candidate"
           ditto -c -k --sequesterRsrc --keepParent build/browse.app "$RUNNER_TEMP/release-candidate/browse-app.zip"

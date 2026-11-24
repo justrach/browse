@@ -70,6 +70,7 @@ final class Links: NSObject, NSApplicationDelegate {
     /// window is asked for here instead; started hidden, it stays hidden
     /// with the app until the app is shown.
     func applicationDidFinishLaunching(_ notification: Notification) {
+        WebNotifications.installCenterDelegate()
         let plain = notification.userInfo?[NSApplication.launchIsDefaultUserInfoKey] as? Bool ?? true
         guard !plain else { return }
         DispatchQueue.main.async {
@@ -120,8 +121,20 @@ final class Links: NSObject, NSApplicationDelegate {
     /// third of one. Now the window comes first; the first page goes into
     /// the blank tab that is already there, and the others fill in behind
     /// it, a few frames apart, in the order they came.
+    @MainActor static weak var browser: Browser?
+
+    @MainActor
+    static func activateBrowserWindow() {
+        if let window = window ?? browserWindow() {
+            if window.isMiniaturized { window.deminiaturize(nil) }
+            window.makeKeyAndOrderFront(nil)
+        }
+        comeForward()
+    }
+
     @MainActor
     static func hand(to browser: Browser) {
+        Links.browser = browser
         deliver = { [weak browser] url in
             // In a small window of its own, for whoever chose that.
             if let browser, browser.prefs.littleLinks {
