@@ -6,6 +6,8 @@ All notable changes to **browse** are documented here, newest first.
 
 ## Unreleased
 
+## 1.11.0 — 24 November 2026
+
 ### Added
 
 - **Split View divider menu, Sync Scrolling & sidebar drag-to-split (`Split.swift`, `Side.swift`, `TabBar.swift`, `Session.swift`, `Tab.swift`)**: Added a right-click menu on the Split View divider, opt-in per-split **Sync Scrolling** (with loop-free echo detection and session persistence), and sidebar middle-band drag-and-drop onto another tab with a live 50/50 preview to create a split.
