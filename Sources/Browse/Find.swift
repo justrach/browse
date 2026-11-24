@@ -1,3 +1,4 @@
+import AppKit
 import SwiftUI
 
 /// Looking for a word on the page: frosted floating pill in the top-right
@@ -6,7 +7,7 @@ import SwiftUI
 struct FindBar: View {
     @ObservedObject var browser: Browser
     @Environment(\.colorScheme) private var scheme
-    @FocusState private var focused: Bool
+    @State private var clearFocusTick = 0
 
     var body: some View {
         let dark = scheme == .dark
@@ -19,15 +20,17 @@ struct FindBar: View {
                 if browser.needle.isEmpty {
                     Text("Find on page")
                         .foregroundStyle(Palette.ink.opacity(0.34))
+                        .allowsHitTesting(false)
                 }
-                TextField("", text: $browser.needle)
-                    .textFieldStyle(.plain)
-                    .foregroundStyle(Palette.ink)
-                    .focused($focused)
-                    .onSubmit { browser.look(forward: true) }
+                FindField(
+                    text: $browser.needle,
+                    focusTick: browser.findFocus &+ clearFocusTick,
+                    onSubmit: { forward in browser.look(forward: forward) },
+                    onClose: { browser.closeFind() }
+                )
             }
             .font(.system(size: 12.5))
-            .frame(width: 164)
+            .frame(width: 164, height: 18)
 
             if !browser.needle.isEmpty {
                 let countText: String = {
@@ -46,7 +49,10 @@ struct FindBar: View {
                         .padding(.horizontal, 4)
                         .transition(.opacity)
                 }
-                Button { browser.needle = "" } label: {
+                Button {
+                    browser.needle = ""
+                    clearFocusTick &+= 1
+                } label: {
                     Image(systemName: "xmark.circle.fill")
                         .font(.system(size: 11))
                         .foregroundStyle(Palette.muted.opacity(0.75))
@@ -86,8 +92,81 @@ struct FindBar: View {
         .padding(.trailing, 14)
         .animation(Motion.quick, value: browser.missed)
         .animation(Motion.quick, value: browser.findMatches)
-        .onAppear { focused = true }
-        .onChange(of: browser.findFocus) { _, _ in focused = true }
+    }
+
+    private struct FindField: NSViewRepresentable {
+        @Binding var text: String
+        let focusTick: Int
+        let onSubmit: (Bool) -> Void
+        let onClose: () -> Void
+
+        func makeCoordinator() -> Coordinator { Coordinator(parent: self) }
+
+        func makeNSView(context: Context) -> NSTextField {
+            let field = NSTextField()
+            field.isBordered = false
+            field.drawsBackground = false
+            field.focusRingType = .none
+            field.font = .systemFont(ofSize: 12.5)
+            field.textColor = .labelColor
+            field.lineBreakMode = .byTruncatingTail
+            field.usesSingleLineMode = true
+            field.cell?.isScrollable = true
+            field.delegate = context.coordinator
+            field.stringValue = text
+            return field
+        }
+
+        func updateNSView(_ field: NSTextField, context: Context) {
+            context.coordinator.parent = self
+            if field.stringValue != text {
+                field.stringValue = text
+            }
+            context.coordinator.focusIfNeeded(field)
+        }
+
+        @MainActor
+        final class Coordinator: NSObject, NSTextFieldDelegate {
+            var parent: FindField
+            private var didInitialFocus = false
+            private var lastFocusTick: Int
+
+            init(parent: FindField) {
+                self.parent = parent
+                self.lastFocusTick = parent.focusTick
+            }
+
+            func focusIfNeeded(_ field: NSTextField) {
+                guard !didInitialFocus || lastFocusTick != parent.focusTick else { return }
+                didInitialFocus = true
+                lastFocusTick = parent.focusTick
+                DispatchQueue.main.async { [weak field] in
+                    guard let field, let window = field.window else { return }
+                    window.makeFirstResponder(field)
+                    (field.currentEditor() as? NSTextView)?.selectAll(nil)
+                }
+            }
+
+            func controlTextDidChange(_ obj: Notification) {
+                guard let field = obj.object as? NSTextField else { return }
+                if parent.text != field.stringValue {
+                    parent.text = field.stringValue
+                }
+            }
+
+            func control(_ control: NSControl, textView: NSTextView, doCommandBy selector: Selector) -> Bool {
+                if selector == #selector(NSResponder.insertNewline(_:)) {
+                    let forward = !(NSApp.currentEvent?.modifierFlags.contains(.shift) ?? false)
+                    parent.onSubmit(forward)
+                    return true
+                }
+                if selector == #selector(NSResponder.cancelOperation(_:)) {
+                    parent.onClose()
+                    return true
+                }
+                return false
+            }
+        }
     }
 
     private func step(_ icon: String, help: String, disabled: Bool = false, action: @escaping () -> Void) -> some View {

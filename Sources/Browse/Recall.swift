@@ -395,13 +395,22 @@ struct DownloadsPanel: View {
                 }
             }
         } foot: {
-            HStack {
-                Text(loot.kept.isEmpty ? "Files land in \(browser.downloadsFolder.lastPathComponent)"
-                     : "Clearing the list leaves the files where they are")
-                    .font(.system(size: 12))
-                    .foregroundStyle(Palette.muted)
+            HStack(spacing: 8) {
+                if loot.kept.isEmpty {
+                    HStack(spacing: 4) {
+                        Text("Files land in")
+                            .font(.system(size: 12))
+                            .foregroundStyle(Palette.muted)
+                        FolderLink(folder: browser.downloadsFolder)
+                    }
+                } else {
+                    Text("Clearing the list leaves the files where they are")
+                        .font(.system(size: 12))
+                        .foregroundStyle(Palette.muted)
+                }
                 Spacer()
                 if !loot.kept.isEmpty {
+                    FolderLink(folder: browser.downloadsFolder, pill: true)
                     Pill("Clear list") { loot.forgetAll() }
                 }
             }
@@ -468,6 +477,37 @@ struct DownloadsPanel: View {
         }
     }
 
+    private struct FolderLink: View {
+        let folder: URL
+        var pill: Bool = false
+        @State private var hovering = false
+
+        var body: some View {
+            Button {
+                NSWorkspace.shared.open(folder)
+            } label: {
+                HStack(spacing: 4) {
+                    Image(systemName: "folder")
+                        .font(.system(size: 11))
+                    Text(folder.lastPathComponent)
+                        .underline(!pill && hovering)
+                }
+                .font(.system(size: 12, weight: pill ? .medium : .regular))
+                .foregroundStyle(hovering ? Palette.ink : Palette.muted)
+                .padding(.horizontal, pill ? 9 : 0)
+                .padding(.vertical, pill ? 4 : 0)
+                .background {
+                    if pill {
+                        Capsule().fill(hovering ? Palette.hover : Palette.wash)
+                    }
+                }
+            }
+            .buttonStyle(.plain)
+            .onHover { hovering = $0 }
+            .help("Open downloads folder: \(folder.path)")
+        }
+    }
+
     private struct Row: View {
         let keep: Keep
         let open: () -> Void
@@ -483,11 +523,21 @@ struct DownloadsPanel: View {
                     .foregroundStyle(keep.stillThere ? Palette.muted : Palette.faint)
                     .frame(width: 18)
                 VStack(alignment: .leading, spacing: 2) {
-                    Text(keep.name)
-                        .font(.system(size: 13))
-                        .foregroundStyle(keep.stillThere ? Palette.ink : Palette.faint)
-                        .lineLimit(1)
-                        .truncationMode(.middle)
+                    HStack(spacing: 6) {
+                        Text(keep.name)
+                            .font(.system(size: 13))
+                            .foregroundStyle(keep.stillThere ? Palette.ink : Palette.faint)
+                            .lineLimit(1)
+                            .truncationMode(.middle)
+                        if !keep.stillThere {
+                            Text("Missing from disk")
+                                .font(.system(size: 10.5, weight: .medium))
+                                .foregroundStyle(Palette.unsafe)
+                                .padding(.horizontal, 6)
+                                .padding(.vertical, 1.5)
+                                .background(Palette.unsafe.opacity(0.12), in: Capsule())
+                        }
+                    }
                     let parts = [keep.from, keep.formattedSize ?? "", When.said(keep.date)].filter { !$0.isEmpty }
                     Text(parts.joined(separator: " · "))
                         .font(.system(size: 11.5))

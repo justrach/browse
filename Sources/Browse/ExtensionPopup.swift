@@ -16,17 +16,18 @@ import WebKit
 
 @available(macOS 15.4, *)
 @MainActor
-final class ExtensionPopup: NSObject, WKUIDelegate, WKNavigationDelegate, NSPopoverDelegate {
+final class ExtensionPopup: NSObject, WKUIDelegate, WKNavigationDelegate, NSPopoverDelegate, WKScriptMessageHandler {
     static let shared = ExtensionPopup()
+    private static let handlerName = "searchPopupSize"
 
     private var popover: NSPopover?
     private var web: WKWebView?
+    private weak var messageController: WKUserContentController?
     /// The popup as WebKit is told about it: a page it can find, belonging
     /// to the browser's window — Chrome gives a popup no window of its own,
     /// so "the current window" from a popup is the browser's, and so is the
     /// last focused one.
     private var page: PopupPage?
-    private var measuring: Timer?
     private(set) var extensionID: String?
     /// The extension's own button, when the popup hangs from it.
     private weak var button: NSView?
@@ -57,6 +58,9 @@ final class ExtensionPopup: NSObject, WKUIDelegate, WKNavigationDelegate, NSPopo
         let web = WKWebView(frame: NSRect(x: 0, y: 0, width: 25, height: 25), configuration: configuration)
         web.uiDelegate = self
         web.navigationDelegate = self
+        configuration.userContentController.removeScriptMessageHandler(forName: Self.handlerName, contentWorld: Self.world)
+        configuration.userContentController.add(self, contentWorld: Self.world, name: Self.handlerName)
+        messageController = configuration.userContentController
         // White behind the page, as Chrome paints a popup: many leave their
         // background unset, and their dark text over the popover's dark
         // material would vanish.
@@ -109,7 +113,7 @@ final class ExtensionPopup: NSObject, WKUIDelegate, WKNavigationDelegate, NSPopo
         // shown regardless a little later.
         DispatchQueue.main.asyncAfter(deadline: .now() + 3) { [weak self, weak popover] in
             guard let self, let popover, popover === self.popover else { return }
-            self.follow()
+            self.measure()
         }
         DispatchQueue.main.asyncAfter(deadline: .now() + 5) { [weak self, weak popover] in
             guard let self, let popover, popover === self.popover else { return }
@@ -118,14 +122,20 @@ final class ExtensionPopup: NSObject, WKUIDelegate, WKNavigationDelegate, NSPopo
         }
     }
 
-    /// Each extension's popup size, persisted across launches and clamped to
-    /// valid bounds (25×25 to 800×600).
+    private static var cachedSizes: [String: NSSize]?
+
+    /// Each extension's popup size, cached in memory and persisted across
+    /// launches within valid bounds (25×25 to 800×600).
     static var lastSize: [String: NSSize] {
         get {
+            if let cachedSizes { return cachedSizes }
             let kept = Store.settings.dictionary(forKey: "extensionPopupSizes") as? [String: [Double]] ?? [:]
-            return kept.compactMapValues { $0.count == 2 ? bounded(NSSize(width: $0[0], height: $0[1])) : nil }
+            let loaded = kept.compactMapValues { $0.count == 2 ? bounded(NSSize(width: $0[0], height: $0[1])) : nil }
+            cachedSizes = loaded
+            return loaded
         }
         set {
+            cachedSizes = newValue
             Store.settings.set(newValue.mapValues { [Double($0.width), Double($0.height)] }, forKey: "extensionPopupSizes")
         }
     }
@@ -143,7 +153,7 @@ final class ExtensionPopup: NSObject, WKUIDelegate, WKNavigationDelegate, NSPopo
     /// Removes stored popup dimensions when an extension is uninstalled.
     static func forget(_ id: String) {
         var sizes = lastSize
-        sizes[id] = nil
+        guard sizes.removeValue(forKey: id) != nil else { return }
         lastSize = sizes
     }
 
@@ -159,20 +169,7 @@ final class ExtensionPopup: NSObject, WKUIDelegate, WKNavigationDelegate, NSPopo
         }
     }
 
-    /// Measures on initial layout and follows growth/shrinkage in both
-    /// directions for the popover's open lifetime using ResizeObserver and
-    /// lightweight layout-signature checks (zero MutationObservers).
-    private func follow() {
-        measure()
-        guard measuring == nil else { return }
-        measuring = Timer.scheduledTimer(withTimeInterval: 0.25, repeats: true) { [weak self] _ in
-            MainActor.assumeIsolated { self?.measure() }
-        }
-    }
-
     func close() {
-        measuring?.invalidate()
-        measuring = nil
         let closing = popover
         forget()
         closing?.performClose(nil)
@@ -180,6 +177,8 @@ final class ExtensionPopup: NSObject, WKUIDelegate, WKNavigationDelegate, NSPopo
 
     /// Tells WebKit the popup's window and tab are gone.
     private func forget() {
+        messageController?.removeScriptMessageHandler(forName: Self.handlerName, contentWorld: Self.world)
+        messageController = nil
         if let page { Extensions.shared.controller.didCloseTab(page, windowIsClosing: false) }
         page = nil
         popover = nil
@@ -256,7 +255,7 @@ final class ExtensionPopup: NSObject, WKUIDelegate, WKNavigationDelegate, NSPopo
     @objc(_webView:navigationDidFinishDocumentLoad:)
     func webView(_ webView: WKWebView, navigationDidFinishDocumentLoad navigation: WKNavigation?) {
         guard webView === web else { return }
-        follow()
+        measure()
     }
 
     private static let world = WKContentWorld.world(name: "search-popup-size")
@@ -266,34 +265,53 @@ final class ExtensionPopup: NSObject, WKUIDelegate, WKNavigationDelegate, NSPopo
         (() => {
           const d = document.documentElement;
           if (!d) return null;
-          const w = window.__searchWatch || (window.__searchWatch = { n: 1, seen: 0, sig: "" });
+          const w = window.__searchWatch || (window.__searchWatch = { raf: 0, posted: null });
+          const measure = \(preferred);
+          const push = (forceSend) => {
+            const size = measure();
+            if (!size) return null;
+            if (!forceSend && w.posted && Math.abs(size[0] - w.posted[0]) <= 1 && Math.abs(size[1] - w.posted[1]) <= 1) {
+              return null;
+            }
+            w.posted = size;
+            return size;
+          };
+          const notify = () => {
+            if (w.raf) return;
+            w.raf = requestAnimationFrame(() => {
+              w.raf = 0;
+              const size = push(false);
+              if (!size) return;
+              try {
+                const mh = window.webkit && webkit.messageHandlers && webkit.messageHandlers.\(handlerName);
+                if (mh) mh.postMessage(size);
+              } catch (e) {}
+            });
+          };
           if (!w.ro) {
-            const bump = () => { w.n++; };
             try {
-              w.ro = new ResizeObserver(bump);
+              w.ro = new ResizeObserver(notify);
               w.ro.observe(d);
               if (document.body) { w.body = document.body; w.ro.observe(document.body); }
             } catch (e) {}
-            addEventListener("load", bump, true);
-            addEventListener("transitionend", bump, true);
-            try { document.fonts.addEventListener("loadingdone", bump); } catch (e) {}
+            addEventListener("load", notify, true);
+            addEventListener("transitionend", notify, true);
+            try { document.fonts.addEventListener("loadingdone", notify); } catch (e) {}
           }
           if (w.ro && document.body && w.body !== document.body) {
             w.body = document.body;
             try { w.ro.observe(document.body); } catch (e) {}
-            w.n++;
           }
-          const sig = [
-            d.scrollWidth, d.scrollHeight,
-            document.body ? document.body.scrollHeight : 0,
-            document.body ? document.body.childElementCount : 0
-          ].join(",");
-          if (sig !== w.sig) { w.sig = sig; w.n++; }
-          if (!\(force) && w.seen === w.n) return null;
-          w.seen = w.n;
-          return (\(preferred))();
+          return push(\(force));
         })()
         """
+    }
+
+    func userContentController(_ controller: WKUserContentController, didReceive message: WKScriptMessage) {
+        guard message.webView === web,
+              let pair = message.body as? [Double], pair.count == 2
+        else { return }
+        handleMeasuredSize(NSSize(width: pair[0], height: pair[1]), force: false)
     }
 
     /// Measures while hidden (delaying reveal until content renders) and while open.
@@ -301,16 +319,20 @@ final class ExtensionPopup: NSObject, WKUIDelegate, WKNavigationDelegate, NSPopo
         guard let web else { return }
         web.evaluateJavaScript(Self.watch(force: force), in: nil, in: Self.world) { [weak self] result in
             MainActor.assumeIsolated {
-                guard let self, web === self.web, let popover = self.popover,
+                guard let self, web === self.web,
                       case .success(let value) = result, let pair = value as? [Double], pair.count == 2
                 else { return }
-                let wanted = NSSize(width: pair[0], height: pair[1])
-                if !self.shown, !force, max(wanted.width, wanted.height) <= 25 { return }
-                let now = popover.contentSize
-                if !self.shown || abs(wanted.width - now.width) > 1 || abs(wanted.height - now.height) > 1 {
-                    self.apply(wanted)
-                }
+                self.handleMeasuredSize(NSSize(width: pair[0], height: pair[1]), force: force)
             }
+        }
+    }
+
+    private func handleMeasuredSize(_ wanted: NSSize, force: Bool) {
+        guard let popover else { return }
+        if !shown, !force, max(wanted.width, wanted.height) <= 25 { return }
+        let now = popover.contentSize
+        if !shown || abs(wanted.width - now.width) > 1 || abs(wanted.height - now.height) > 1 {
+            apply(wanted)
         }
     }
 
@@ -334,7 +356,7 @@ final class ExtensionPopup: NSObject, WKUIDelegate, WKNavigationDelegate, NSPopo
 
     func webView(_ webView: WKWebView, didFinish navigation: WKNavigation!) {
         guard webView === web else { return }
-        follow()
+        measure()
         DispatchQueue.main.asyncAfter(deadline: .now() + 1) { [weak self, weak webView] in
             guard let self, let webView, webView === self.web, !self.shown else { return }
             self.measure(force: true)
@@ -367,8 +389,6 @@ final class ExtensionPopup: NSObject, WKUIDelegate, WKNavigationDelegate, NSPopo
     /// its notification can land after the next one has opened.
     func popoverDidClose(_ notification: Notification) {
         guard (notification.object as? NSPopover) === popover else { return }
-        measuring?.invalidate()
-        measuring = nil
         forget()
     }
 }

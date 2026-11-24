@@ -121,25 +121,33 @@ extension ExtensionShims {
         catch (e) { try { target[key] = value; } catch (e2) {} }
       };
       // Held from the start, before the extension's own code runs — its
-      // polyfills set things on these objects too.
-      const spaces = new Set(Object.keys(chrome));
-      for (let o = Object.getPrototypeOf(chrome); o && o !== Object.prototype; o = Object.getPrototypeOf(o)) Object.getOwnPropertyNames(o).forEach((k) => spaces.add(k));
-      for (const space of spaces) {
-        let ns; try { ns = chrome[space]; } catch (e) { continue; }
-        if (!ns || typeof ns !== "object") continue;
-        kept.add(ns);
-        // And the same object every time it is asked for: WebKit can hand
-        // out a fresh one, without what was set on the last.
-        if (!Object.prototype.hasOwnProperty.call(chrome, space) || Object.getOwnPropertyDescriptor(chrome, space).get) {
-          try { Object.defineProperty(chrome, space, { value: ns, configurable: true, writable: true, enumerable: true }); } catch (e) {}
-        }
-        for (let o = ns; o && o !== Object.prototype; o = Object.getPrototypeOf(o)) {
-          for (const key of Object.getOwnPropertyNames(o)) {
-            if (!/^on[A-Z]/.test(key)) continue;
-            try { const ev = ns[key]; if (ev && typeof ev === "object") kept.add(ev); } catch (e) {}
+      // polyfills set things on these objects too. Skip the heavy namespace and
+      // prototype enumeration in website content scripts where only runtime
+      // method binding is needed.
+      const spaces = new Set();
+      if (!inContent) {
+        for (const k of Object.keys(chrome)) spaces.add(k);
+        for (let o = Object.getPrototypeOf(chrome); o && o !== Object.prototype; o = Object.getPrototypeOf(o)) Object.getOwnPropertyNames(o).forEach((k) => spaces.add(k));
+        for (const space of spaces) {
+          let ns; try { ns = chrome[space]; } catch (e) { continue; }
+          if (!ns || typeof ns !== "object") continue;
+          kept.add(ns);
+          // And the same object every time it is asked for: WebKit can hand
+          // out a fresh one, without what was set on the last.
+          if (!Object.prototype.hasOwnProperty.call(chrome, space) || Object.getOwnPropertyDescriptor(chrome, space).get) {
+            try { Object.defineProperty(chrome, space, { value: ns, configurable: true, writable: true, enumerable: true }); } catch (e) {}
           }
+          for (let o = ns; o && o !== Object.prototype; o = Object.getPrototypeOf(o)) {
+            for (const key of Object.getOwnPropertyNames(o)) {
+              if (!/^on[A-Z]/.test(key)) continue;
+              try { const ev = ns[key]; if (ev && typeof ev === "object") kept.add(ev); } catch (e) {}
+            }
+          }
+          for (const sub of ["local", "sync", "session", "managed"]) { try { if (ns[sub] && typeof ns[sub] === "object") kept.add(ns[sub]); } catch (e) {} }
         }
-        for (const sub of ["local", "sync", "session", "managed"]) { try { if (ns[sub] && typeof ns[sub] === "object") kept.add(ns[sub]); } catch (e) {} }
+      } else {
+        const runtimeObj = chrome.runtime;
+        if (runtimeObj && typeof runtimeObj === "object") kept.add(runtimeObj);
       }
       const withLastError = (error, callback) => {
         put(runtime, "lastError", { message: String(error && error.message || error) });
@@ -534,7 +542,40 @@ extension ExtensionShims {
       // WebKit doesn't bring every message to every page. Not waited for
       // until they say something about one they heard.
       const deaf = new Set();
-      const keyOf = (message) => { try { const k = JSON.stringify(message); return k && k.length < 4000 ? k : null; } catch (e) { return null; } };
+      const keyOf = (message) => {
+        try {
+          const k = JSON.stringify(message);
+          if (!k) return null;
+          if (k.length < 4000) return k;
+          let h1 = 0x811c9dc5, h2 = 0x9e3779b1;
+          const n = k.length;
+          if (n <= 65536) {
+            for (let i = 0; i < n; i++) {
+              const c = k.charCodeAt(i);
+              h1 = Math.imul(h1 ^ c, 0x01000193);
+              h2 = Math.imul(h2 ^ (c + i), 0x85ebca6b);
+            }
+          } else {
+            for (let i = 0; i < 512; i++) {
+              const c = k.charCodeAt(i);
+              h1 = Math.imul(h1 ^ c, 0x01000193);
+              h2 = Math.imul(h2 ^ (c + i), 0x85ebca6b);
+            }
+            const step = Math.max(1, n >> 14);
+            for (let i = 512; i < n - 512; i += step) {
+              const c = k.charCodeAt(i);
+              h1 = Math.imul(h1 ^ c, 0x01000193);
+              h2 = Math.imul(h2 ^ (c + i), 0x85ebca6b);
+            }
+            for (let i = n - 512; i < n; i++) {
+              const c = k.charCodeAt(i);
+              h1 = Math.imul(h1 ^ c, 0x01000193);
+              h2 = Math.imul(h2 ^ (c + i), 0x85ebca6b);
+            }
+          }
+          return "h:" + n + ":" + (h1 >>> 0).toString(36) + ":" + (h2 >>> 0).toString(36);
+        } catch (e) { return null; }
+      };
       const tell = (message, verdict, heard) => {
         const key = channel && keyOf(message);
         if (key) channel.postMessage({ key, from: background ? "worker" : me, verdict, heard, at: Date.now() });

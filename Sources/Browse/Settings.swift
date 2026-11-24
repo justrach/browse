@@ -79,11 +79,15 @@ struct SettingsPanel: View {
         )
         .clipShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
         .shadow(color: .black.opacity(0.16), radius: 34, y: 12)
-        .onChange(of: page) { _, page in Store.settings.set(page.rawValue, forKey: "settings.page") }
+        .onChange(of: page) { _, page in
+            shortcuts.stopRecording()
+            Store.settings.set(page.rawValue, forKey: "settings.page")
+        }
         .onChange(of: browser.settingsSearchFocusTick) { _, _ in
             DispatchQueue.main.async { searchFocused = true }
         }
         .onDisappear {
+            shortcuts.stopRecording()
             browser.settingsSearchQuery = ""
         }
     }
@@ -324,6 +328,7 @@ struct SettingsPanel: View {
         SearchEntry(.tabs, "Show how far you've read", "Reading progress fill on the active tab", keywords: "scroll progress indicator"),
         SearchEntry(.tabs, "Sleep tabs you aren't using", "Suspend background tabs to save RAM and battery", keywords: "memory saver suspend hibernate ram"),
         SearchEntry(.tabs, "Memory profile", "Relaxed, Balanced, or Low RAM tab sleeping schedule", keywords: "ram memory relaxed low balanced sleep now"),
+        SearchEntry(.tabs, "Auto-archive unpinned tabs", "Quietly close untouched unpinned tabs after a set period", keywords: "auto archive cleanup idle tabs expire"),
         SearchEntry(.tabs, "Spaces", "Separate sets of tabs and profiles switched with ⌃1–⌃9", keywords: "workspaces profiles containers arc"),
         SearchEntry(.tabs, "Use the same pinned tabs across spaces", "Share live pinned tabs between spaces that share sign-ins", keywords: "shared pins spaces arc workspaces"),
         SearchEntry(.tabs, "Links from pinned tabs open in a new tab", "Keep pinned tabs on their page when clicking links", keywords: "pins links new tab arc peek"),
