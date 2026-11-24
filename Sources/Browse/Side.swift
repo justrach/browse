@@ -35,6 +35,8 @@ struct SideBar: View {
 
     /// Where the loose rows start in the window (see `loose`).
     @State private var rowsOrigin: CGPoint = .zero
+    @State private var agentRowsOrigin: CGPoint = .zero
+    @State private var rowFrames = SplitRowFrames()
 
     @State private var pinDragging: Tab.ID?
     @State private var pinFrom = 0
@@ -544,6 +546,14 @@ struct SideBar: View {
                 // Positions here are among the loose rows; the pinned block
                 // sits in front of them in the real list. Carried out over
                 // the page, it opens there beside what's on it.
+                .background {
+                    GeometryReader { geo in
+                        Color.clear
+                            .onAppear { rowFrames.rects[tab.id] = geo.frame(in: .named("rows")) }
+                            .onChange(of: geo.frame(in: .named("rows"))) { _, rect in rowFrames.rects[tab.id] = rect }
+                            .onDisappear { rowFrames.rects[tab.id] = nil }
+                    }
+                }
                 .modifier(Carried(
                     index: index, count: looseTabs.count, step: step, vertical: true, space: "rows",
                     outside: { point in
@@ -552,7 +562,17 @@ struct SideBar: View {
                         browser.dragOut(tab, at: out ? at : nil)
                         return out
                     },
-                    land: { browser.dropOut(tab) }
+                    land: { browser.dropOut(tab) },
+                    rowFrames: rowFrames,
+                    draggingTab: tab,
+                    browserID: ObjectIdentifier(browser),
+                    onMerge: { targetID, onLeft in
+                        guard let target = browser.tabs.first(where: { $0.id == targetID }),
+                              !target.isBlank
+                        else { return }
+                        if browser.activeID != target.id { browser.select(target) }
+                        browser.open(tab, on: onLeft ? .left : .right)
+                    }
                 ) {
                     browser.move(tab, to: $0 + browser.pinnedCount + agentTabs.count)
                 })
@@ -671,7 +691,7 @@ struct SideBar: View {
                             .modifier(Carried(
                                 index: index, count: grouped.count, step: step, vertical: true, space: "agentRows",
                                 outside: { point in
-                                    let at = CGPoint(x: point.x + rowsOrigin.x, y: point.y + rowsOrigin.y)
+                                    let at = CGPoint(x: point.x + agentRowsOrigin.x, y: point.y + agentRowsOrigin.y)
                                     let out = at.x > prefs.sideWidth + 16
                                     browser.dragOut(tab, at: out ? at : nil)
                                     return out
@@ -683,6 +703,13 @@ struct SideBar: View {
                         }
                     }
                     .coordinateSpace(name: "agentRows")
+                    .background {
+                        GeometryReader { geo in
+                            Color.clear
+                                .onAppear { agentRowsOrigin = geo.frame(in: .global).origin }
+                                .onChange(of: geo.frame(in: .global).origin) { _, new in agentRowsOrigin = new }
+                        }
+                    }
                 }
                 .padding(.bottom, 8)
                 .transition(.opacity.combined(with: .move(edge: .top)))
@@ -1048,6 +1075,11 @@ private struct SideRow: View {
         .animation(Motion.quick, value: tab.loading)
         .animation(Motion.quick, value: speaker)
         .background { ground }
+        .overlay {
+            if tab.pin == nil {
+                MergeHint(browser: browser, tab: tab)
+            }
+        }
         .modifier(Shake(travel: shake))
         .contentShape(RoundedRectangle(cornerRadius: 9, style: .continuous))
         .modifier(OneClick(double: false) {

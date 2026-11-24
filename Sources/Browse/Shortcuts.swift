@@ -56,7 +56,8 @@ struct KeyCombo: Codable, Hashable, Equatable {
     ]
 
     private static func unmodifiedKey(for event: NSEvent) -> String {
-        if let base = event.characters(byApplyingModifiers: [])?.lowercased(), !base.isEmpty {
+        let base = event.shortcutKey
+        if !base.isEmpty {
             return base
         }
         return event.charactersIgnoringModifiers?.lowercased() ?? ""

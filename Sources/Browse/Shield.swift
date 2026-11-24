@@ -1,3 +1,4 @@
+import CryptoKit
 import WebKit
 
 // The ad blocker. No settings, no counter, no shield icon going green — it is
@@ -159,21 +160,40 @@ final class Shield: ObservableObject {
             release()
             return
         }
-        store.compileContentRuleList(
-            forIdentifier: "office-shield",
-            encodedContentRuleList: json
-        ) { [weak self] compiled, error in
+        let digest = SHA256.hash(data: data).prefix(6).map { String(format: "%02x", $0) }.joined()
+        let builtinIdentifier = "office-shield-\(digest)"
+        store.getAvailableContentRuleListIdentifiers { kept in
+            for old in kept ?? [] where old.hasPrefix("office-shield") && old != builtinIdentifier {
+                store.removeContentRuleList(forIdentifier: old) { _ in }
+            }
+        }
+        store.lookUpContentRuleList(forIdentifier: builtinIdentifier) { [weak self] found, _ in
             MainActor.assumeIsolated {
                 guard let self else { return }
-                self.compiling = false
-                guard let compiled else {
-                    self.trouble = error?.localizedDescription ?? "Compiling the block list failed"
+                if let found {
+                    self.compiling = false
+                    self.arrived(found)
                     self.release()
+                    self.bring(store)
                     return
                 }
-                self.arrived(compiled)
-                self.release()
-                self.bring(store)
+                store.compileContentRuleList(
+                    forIdentifier: builtinIdentifier,
+                    encodedContentRuleList: json
+                ) { [weak self] compiled, error in
+                    MainActor.assumeIsolated {
+                        guard let self else { return }
+                        self.compiling = false
+                        guard let compiled else {
+                            self.trouble = error?.localizedDescription ?? "Compiling the block list failed"
+                            self.release()
+                            return
+                        }
+                        self.arrived(compiled)
+                        self.release()
+                        self.bring(store)
+                    }
+                }
             }
         }
     }

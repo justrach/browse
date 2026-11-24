@@ -214,6 +214,17 @@ final class Preferences: ObservableObject {
             AutoScroll.on = autoScroll
         }
     }
+    /// Space and ← → control a clicked video showing native browser controls.
+    @Published var videoKeys: Bool {
+        didSet {
+            store.set(videoKeys, forKey: "video.keys")
+            VideoKeys.on = videoKeys
+        }
+    }
+    /// Plain link clicks in pinned tabs open in a new foreground loose tab.
+    @Published var pinLinksOpenTabs: Bool {
+        didSet { store.set(pinLinksOpenTabs, forKey: "pins.linksNewTab") }
+    }
     /// Pages draw at 120 frames a second on a screen that can (see FrameRate.swift).
     /// Off unless asked for.
     @Published var fastPages: Bool {
@@ -565,6 +576,10 @@ final class Preferences: ObservableObject {
         let scrolls = store.bool(forKey: "autoscroll")
         autoScroll = scrolls
         AutoScroll.on = scrolls
+        let vKeys = store.bool(forKey: "video.keys")
+        videoKeys = vKeys
+        VideoKeys.on = vKeys
+        pinLinksOpenTabs = store.bool(forKey: "pins.linksNewTab")
         let fast = store.object(forKey: "pages.120") as? Bool ?? true
         fastPages = fast
         FrameRate.fast = fast

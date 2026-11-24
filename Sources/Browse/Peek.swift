@@ -44,6 +44,34 @@ extension Browser {
         insert(page, at: place)
         open(page, on: .right)
     }
+
+    /// True when clicking `url` from a pinned tab at `page` should open a loose
+    /// foreground tab instead of replacing the pin (ignores same-page `#fragment`
+    /// jumps and sign-in/OAuth/SSO hops that expect the starting tab).
+    static func leavesPin(_ url: URL, from page: URL?) -> Bool {
+        guard peekable(url), let host = url.host()?.lowercased() else { return false }
+        if let page, var here = URLComponents(url: page, resolvingAgainstBaseURL: false),
+           var there = URLComponents(url: url, resolvingAgainstBaseURL: false) {
+            here.fragment = nil
+            there.fragment = nil
+            if here.url == there.url { return false }
+        }
+        let signIn = [
+            "login", "log-in", "log_in", "logon", "signin", "sign-in", "sign_in", "signon",
+            "logout", "log-out", "signout", "sign-out", "auth", "oauth", "oauth2", "sso", "saml", "authorize",
+        ]
+        let first = host.split(separator: ".").first.map(String.init) ?? ""
+        if signIn.contains(first) || ["accounts", "account", "id", "idp"].contains(first) { return false }
+        let parts = url.path.lowercased().split(separator: "/").map(String.init)
+        return !parts.contains { part in
+            signIn.contains(part) || signIn.contains { part.hasPrefix($0 + ".") }
+        }
+    }
+
+    static func peekable(_ url: URL) -> Bool {
+        guard let scheme = url.scheme?.lowercased() else { return false }
+        return scheme == "http" || scheme == "https"
+    }
 }
 
 /// The peek over the page: the page dimmed around it, and the panel.

@@ -109,18 +109,43 @@ final class ExtensionPopup: NSObject, WKUIDelegate, WKNavigationDelegate, NSPopo
         // shown regardless a little later.
         DispatchQueue.main.asyncAfter(deadline: .now() + 3) { [weak self, weak popover] in
             guard let self, let popover, popover === self.popover else { return }
-            self.firstMeasure()
             self.follow()
         }
         DispatchQueue.main.asyncAfter(deadline: .now() + 5) { [weak self, weak popover] in
             guard let self, let popover, popover === self.popover else { return }
+            self.measure(force: true)
             self.reveal()
         }
     }
 
-    /// Each extension's popup size, so the next opening starts there.
-    private static var lastSize: [String: NSSize] = [:]
+    /// Each extension's popup size, persisted across launches and clamped to
+    /// valid bounds (25×25 to 800×600).
+    static var lastSize: [String: NSSize] {
+        get {
+            let kept = Store.settings.dictionary(forKey: "extensionPopupSizes") as? [String: [Double]] ?? [:]
+            return kept.compactMapValues { $0.count == 2 ? bounded(NSSize(width: $0[0], height: $0[1])) : nil }
+        }
+        set {
+            Store.settings.set(newValue.mapValues { [Double($0.width), Double($0.height)] }, forKey: "extensionPopupSizes")
+        }
+    }
     private var shown = false
+
+    /// Clamps a finite size within `[25...800, 25...600]`, returning `nil` for NaN/infinity.
+    static func bounded(_ size: NSSize) -> NSSize? {
+        guard size.width.isFinite, size.height.isFinite else { return nil }
+        return NSSize(
+            width: min(800, max(25, size.width.rounded(.up))),
+            height: min(600, max(25, size.height.rounded(.up)))
+        )
+    }
+
+    /// Removes stored popup dimensions when an extension is uninstalled.
+    static func forget(_ id: String) {
+        var sizes = lastSize
+        sizes[id] = nil
+        lastSize = sizes
+    }
 
     /// The page, at the popover's size, in view.
     private func reveal() {
@@ -134,19 +159,14 @@ final class ExtensionPopup: NSObject, WKUIDelegate, WKNavigationDelegate, NSPopo
         }
     }
 
-    /// From the page's first load: sized, then followed as it grows — a
-    /// list filled in by a reply from the worker — for a few seconds.
+    /// Measures on initial layout and follows growth/shrinkage in both
+    /// directions for the popover's open lifetime using ResizeObserver and
+    /// lightweight layout-signature checks (zero MutationObservers).
     private func follow() {
+        measure()
         guard measuring == nil else { return }
-        if !shown { firstMeasure() }
-        ticks = 0
-        var ticks = 0
-        measuring = Timer.scheduledTimer(withTimeInterval: 0.25, repeats: true) { [weak self] timer in
-            MainActor.assumeIsolated {
-                ticks += 1
-                self?.grow()
-                if ticks > 24 { timer.invalidate() }
-            }
+        measuring = Timer.scheduledTimer(withTimeInterval: 0.25, repeats: true) { [weak self] _ in
+            MainActor.assumeIsolated { self?.measure() }
         }
     }
 
@@ -182,25 +202,18 @@ final class ExtensionPopup: NSObject, WKUIDelegate, WKNavigationDelegate, NSPopo
         return Date().timeIntervalSince(closed.at) < 1.5
     }
 
-
-    /// The size Chrome would give the popup (Blink's auto-size, between
-    /// 25 × 25 and 800 × 600), worked out in the page while its view is
-    /// still the 25-point square: the width the page names for itself if it
-    /// names one, else its narrowest (min-content — what is positioned off
-    /// to the side doesn't count), else, for a page with next to no width
-    /// of its own, what its content spans; then, laid out at that width,
-    /// the height it names or spans. Nothing of it is left on the page.
+    /// Chrome auto-size (25×25 to 800×600), measuring explicit widths/heights,
+    /// min-content narrowest width, and overflowing elements hanging beneath `body`.
     static let preferred = """
     () => {
       const d = document.documentElement;
       if (!d) return null;
+      const v = document.compatMode === 'BackCompat' && document.body ? document.body : d;
       const m = window.__searchSizing || (window.__searchSizing = {});
       const saved = d.getAttribute("style");
       const back = () => saved === null ? d.removeAttribute("style") : d.setAttribute("style", saved);
       const box = d.getBoundingClientRect();
-      // A width the page sets for itself shows as one the view doesn't
-      // have; one equal to the view is either filling it or the width it
-      // was given last time, remembered.
+      const gutter = Math.max(0, innerWidth - v.clientWidth);
       let w;
       if (Math.abs(box.width - innerWidth) > 1) w = m.w = box.width;
       else if (m.w && Math.abs(m.w - innerWidth) <= 1) w = m.w;
@@ -210,114 +223,123 @@ final class ExtensionPopup: NSObject, WKUIDelegate, WKNavigationDelegate, NSPopo
         back();
         w = narrowest >= 100 ? narrowest : Math.max(narrowest, d.scrollWidth);
       }
-      w = Math.min(800, Math.max(25, Math.ceil(w)));
-      d.style.setProperty("width", w + "px", "important");
+      const below = (root) => {
+        let bottom = 0, n = 0;
+        const walk = (el) => {
+          for (const c of el.children) {
+            if (++n > 3000) return;
+            const s = getComputedStyle(c);
+            if (s.display === "none") continue;
+            const r = c.getBoundingClientRect();
+            if (r.width > 0 && r.height > 0) bottom = Math.max(bottom, r.bottom);
+            if (s.overflowY === "visible" && s.overflowX === "visible") walk(c);
+          }
+        };
+        walk(root);
+        return bottom + scrollY;
+      };
+      w = Math.min(800, Math.max(25, Math.ceil(w + gutter)));
+      d.style.setProperty("width", Math.max(1, w - gutter) + "px", "important");
       let h = d.getBoundingClientRect().height;
-      if (Math.abs(h - innerHeight) > 1) m.h = h;
-      else if (m.h && Math.abs(m.h - innerHeight) <= 1) h = m.h;
-      else {
-        d.style.setProperty("height", "auto", "important");
-        d.style.setProperty("min-height", "0", "important");
-        h = d.getBoundingClientRect().height;
-      }
+      d.style.setProperty("height", "auto", "important");
+      d.style.setProperty("min-height", "0", "important");
+      const content = d.getBoundingClientRect().height;
+      if (Math.abs(h - content) <= 1) { m.h = 0; h = content; }
+      else if (Math.abs(h - innerHeight) > 1) m.h = h;
+      else h = m.h && Math.abs(m.h - innerHeight) <= 1 ? m.h : content;
+      if (document.body && v === d) h = Math.max(h, below(document.body));
       back();
       return [w, Math.min(600, Math.max(25, Math.ceil(h)))];
     }
     """
 
-    /// The document is built — DOMContentLoaded, the moment Chrome sizes a
-    /// popup, before the page's scripts look at the room they have (Proton
-    /// Pass takes whatever size it finds then for good). WebKit tells a
-    /// navigation delegate that has this method; the configuration
-    /// extension pages share can't be given a script of our own.
     @objc(_webView:navigationDidFinishDocumentLoad:)
     func webView(_ webView: WKWebView, navigationDidFinishDocumentLoad navigation: WKNavigation?) {
         guard webView === web else { return }
-        firstMeasure()
+        follow()
     }
 
-    /// Measured while still the 25-point square and unseen, then shown at
-    /// the size found.
-    private func firstMeasure() {
-        guard let web, !shown else { return }
-        web.evaluateJavaScript("(\(ExtensionPopup.preferred))()") { [weak self] value, _ in
+    private static let world = WKContentWorld.world(name: "search-popup-size")
+
+    private static func watch(force: Bool) -> String {
+        """
+        (() => {
+          const d = document.documentElement;
+          if (!d) return null;
+          const w = window.__searchWatch || (window.__searchWatch = { n: 1, seen: 0, sig: "" });
+          if (!w.ro) {
+            const bump = () => { w.n++; };
+            try {
+              w.ro = new ResizeObserver(bump);
+              w.ro.observe(d);
+              if (document.body) { w.body = document.body; w.ro.observe(document.body); }
+            } catch (e) {}
+            addEventListener("load", bump, true);
+            addEventListener("transitionend", bump, true);
+            try { document.fonts.addEventListener("loadingdone", bump); } catch (e) {}
+          }
+          if (w.ro && document.body && w.body !== document.body) {
+            w.body = document.body;
+            try { w.ro.observe(document.body); } catch (e) {}
+            w.n++;
+          }
+          const sig = [
+            d.scrollWidth, d.scrollHeight,
+            document.body ? document.body.scrollHeight : 0,
+            document.body ? document.body.childElementCount : 0
+          ].join(",");
+          if (sig !== w.sig) { w.sig = sig; w.n++; }
+          if (!\(force) && w.seen === w.n) return null;
+          w.seen = w.n;
+          return (\(preferred))();
+        })()
+        """
+    }
+
+    /// Measures while hidden (delaying reveal until content renders) and while open.
+    private func measure(force: Bool = false) {
+        guard let web else { return }
+        web.evaluateJavaScript(Self.watch(force: force), in: nil, in: Self.world) { [weak self] result in
             MainActor.assumeIsolated {
-                guard let self, web === self.web, !self.shown else { return }
-                guard let pair = value as? [Double], pair.count == 2 else { return }
-                self.apply(NSSize(width: pair[0], height: pair[1]))
+                guard let self, web === self.web, let popover = self.popover,
+                      case .success(let value) = result, let pair = value as? [Double], pair.count == 2
+                else { return }
+                let wanted = NSSize(width: pair[0], height: pair[1])
+                if !self.shown, !force, max(wanted.width, wanted.height) <= 25 { return }
+                let now = popover.contentSize
+                if !self.shown || abs(wanted.width - now.width) > 1 || abs(wanted.height - now.height) > 1 {
+                    self.apply(wanted)
+                }
             }
         }
     }
 
-    private func apply(_ size: NSSize) {
-        guard let popover else { return }
+    private func apply(_ measured: NSSize) {
+        guard let popover, let size = ExtensionPopup.bounded(measured) else { return }
         if abs(size.width - popover.contentSize.width) > 1 || abs(size.height - popover.contentSize.height) > 1 {
-            // The popover takes its size from its view controller, and goes
-            // back to it: both are told.
             popover.contentViewController?.preferredContentSize = size
             popover.contentSize = size
             popover.contentViewController?.view.setFrameSize(size)
             if shown { web?.frame = NSRect(origin: .zero, size: size) }
         }
-        if let id = extensionID { ExtensionPopup.lastSize[id] = size }
+        if let id = extensionID, ExtensionPopup.lastSize[id] != size {
+            ExtensionPopup.lastSize[id] = size
+        }
         reveal()
-    }
-
-    /// How far the page reaches, as a function of "width" or "height":
-    /// its own width if it names one wider than the view, else its
-    /// narrowest (min-content — what is positioned off to the side doesn't
-    /// count, as in Chrome's measure), else, for a page that only fills the
-    /// view and has next to no width of its own, what its content spans.
-    /// Height: all it spans.
-    static let reach = """
-    ((key) => {
-      const d = document.documentElement;
-      if (!d) return null;
-      if (key === "height") return d.scrollHeight;
-      const own = d.getBoundingClientRect().width;
-      if (own > innerWidth + 1) return own;
-      const saved = d.getAttribute("style");
-      d.style.setProperty("width", "min-content", "important");
-      const narrowest = d.getBoundingClientRect().width;
-      saved === null ? d.removeAttribute("style") : d.setAttribute("style", saved);
-      return narrowest >= 100 ? narrowest : Math.max(narrowest, d.scrollWidth);
-    })
-    """
-
-    /// Measured again as the page builds itself, the way Chrome measures on
-    /// each layout: for its first two seconds the popup follows it either
-    /// way, after that it only grows — so a page that settles doesn't set
-    /// it rocking.
-    private var ticks = 0
-    private func grow() {
-        guard shown, let web, let popover else { return }
-        ticks += 1
-        if ticks <= 8 {
-            web.evaluateJavaScript("(\(ExtensionPopup.preferred))()") { [weak self] value, _ in
-                MainActor.assumeIsolated {
-                    guard let self, let pair = value as? [Double], pair.count == 2 else { return }
-                    let wanted = NSSize(width: pair[0], height: pair[1])
-                    let now = popover.contentSize
-                    if abs(wanted.width - now.width) > 2 || abs(wanted.height - now.height) > 2 { self.apply(wanted) }
-                }
-            }
-            return
-        }
-        web.evaluateJavaScript("[\(ExtensionPopup.reach)('width'), (() => { const d = document.documentElement; return d && d.scrollHeight > d.clientHeight ? d.scrollHeight : 0; })()]") { value, _ in
-            MainActor.assumeIsolated {
-                guard let pair = value as? [Double], pair.count == 2 else { return }
-                let now = popover.contentSize
-                let wanted = NSSize(width: min(800, max(now.width, pair[0])), height: min(600, max(now.height, pair[1])))
-                if wanted != now { self.apply(wanted) }
-            }
-        }
     }
 
     // MARK: - the page asking
 
     func webViewDidClose(_ webView: WKWebView) { close() }
 
-    func webView(_ webView: WKWebView, didFinish navigation: WKNavigation!) { follow() }
+    func webView(_ webView: WKWebView, didFinish navigation: WKNavigation!) {
+        guard webView === web else { return }
+        follow()
+        DispatchQueue.main.asyncAfter(deadline: .now() + 1) { [weak self, weak webView] in
+            guard let self, let webView, webView === self.web, !self.shown else { return }
+            self.measure(force: true)
+        }
+    }
 
     /// A link that asks for a new window becomes a tab, and the popup goes —
     /// the way it does in Chrome when you follow a link out of one.

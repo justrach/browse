@@ -95,11 +95,18 @@ final class Links: NSObject, NSApplicationDelegate {
         }
     }
 
-    /// The Dock icon clicked with the window closed: bring the window back
-    /// rather than doing nothing, which is what a hidden-title-bar SwiftUI
-    /// window does by default.
+    /// The Dock icon clicked with no browser window in sight (minimised,
+    /// hidden, or on another Space behind a utility panel): bring or
+    /// deminiaturize a browser window forward.
     func applicationShouldHandleReopen(_ sender: NSApplication, hasVisibleWindows flag: Bool) -> Bool {
-        if !flag, let window = NSApp.windows.first(where: { $0.contentView != nil }) {
+        let visibleBrowser = NSApp.windows.contains { win in
+            win.contentView != nil && !(win is NSPanel) && win.canBecomeMain
+                && !win.isMiniaturized && win.occlusionState.contains(.visible)
+        }
+        if !flag || !visibleBrowser,
+           let window = NSApp.windows.first(where: { $0.contentView != nil && !($0 is NSPanel) && $0.canBecomeMain })
+            ?? NSApp.windows.first(where: { $0.contentView != nil }) {
+            if window.isMiniaturized { window.deminiaturize(nil) }
             window.makeKeyAndOrderFront(nil)
         }
         return true

@@ -972,12 +972,18 @@ struct Carried: ViewModifier {
     var outside: ((CGPoint) -> Bool)? = nil
     /// Let go of while outside.
     var land: (() -> Void)? = nil
+    /// Sidebar drag-to-split support when carried vertically in `rows`.
+    var rowFrames: SplitRowFrames? = nil
+    var draggingTab: Tab? = nil
+    var browserID: ObjectIdentifier? = nil
+    var onMerge: ((Tab.ID, Bool) -> Void)? = nil
     let move: (Int) -> Void
 
     @State private var held = false
     @State private var from = 0
     @State private var travel: CGFloat = 0
     @State private var out = false
+    @State private var mergeTarget: SplitMergeState.Shown?
 
     func body(content: Content) -> some View {
         // What it has travelled, less the ground its new place has already
@@ -992,7 +998,8 @@ struct Carried: ViewModifier {
             // drifted back each time it passed one. Only the others glide.
             .transaction { if held { $0.animation = nil } }
             .zIndex(held ? 1 : 0)
-            .shadow(color: .black.opacity(held ? 0.14 : 0), radius: 12, y: 4)
+            .shadow(color: .black.opacity(held && mergeTarget == nil ? 0.14 : 0), radius: 12, y: 4)
+            .opacity(held && mergeTarget != nil ? 0.0 : 1)
             .gesture(
                 DragGesture(minimumDistance: 5, coordinateSpace: .named(space))
                     .onChanged { value in
@@ -1001,15 +1008,38 @@ struct Carried: ViewModifier {
                             from = index
                         }
                         out = outside?(value.location) ?? false
-                        guard !out else { return }
+                        guard !out else {
+                            clearMergeHint()
+                            return
+                        }
                         travel = vertical ? value.translation.height : value.translation.width
+                        if vertical, let rowFrames, let draggingTab, let browserID, onMerge != nil {
+                            let resolved = SplitMergeResolver.resolve(
+                                point: value.location,
+                                dragging: draggingTab.id,
+                                in: rowFrames.rects,
+                                browserID: browserID,
+                                canSplit: !draggingTab.isBlank && draggingTab.pin == nil
+                            )
+                            if SplitMergeState.shared.shown != resolved {
+                                SplitMergeState.shared.shown = resolved
+                            }
+                            mergeTarget = resolved
+                            if resolved != nil { return }
+                        }
                         let target = min(max(0, from + Int((travel / step).rounded())), count - 1)
                         if target != index {
                             withAnimation(Motion.settle) { move(target) }
                         }
                     }
                     .onEnded { _ in
-                        if out { land?() }
+                        let pendingMerge = mergeTarget
+                        clearMergeHint()
+                        if out {
+                            land?()
+                        } else if let pendingMerge {
+                            onMerge?(pendingMerge.targetID, pendingMerge.onLeft)
+                        }
                         out = false
                         withAnimation(Motion.settle) {
                             held = false
@@ -1017,6 +1047,14 @@ struct Carried: ViewModifier {
                         }
                     }
             )
+            .onDisappear { clearMergeHint() }
+    }
+
+    private func clearMergeHint() {
+        mergeTarget = nil
+        if let id = draggingTab?.id, SplitMergeState.shared.shown?.sourceID == id {
+            SplitMergeState.shared.shown = nil
+        }
     }
 }
 
@@ -1186,8 +1224,9 @@ struct TabMenu: View {
         }
         Divider()
         // Side by side with the tab in front (Split.swift).
-        if browser.split?.has(tab.id) == true {
+        if let split = browser.split, split.has(tab.id) {
             Button("Swap Sides") { browser.swapSplit() }
+            Button(split.syncsScroll ? "✓ Sync Scrolling" : "Sync Scrolling") { browser.toggleSyncScroll() }
             Button("Leave Split View") { browser.unsplit() }
         } else if tab.id != browser.activeID {
             Button("Open in Split View") { browser.split(with: tab) }

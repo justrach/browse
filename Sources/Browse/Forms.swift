@@ -161,13 +161,29 @@ final class FormRelay: NSObject, WKScriptMessageHandler {
         if (!pass) return null;
         var scope = pass.form || (pass.closest && pass.closest('form')) || document;
         var all = scope === document ? liveInputs : scope.querySelectorAll('input');
+        function caption(el) {
+          var up = el;
+          for (var k = 0; up && k < 3; k++, up = up.parentElement) {
+            var before = up.previousElementSibling;
+            if (!before) continue;
+            if (before.matches('input, select, textarea, button') || before.querySelector('input, select, textarea, button')) return '';
+            var said = (before.textContent || '').replace(/\\s+/g, ' ').trim();
+            return said.length <= 40 ? said.toLowerCase() : '';
+          }
+          return '';
+        }
+        var whoCaption = /user|login|log-in|logon|e-?mail|courriel|correo|identifi|account|compte|cuenta|konto|phone|mobile|usuario|utente/;
         var user = null;
+        var captionedUser = null;
         for (var i = 0; i < all.length; i++) {
           if (all[i] === pass) break;
           var kind = (all[i].type || 'text').toLowerCase();
-          if (kind === 'text' || kind === 'email' || kind === 'tel') user = all[i];
+          if (kind === 'text' || kind === 'email' || kind === 'tel') {
+            user = all[i];
+            if (kind === 'email' || whoCaption.test(caption(all[i]))) captionedUser = all[i];
+          }
         }
-        return { user: user, pass: pass };
+        return { user: captionedUser || user, pass: pass };
       }
 
       function put(box, value) {

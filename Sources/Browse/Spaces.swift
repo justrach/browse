@@ -51,6 +51,19 @@ enum Spaces {
     ]
     static let colourNames = ["Slate", "Blue", "Green", "Orange", "Red", "Violet"]
 
+    /// Space swatch toned for the current appearance so dots and menus match
+    /// what the window wears without blowing out in Dark Mode or Light Mode.
+    static func toned(_ index: Int, dark: Bool) -> Color {
+        let c = NSColor(colours[max(0, index) % colours.count]).usingColorSpace(.sRGB) ?? .gray
+        let ground: (r: Double, g: Double, b: Double) = dark ? (0.14, 0.14, 0.16) : (0.94, 0.94, 0.95)
+        let weight = dark ? 0.78 : 0.88
+        return Color(
+            red: Double(c.redComponent) * weight + ground.r * (1 - weight),
+            green: Double(c.greenComponent) * weight + ground.g * (1 - weight),
+            blue: Double(c.blueComponent) * weight + ground.b * (1 - weight)
+        )
+    }
+
     /// The icons a space can wear: Apple's own symbols, drawn in one weight
     /// and one grey, grouped as work, thinking, leisure and life.
     static let icons = [
@@ -421,6 +434,7 @@ extension Browser {
 /// the menu. When the space changes the icon turns over the way the spaces
 /// went — out on one side, the next one in from the other.
 struct SpaceDot: View {
+    @Environment(\.colorScheme) private var scheme
     @ObservedObject var browser: Browser
     @State private var hovering = false
     /// What is drawn, a step behind the browser: the space changes in a
@@ -434,8 +448,9 @@ struct SpaceDot: View {
     private var key: String { browser.makingSpace ? "new" : "\(browser.spaceID.uuidString)-\(browser.space.symbol)" }
 
     var body: some View {
+        let dark = scheme == .dark
         let tinted = !browser.makingSpace && browser.space.colour != 0
-        let restColor = tinted ? Spaces.colours[browser.space.colour % Spaces.colours.count] : Palette.muted
+        let restColor = tinted ? Spaces.toned(browser.space.colour, dark: dark) : Palette.muted
         Button { SpaceMenu.show(for: browser) } label: {
             ZStack {
                 Image(systemName: shown?.symbol ?? symbol)
@@ -518,9 +533,10 @@ enum SpaceMenu {
         icon.submenu = icons
         menu.addItem(icon)
         let colours = NSMenu()
+        let darkMenu = NSApp.effectiveAppearance.bestMatch(from: [.darkAqua, .aqua]) == .darkAqua
         for (idx, name) in Spaces.colourNames.enumerated() {
             let choice = item(name, checked: here.colour == idx) { browser.setSpaceColour(here.id, to: idx) }
-            let tint = NSColor(Spaces.colours[idx])
+            let tint = NSColor(Spaces.toned(idx, dark: darkMenu))
             if let img = NSImage(systemSymbolName: "circle.fill", accessibilityDescription: name)?
                 .withSymbolConfiguration(.init(paletteColors: [tint])) {
                 choice.image = img

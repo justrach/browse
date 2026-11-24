@@ -6,6 +6,19 @@ All notable changes to **browse** are documented here, newest first.
 
 ## Unreleased
 
+### Added
+
+- **Split View divider menu, Sync Scrolling & sidebar drag-to-split (`Split.swift`, `Side.swift`, `TabBar.swift`, `Session.swift`, `Tab.swift`)**: Added a right-click menu on the Split View divider, opt-in per-split **Sync Scrolling** (with loop-free echo detection and session persistence), and sidebar middle-band drag-and-drop onto another tab with a live 50/50 preview to create a split.
+- **Space and arrow keys for videos (`VideoKeys.swift`, `Prefs.swift`, `Settings.swift`)**: Added opt-in **Settings › General › Space and arrow keys control videos** so native HTML5 media elements with browser controls respond to `Space` (play/pause) and `←`/`→` (±5 s) without hijacking YouTube or custom players.
+- **Links from pinned tabs open in a new tab (`Peek.swift`, `Prefs.swift`, `Settings.swift`, `Browser.swift`)**: Added opt-in **Settings › Tabs › Links from pinned tabs open in a new tab** (preserving same-page fragments and sign-in flows).
+- **Stuck closed-tab WebContent guard (`Stuck.swift`, `Tab.swift`)**: Ends wedged spinning `com.apple.WebKit.WebContent` processes (> 80% CPU for 10 s after tab close/sleep with PID start-time verification and live/extension-page exclusions).
+
+### Improved
+
+- **Faster launch Shield setup (`Shield.swift`, `Browser.swift`)**: Cached the built-in `office-shield` rule list by content digest instead of recompiling at every launch, and deferred compilation when ad blocking is disabled.
+- **Extension popup sizing & standards-mode HTML shims (`ExtensionPopup.swift`, `Extensions.swift`, `ExtensionShims.swift`)**: Persisted bounded `[25...800, 25...600]` popup dimensions across launches, tracked full-lifetime growth/shrinkage with zero `MutationObserver`s, cleared saved sizes on uninstall, and placed `<script>` shims after BOM/doctype/`<html>` while ignoring `<header>`.
+- **Navigation, Dock, Forms, Hover & Dvorak–QWERTY `⌘` polish (`Links.swift`, `App.swift`, `Fold.swift`, `Browser.swift`, `Forms.swift`, `KeyLayout.swift`, `Shortcuts.swift`, `Spaces.swift`)**: Added `Dvorak – QWERTY ⌘` shortcut resolution, captioned bare email field recognition, folded-edge hover suppression, Dock reopen/Window menu registration, recent awake pin navigation on `⌘W`, appearance-toned Space swatches, and fixed `agentRowsOrigin` drag-out coordinates in the sidebar.
+
 ## 1.10.1 — 24 November 2026
 
 ### Fixed

@@ -39,8 +39,9 @@ enum ExtensionShims {
     /// one needs nothing redone, which matters at launch — preparing reads
     /// every script and page an extension ships.
     nonisolated static let stamp = ".search-shim"
+    nonisolated private static let preparation = "8"
     nonisolated static let version: String = {
-        SHA256.hash(data: Data((script + PasskeyRelay.page).utf8)).prefix(8).map { String(format: "%02x", $0) }.joined() + (Store.testing ? "-test" : "")
+        SHA256.hash(data: Data((script + PasskeyRelay.page + preparation).utf8)).prefix(8).map { String(format: "%02x", $0) }.joined() + (Store.testing ? "-test" : "")
     }()
 
     /// `fresh`: a package just unpacked or copied in. What only Search writes
@@ -137,20 +138,53 @@ enum ExtensionShims {
 
         // Every page it ships — popup, options, background page, side panel.
         let walker = files.enumerator(at: folder, includingPropertiesForKeys: [.isSymbolicLinkKey])
+        let signature: [UInt8] = [0xEF, 0xBB, 0xBF]
         while let url = walker?.nextObject() as? URL {
             guard (try? url.resourceValues(forKeys: [.isSymbolicLinkKey]).isSymbolicLink) != true,
                   ["html", "htm"].contains(url.pathExtension.lowercased()),
-                  var html = try? String(contentsOf: url, encoding: .utf8),
-                  !html.contains(file)
+                  let bytes = try? Data(contentsOf: url),
+                  let page = String(data: bytes, encoding: .utf8)
             else { continue }
-            let tag = "<script src=\"/\(file)\"></script>"
-            if let head = html.range(of: "<head[^>]*>", options: [.regularExpression, .caseInsensitive]) {
-                html.insert(contentsOf: tag, at: head.upperBound)
-            } else {
-                html = tag + html
+            let hasBOM = page.hasPrefix("\u{FEFF}") || bytes.starts(with: signature)
+            let base = page.hasPrefix("\u{FEFF}") || !bytes.starts(with: signature) ? page : "\u{FEFF}" + page
+            let patched = ExtensionShims.withShim(base)
+            var out = Data(patched.utf8)
+            if hasBOM, !out.starts(with: signature) {
+                out.insert(contentsOf: signature, at: 0)
             }
-            try? html.write(to: url, atomically: true, encoding: .utf8)
+            guard out != bytes else { continue }
+            try? out.write(to: url, options: .atomic)
         }
+    }
+
+    /// Places the shim script tag first in `<head>` (ignoring `<header>`), or
+    /// immediately after BOM / whitespace / comments / doctype / `<html>` when no
+    /// `<head>` tag is present so WebKit stays in standards mode (`CSS1Compat`).
+    nonisolated static func withShim(_ page: String) -> String {
+        let tag = "<script src=\"/\(file)\"></script>"
+        var html = page
+        if html.contains(tag) { html = html.replacingOccurrences(of: tag, with: "") }
+        if let head = html.range(of: #"<head(\s[^>]*)?>"#, options: [.regularExpression, .caseInsensitive]) {
+            html.insert(contentsOf: tag, at: head.upperBound)
+            return html
+        }
+        var at = html.startIndex
+        if html.hasPrefix("\u{FEFF}") { at = html.index(after: at) }
+        let prolog = [#"\s+"#, #"<!--[\s\S]*?-->"#, #"<!doctype[^>]*>"#]
+        var pastHTML = false
+        while at < html.endIndex {
+            let rest = html[at...]
+            if let found = prolog.lazy.compactMap({ rest.range(of: $0, options: [.regularExpression, .caseInsensitive, .anchored]) }).first {
+                at = found.upperBound
+            } else if !pastHTML, let found = rest.range(of: #"<html(\s[^>]*)?>"#, options: [.regularExpression, .caseInsensitive, .anchored]) {
+                at = found.upperBound
+                pastHTML = true
+            } else {
+                break
+            }
+        }
+        html.insert(contentsOf: tag, at: at)
+        return html
     }
 
     /// A path a package names, resolved and kept inside the folder it came
