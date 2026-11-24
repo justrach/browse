@@ -271,15 +271,28 @@ extension Agent {
         process.standardOutput = out
         process.standardError = FileHandle.nullDevice
         process.standardInput = FileHandle.nullDevice
-        do { try process.run() } catch { return nil }
-        let deadline = Date().addingTimeInterval(3)
-        while process.isRunning, Date() < deadline { usleep(20_000) }
-        if process.isRunning {
+        let exitDone = DispatchSemaphore(value: 0)
+        let readDone = DispatchSemaphore(value: 0)
+        final class OutputBox: @unchecked Sendable {
+            var data = Data()
+        }
+        let box = OutputBox()
+        process.terminationHandler = { _ in exitDone.signal() }
+        do { try process.run() } catch {
+            process.terminationHandler = nil
+            return nil
+        }
+        DispatchQueue.global(qos: .userInitiated).async {
+            box.data = out.fileHandleForReading.readDataToEndOfFile()
+            readDone.signal()
+        }
+        if exitDone.wait(timeout: .now() + 3) == .timedOut {
             process.terminate()
             return nil
         }
         guard process.terminationStatus == 0 else { return nil }
-        return String(data: out.fileHandleForReading.readDataToEndOfFile(), encoding: .utf8)
+        _ = readDone.wait(timeout: .now() + 0.5)
+        return String(data: box.data, encoding: .utf8)
     }
 }
 
@@ -401,9 +414,15 @@ final class AcpPipe: @unchecked Sendable {
         lock.lock()
         buffer.append(chunk)
         var lines: [Data] = []
-        while let end = buffer.firstIndex(of: 0x0A) {
-            lines.append(buffer.subdata(in: buffer.startIndex..<end))
-            buffer.removeSubrange(buffer.startIndex...end)
+        var cursor = buffer.startIndex
+        while let end = buffer[cursor...].firstIndex(of: 0x0A) {
+            lines.append(buffer.subdata(in: cursor..<end))
+            cursor = buffer.index(after: end)
+        }
+        if cursor == buffer.endIndex {
+            buffer.removeAll(keepingCapacity: buffer.count <= 65_536)
+        } else if cursor > buffer.startIndex {
+            buffer.removeSubrange(buffer.startIndex..<cursor)
         }
         let ended = over
         lock.unlock()

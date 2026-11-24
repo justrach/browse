@@ -390,7 +390,35 @@ final class Agent: ObservableObject {
         var fastSupported = false
         var ultrafastSupported = false
         var serviceTiers: [String] = []
+        let label: String
         var id: String { "\(provider)/\(name)" }
+
+        init(
+            provider: String,
+            name: String,
+            displayName: String? = nil,
+            acpValue: String? = nil,
+            context: Int = 0,
+            rawMaker: String? = nil,
+            billing: String? = nil,
+            effortLevels: [String] = [],
+            fastSupported: Bool = false,
+            ultrafastSupported: Bool = false,
+            serviceTiers: [String] = []
+        ) {
+            self.provider = provider
+            self.name = name
+            self.displayName = displayName
+            self.acpValue = acpValue
+            self.context = context
+            self.rawMaker = rawMaker
+            self.billing = billing
+            self.effortLevels = effortLevels
+            self.fastSupported = fastSupported
+            self.ultrafastSupported = ultrafastSupported
+            self.serviceTiers = serviceTiers
+            self.label = Model.computeLabel(name: name, displayName: displayName)
+        }
 
         var supportedServiceTiers: [ServiceTier] {
             let hasFast = fastSupported || serviceTiers.contains { $0.caseInsensitiveCompare("fast") == .orderedSame || $0.caseInsensitiveCompare("priority") == .orderedSame }
@@ -403,12 +431,14 @@ final class Agent: ObservableObject {
 
         /// The model's own part of its name: after any "vendor/", without a
         /// ":free" or ":beta" on the end.
-        private var bare: String {
+        private static func bareName(of name: String) -> String {
             var bare = name
             if let slash = bare.lastIndex(of: "/") { bare = String(bare[bare.index(after: slash)...]) }
             if let colon = bare.firstIndex(of: ":") { bare = String(bare[..<colon]) }
             return bare
         }
+
+        private var bare: String { Model.bareName(of: name) }
 
         /// What follows a colon — OpenRouter's "free", "beta", "extended".
         var tag: String? {
@@ -522,8 +552,9 @@ final class Agent: ObservableObject {
 
         /// "gpt-6-sol" as people say it: "GPT-6 Sol"; "claude-opus-4-8" is
         /// "Claude Opus 4.8", and a date on the end is left off.
-        var label: String {
+        private static func computeLabel(name: String, displayName: String?) -> String {
             if let displayName, !displayName.isEmpty { return displayName }
+            let bare = bareName(of: name)
             var words: [String] = []
             var dated = false
             for part in bare.split(whereSeparator: { $0 == "-" || $0 == "_" }).map(String.init) {
@@ -551,10 +582,10 @@ final class Agent: ObservableObject {
                 }
                 if ["gpt", "glm", "ui", "ai", "oss", "vl", "moe", "r1", "v3", "v4", "k2", "k3", "4o"].contains(lower) {
                     words.append(part.uppercased())
-                } else if lower.range(of: #"^a?\d+(\.\d+)?[bkm]$"#, options: .regularExpression) != nil {
+                } else if isParamSizeToken(lower) {
                     // 72b → 72B, the size of the thing; a10b → A10B.
                     words.append(part.uppercased())
-                } else if lower.range(of: #"^o\d$"#, options: .regularExpression) != nil {
+                } else if isOpenAINumbered(lower) {
                     // OpenAI's o1, o3, o4 are written small.
                     words.append(lower)
                 } else {
@@ -562,6 +593,33 @@ final class Agent: ObservableObject {
                 }
             }
             return words.isEmpty ? name : words.joined(separator: " ")
+        }
+
+        private static func isParamSizeToken(_ lower: String) -> Bool {
+            let bytes = Array(lower.utf8)
+            var idx = 0
+            guard idx < bytes.count else { return false }
+            if bytes[idx] == 0x61 { idx += 1 }
+            let intStart = idx
+            while idx < bytes.count && bytes[idx] >= 0x30 && bytes[idx] <= 0x39 { idx += 1 }
+            guard idx > intStart, idx < bytes.count else { return false }
+            if bytes[idx] == 0x2E {
+                idx += 1
+                let fracStart = idx
+                while idx < bytes.count && bytes[idx] >= 0x30 && bytes[idx] <= 0x39 { idx += 1 }
+                guard idx > fracStart, idx < bytes.count else { return false }
+            }
+            guard idx == bytes.count - 1 else { return false }
+            let suffix = bytes[idx]
+            return suffix == 0x62 || suffix == 0x6B || suffix == 0x6D
+        }
+
+        private static func isOpenAINumbered(_ lower: String) -> Bool {
+            let bytes = lower.utf8
+            guard bytes.count == 2 else { return false }
+            let first = bytes[bytes.startIndex]
+            let second = bytes[bytes.index(after: bytes.startIndex)]
+            return first == 0x6F && second >= 0x30 && second <= 0x39
         }
 
         /// Words their makers write their own way.
@@ -924,15 +982,15 @@ final class Agent: ObservableObject {
                 AgentTools.withdraw()
             }
         }
-        refreshBackends()
-        // Pre-warm the active backend in the background right after launch so
-        // opening the Agent sidebar has zero warm time.
-        if prefs.usesAgent && !Store.testing {
-            Task { [weak self] in
+        // Defer backend CLI discovery + pre-warm off cold launch so frame 1 stays unblocked.
+        Task { @MainActor [weak self] in
+            if !Store.testing {
                 try? await Task.sleep(nanoseconds: 250_000_000)
-                guard let self, self.prefs.usesAgent, self.pipe == nil, self.phase == .asleep else { return }
-                AgentEngine.shared.prewarm(backend: self.backend, prefs: self.prefs)
             }
+            guard let self else { return }
+            self.refreshBackends()
+            guard !Store.testing, self.prefs.usesAgent, self.pipe == nil, self.phase == .asleep else { return }
+            AgentEngine.shared.prewarm(backend: self.backend, prefs: self.prefs)
         }
     }
 
@@ -1426,8 +1484,10 @@ final class Agent: ObservableObject {
     }
 
     /// Starred model ids, persisted across launches (1:1 with NanoHarness favorites).
+    private var cachedFavoriteModelIDs: Set<String> = Set(Store.settings.stringArray(forKey: "agent.favorites") ?? [])
+
     var favoriteModelIDs: Set<String> {
-        Set(Store.settings.stringArray(forKey: "agent.favorites") ?? [])
+        cachedFavoriteModelIDs
     }
 
     var preferredEffort: String { prefs.agentEffort }
@@ -1436,8 +1496,10 @@ final class Agent: ObservableObject {
         var list = Store.settings.stringArray(forKey: "agent.favorites") ?? []
         if let idx = list.firstIndex(of: model.id) {
             list.remove(at: idx)
+            cachedFavoriteModelIDs.remove(model.id)
         } else {
             list.insert(model.id, at: 0)
+            cachedFavoriteModelIDs.insert(model.id)
         }
         Store.settings.set(list, forKey: "agent.favorites")
         objectWillChange.send()
@@ -1931,7 +1993,13 @@ final class Agent: ObservableObject {
     /// own, without the browser needing leave to drive Terminal.
     func loginInTerminal() {
         Task {
-            guard let found = await Agent.locate(custom: prefs.agentPath)?.program else {
+            let program: URL?
+            if let cached = await AgentEngine.shared.binary(for: .graff, customGraff: prefs.agentPath)?.program {
+                program = cached
+            } else {
+                program = await Agent.locate(custom: prefs.agentPath)?.program
+            }
+            guard let found = program else {
                 phase = .missing
                 return
             }
@@ -2327,8 +2395,11 @@ final class Agent: ObservableObject {
     }
 
     private func updated(_ update: [String: Any]) {
-        lastStreamAt = Date()
-        switch update["sessionUpdate"] as? String {
+        let updateKind = update["sessionUpdate"] as? String
+        if updateKind != "agent_message_chunk" && updateKind != "agent_thought_chunk" {
+            lastStreamAt = Date()
+        }
+        switch updateKind {
         case "agent_message_chunk":
             flow(.reply, Agent.text(update["content"]))
         case "agent_thought_chunk":
@@ -2458,12 +2529,17 @@ final class Agent: ObservableObject {
         flowFlushTask = nil
         guard let pending = pendingFlow else { return }
         pendingFlow = nil
-        lastStreamAt = Date()
+        let now = Date()
         if let last = entries.indices.last, entries[last].kind == pending.kind {
-            entries[last].text += pending.text
-            entries[last].until = Date()
+            var entry = entries[last]
+            entry.text += pending.text
+            entry.until = now
+            entries[last] = entry
         } else {
             entries.append(Entry(kind: pending.kind, text: pending.text))
+        }
+        if now.timeIntervalSince(lastStreamAt) >= 0.25 {
+            lastStreamAt = now
         }
     }
 
@@ -2574,7 +2650,11 @@ final class Agent: ObservableObject {
     /// .harness/settings.json in the folder it works in — {"skills": {"kuri":
     /// false}}, the same one `/skills remove kuri` writes — so graff
     /// everywhere else keeps it. Anything else in the file is left as it is.
+    private static var didLeaveKuriOut = false
+
     static func leaveKuriOut() {
+        guard !didLeaveKuriOut else { return }
+        didLeaveKuriOut = true
         let folder = Agent.folder.appendingPathComponent(".harness", isDirectory: true)
         let file = folder.appendingPathComponent("settings.json")
         var settings = (try? Data(contentsOf: file))

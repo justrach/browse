@@ -322,6 +322,11 @@ struct AgentComposer: View {
         let minH: CGFloat = full ? 48 : 30
         let maxH: CGFloat = full ? 210 : 156
         let dark = scheme == .dark
+        let activeSlashMatches = slashMatches
+        let isSlashOpen = !activeSlashMatches.isEmpty
+        let activeMentionCandidates = isSlashOpen ? [] : mentionCandidates
+        let isMentionOpen = !activeMentionCandidates.isEmpty
+        let isAnyCompletionOpen = isSlashOpen || isMentionOpen
 
         return VStack(alignment: .leading, spacing: 8) {
             if full, agent.pinned == nil, let tab = browser.active, !tab.isBlank, agent.asking == nil {
@@ -343,11 +348,11 @@ struct AgentComposer: View {
                 }
             }
             // NanoHarness slash-command or Dia @-tab completion popover anchored above the composer.
-            if slashMenuOpen {
-                slashMenu
+            if isSlashOpen {
+                slashMenu(matches: activeSlashMatches)
                     .transition(.move(edge: .bottom).combined(with: .opacity))
-            } else if mentionMenuOpen {
-                mentionMenu
+            } else if isMentionOpen {
+                mentionMenu(items: activeMentionCandidates)
                     .transition(.move(edge: .bottom).combined(with: .opacity))
             }
             // What was typed while it worked, in the order it will go.
@@ -385,7 +390,7 @@ struct AgentComposer: View {
                             minHeight: minH,
                             maxHeight: maxH,
                             newlinesOnReturn: false,
-                            slashMenuOpen: anyCompletionOpen,
+                            slashMenuOpen: isAnyCompletionOpen,
                             recallingUnchanged: recall.isShowingUnchanged(composer.text),
                             focusRequest: localFocusToken,
                             measuredHeight: $measuredHeight,
@@ -523,8 +528,8 @@ struct AgentComposer: View {
             .animation(Motion.quick, value: editorFocused)
             .animation(Motion.quick, value: imageDropTargeted)
         }
-        .animation(Motion.quick, value: slashMenuOpen)
-        .animation(Motion.quick, value: mentionMenuOpen)
+        .animation(Motion.quick, value: isSlashOpen)
+        .animation(Motion.quick, value: isMentionOpen)
         .animation(Motion.quick, value: agent.mentionedTabs.map(\.id))
         .animation(Motion.quick, value: agent.pendingImages.map(\.id))
         .animation(Motion.settle, value: agent.queue.map(\.id))
@@ -533,9 +538,8 @@ struct AgentComposer: View {
         .padding(.bottom, full ? 12 : 14)
     }
 
-    private var slashMenu: some View {
-        let matches = slashMatches
-        return VStack(alignment: .leading, spacing: 2) {
+    private func slashMenu(matches: [NanoSlashCommand]) -> some View {
+        VStack(alignment: .leading, spacing: 2) {
             ForEach(Array(matches.prefix(7).enumerated()), id: \.element.id) { index, cmd in
                 let lit = index == min(slashSelection, max(0, matches.count - 1))
                 Button { acceptSlashCommand(cmd) } label: {
@@ -576,9 +580,8 @@ struct AgentComposer: View {
     }
 
     /// Dia-style floating tab & history mention picker triggered by `@` (or `@history`).
-    private var mentionMenu: some View {
-        let items = mentionCandidates
-        return VStack(alignment: .leading, spacing: 2) {
+    private func mentionMenu(items: [MentionCandidate]) -> some View {
+        VStack(alignment: .leading, spacing: 2) {
             Text("Mention an open tab or recent page (@history)")
                 .font(.system(size: 10.5, weight: .semibold))
                 .foregroundStyle(Palette.muted.opacity(0.75))

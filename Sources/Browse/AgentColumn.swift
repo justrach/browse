@@ -391,18 +391,22 @@ struct AgentColumn: View {
                                     let turns = Turn.split(agent.entries)
                                     let seed = agent.chatID?.uuidString ?? "draft"
                                     let busy = agent.phase == .working || agent.phase == .starting
+                                    let activeTurnID = (agent.phase == .working
+                                        || (agent.phase == .starting && turns.last?.you != nil && turns.last?.answer.isEmpty == true))
+                                        ? turns.last?.id : nil
+                                    let waitingText = agent.asking.map { $0.isQuestion ? "Waiting for your answer…" : "Waiting for your approval…" }
                                     ForEach(turns) { turn in
+                                        let isLive = turn.id == activeTurnID
                                         TurnView(
                                             turn: turn,
                                             // Working on it — or asked before graff was up,
                                             // and waiting for it to be.
-                                            live: turn.id == turns.last?.id && (agent.phase == .working
-                                                || (agent.phase == .starting && turn.you != nil && turn.answer.isEmpty)),
+                                            live: isLive,
                                             full: full,
                                             busy: busy,
-                                            lastUpdate: agent.lastStreamAt,
+                                            lastUpdate: isLive ? agent.lastStreamAt : nil,
                                             chatSeed: seed,
-                                            waiting: agent.asking.map { $0.isQuestion ? "Waiting for your answer…" : "Waiting for your approval…" },
+                                            waiting: isLive ? waitingText : nil,
                                             visit: { url in browser.open(url, foreground: true, agentGroup: "Agent") },
                                             onRetry: turn.you.map { prompt in { agent.resend(prompt.text, page: browser.active) } },
                                             onEditPrompt: { prompt in
@@ -413,6 +417,7 @@ struct AgentColumn: View {
                                             onReportProblem: { browser.reportAgentProblem(kind: .stalled) },
                                             feedback: { browser.reportAgentProblem(kind: .answer) }
                                         )
+                                        .equatable()
                                     }
                                     Color.clear
                                         .frame(height: 1)
@@ -699,10 +704,20 @@ private struct NanoModelPopover: View {
     let current: Agent.Model
     let done: () -> Void
 
+    @MainActor
+    private final class CatalogCache {
+        var models: [Agent.Model] = []
+        var favorites: Set<String> = []
+        var starredOnly = false
+        var query = ""
+        var result: (flat: [Agent.Model], sections: [SectionGroup]) = ([], [])
+    }
+
     @Environment(\.colorScheme) private var scheme
     @State private var query = ""
     @State private var starredOnly = false
     @State private var highlightedID: String?
+    @State private var catalogCache = CatalogCache()
     @FocusState private var searchFocused: Bool
 
     private var dark: Bool { scheme == .dark }
@@ -847,13 +862,25 @@ private struct NanoModelPopover: View {
         query.trimmingCharacters(in: .whitespacesAndNewlines)
     }
 
-    private var catalogRows: (flat: [Agent.Model], sections: [SectionGroup]) {
-        let favs = agent.favoriteModelIDs
-        let base = starredOnly ? agent.models.filter { favs.contains($0.id) } : agent.models
+    private func catalogRows(favs: Set<String>) -> (flat: [Agent.Model], sections: [SectionGroup]) {
+        let trimmed = trimmedQuery
+        let models = agent.models
+        if catalogCache.starredOnly == starredOnly,
+           catalogCache.query == trimmed,
+           catalogCache.favorites == favs,
+           catalogCache.models.count == models.count,
+           zip(catalogCache.models, models).allSatisfy({ a, b in
+               a.id == b.id && a.billing == b.billing && a.context == b.context && a.displayName == b.displayName
+           }) {
+            return catalogCache.result
+        }
 
-        if !trimmedQuery.isEmpty || starredOnly {
+        let base = starredOnly ? models.filter { favs.contains($0.id) } : models
+        let result: (flat: [Agent.Model], sections: [SectionGroup])
+
+        if !trimmed.isEmpty || starredOnly {
             let matched: [(model: Agent.Model, rank: Int)] = base.compactMap { m in
-                guard let rank = m.searchRank(for: trimmedQuery) else { return nil }
+                guard let rank = m.searchRank(for: trimmed) else { return nil }
                 return (m, rank)
             }
             let sorted = matched.sorted { a, b in
@@ -861,50 +888,57 @@ private struct NanoModelPopover: View {
                 if a.rank != b.rank { return a.rank < b.rank }
                 return false
             }.map(\.model)
-            return (sorted, [])
-        }
-
-        // Preserve first-appearance route order, place `claude-agent` ahead of
-        // `anthropic`, then order routes by best billing rank (plan → local →
-        // credits → api), 1:1 with NanoHarness `model_picker.zig:rows`.
-        var routeOrder: [String] = []
-        var byRoute: [String: [Agent.Model]] = [:]
-        for model in base {
-            if byRoute[model.provider] == nil { routeOrder.append(model.provider) }
-            byRoute[model.provider, default: []].append(model)
-        }
-        if let agentIdx = routeOrder.firstIndex(of: "claude-agent"),
-           let anthIdx = routeOrder.firstIndex(of: "anthropic"),
-           agentIdx > anthIdx {
-            let moved = routeOrder.remove(at: agentIdx)
-            routeOrder.insert(moved, at: anthIdx)
-        }
-        let sortedRoutes = routeOrder.enumerated().sorted { a, b in
-            let ra = byRoute[a.element]?.map(\.billingRank).min() ?? 2
-            let rb = byRoute[b.element]?.map(\.billingRank).min() ?? 2
-            if ra != rb { return ra < rb }
-            return a.offset < b.offset
-        }.map(\.element)
-
-        var sections: [SectionGroup] = []
-        var flat: [Agent.Model] = []
-        for route in sortedRoutes {
-            let items = (byRoute[route] ?? []).sorted { a, b in
-                if a.billingRank != b.billingRank { return a.billingRank < b.billingRank }
-                return false
+            result = (sorted, [])
+        } else {
+            // Preserve first-appearance route order, place `claude-agent` ahead of
+            // `anthropic`, then order routes by best billing rank (plan → local →
+            // credits → api), 1:1 with NanoHarness `model_picker.zig:rows`.
+            var routeOrder: [String] = []
+            var byRoute: [String: [Agent.Model]] = [:]
+            for model in base {
+                if byRoute[model.provider] == nil { routeOrder.append(model.provider) }
+                byRoute[model.provider, default: []].append(model)
             }
-            guard !items.isEmpty else { continue }
-            let isPlan = items.contains { $0.billingRank == 0 }
-            sections.append(SectionGroup(
-                id: route,
-                provider: route,
-                title: Agent.Model.said(route),
-                isPlan: isPlan,
-                models: items
-            ))
-            flat.append(contentsOf: items)
+            if let agentIdx = routeOrder.firstIndex(of: "claude-agent"),
+               let anthIdx = routeOrder.firstIndex(of: "anthropic"),
+               agentIdx > anthIdx {
+                let moved = routeOrder.remove(at: agentIdx)
+                routeOrder.insert(moved, at: anthIdx)
+            }
+            let sortedRoutes = routeOrder.enumerated().sorted { a, b in
+                let ra = byRoute[a.element]?.map(\.billingRank).min() ?? 2
+                let rb = byRoute[b.element]?.map(\.billingRank).min() ?? 2
+                if ra != rb { return ra < rb }
+                return a.offset < b.offset
+            }.map(\.element)
+
+            var sections: [SectionGroup] = []
+            var flat: [Agent.Model] = []
+            for route in sortedRoutes {
+                let items = (byRoute[route] ?? []).sorted { a, b in
+                    if a.billingRank != b.billingRank { return a.billingRank < b.billingRank }
+                    return false
+                }
+                guard !items.isEmpty else { continue }
+                let isPlan = items.contains { $0.billingRank == 0 }
+                sections.append(SectionGroup(
+                    id: route,
+                    provider: route,
+                    title: Agent.Model.said(route),
+                    isPlan: isPlan,
+                    models: items
+                ))
+                flat.append(contentsOf: items)
+            }
+            result = (flat, sections)
         }
-        return (flat, sections)
+
+        catalogCache.models = models
+        catalogCache.favorites = favs
+        catalogCache.starredOnly = starredOnly
+        catalogCache.query = trimmed
+        catalogCache.result = result
+        return result
     }
 
     /// NanoHarness-style Agent Backend selector (`Codegraff` | `Antigravity` |
@@ -963,7 +997,8 @@ private struct NanoModelPopover: View {
     }
 
     private var catalogList: some View {
-        let data = catalogRows
+        let favs = agent.favoriteModelIDs
+        let data = catalogRows(favs: favs)
         let flat = data.flat
         let highlighted = flat.first { $0.id == highlightedID } ?? flat.first
 
@@ -1043,14 +1078,14 @@ private struct NanoModelPopover: View {
                     LazyVStack(alignment: .leading, spacing: 0, pinnedViews: [.sectionHeaders]) {
                         if data.sections.isEmpty {
                             ForEach(flat, id: \.id) { model in
-                                modelRow(model, lit: model.id == highlighted?.id, showRoute: true)
+                                modelRow(model, lit: model.id == highlighted?.id, showRoute: true, starred: favs.contains(model.id))
                                     .id(model.id)
                             }
                         } else {
                             ForEach(data.sections) { section in
                                 SwiftUI.Section {
                                     ForEach(section.models, id: \.id) { model in
-                                        modelRow(model, lit: model.id == highlighted?.id, showRoute: false)
+                                        modelRow(model, lit: model.id == highlighted?.id, showRoute: false, starred: favs.contains(model.id))
                                             .id(model.id)
                                     }
                                 } header: {
@@ -1105,13 +1140,12 @@ private struct NanoModelPopover: View {
         }
         .frame(width: 352)
         .onChange(of: query) { _, _ in
-            highlightedID = catalogRows.flat.first?.id
+            highlightedID = catalogRows(favs: agent.favoriteModelIDs).flat.first?.id
         }
     }
 
-    private func modelRow(_ model: Agent.Model, lit: Bool, showRoute: Bool) -> some View {
+    private func modelRow(_ model: Agent.Model, lit: Bool, showRoute: Bool, starred: Bool) -> some View {
         let selected = model == current
-        let starred = agent.favoriteModelIDs.contains(model.id)
 
         return HStack(spacing: 8) {
             ProviderMark(provider: model.makerKey, size: 14)
@@ -1394,7 +1428,7 @@ struct PagesCard: View {
 /// One exchange: what was asked, the work graff did on it — thinking, tools,
 /// pages read — and the answer it ended on. What came before anything was
 /// asked is a turn with no question.
-private struct Turn: Identifiable {
+private struct Turn: Identifiable, Equatable {
     let id: UUID
     var you: Agent.Entry?
     var work: [Agent.Entry] = []
@@ -1431,17 +1465,26 @@ private struct Turn: Identifiable {
     }
 
     var started: Date? { you?.at ?? work.first?.at }
-    var ended: Date? { (work + answer).map(\.until).max() }
+    var ended: Date? {
+        let workEnd = work.lazy.map(\.until).max()
+        let answerEnd = answer.lazy.map(\.until).max()
+        switch (workEnd, answerEnd) {
+        case let (a?, b?): return max(a, b)
+        case let (a?, nil): return a
+        case let (nil, b?): return b
+        case (nil, nil): return nil
+        }
+    }
 }
 
 /// A turn's question, reported activity and answer. Live work remains
 /// visible; completed work folds away so the answer has room to be read.
-private struct TurnView: View {
+private struct TurnView: View, Equatable {
     let turn: Turn
     let live: Bool
     let full: Bool
     var busy: Bool = false
-    let lastUpdate: Date
+    let lastUpdate: Date?
     let chatSeed: String
     let waiting: String?
     let visit: (URL) -> Void
@@ -1453,10 +1496,21 @@ private struct TurnView: View {
     @State private var copied = false
     let feedback: () -> Void
 
+    static func == (lhs: Self, rhs: Self) -> Bool {
+        lhs.turn == rhs.turn
+            && lhs.live == rhs.live
+            && lhs.full == rhs.full
+            && lhs.busy == rhs.busy
+            && lhs.lastUpdate == rhs.lastUpdate
+            && lhs.chatSeed == rhs.chatSeed
+            && lhs.waiting == rhs.waiting
+    }
+
     var body: some View {
         VStack(alignment: .leading, spacing: full ? 12 : 10) {
             if let you = turn.you {
                 EntryRow(entry: you, full: full, visit: visit, onEditPrompt: onEditPrompt)
+                    .equatable()
             }
             if turn.work.contains(where: { $0.kind != .thought }) || live {
                 AgentActivity(entries: turn.work, started: turn.started, ended: turn.ended,
@@ -1467,6 +1521,7 @@ private struct TurnView: View {
             }
             ForEach(turn.answer) { entry in
                 EntryRow(entry: entry, full: full, visit: visit)
+                    .equatable()
             }
             if !live, let reply = turn.answer.last(where: { $0.kind == .reply }) {
                 foot(reply)
@@ -1525,7 +1580,7 @@ private struct TurnView: View {
 }
 
 /// One thing said, by you or by it, or one thing it did.
-struct EntryRow: View {
+struct EntryRow: View, Equatable {
     let entry: Agent.Entry
     /// On the stage, where the words are set larger.
     var full = false
@@ -1535,6 +1590,10 @@ struct EntryRow: View {
 
     @State private var hoveringPrompt = false
     @State private var copiedPrompt = false
+
+    static func == (lhs: Self, rhs: Self) -> Bool {
+        lhs.entry == rhs.entry && lhs.full == rhs.full && lhs.live == rhs.live
+    }
 
     init(entry: Agent.Entry, full: Bool = false, live: Bool = false, visit: @escaping (URL) -> Void, onEditPrompt: ((String) -> Void)? = nil) {
         self.entry = entry
@@ -1652,7 +1711,7 @@ private struct ReplyText: View {
     var size: CGFloat = 13
 
     var body: some View {
-        MarkdownReplyView(text: text, size: size)
+        MarkdownReplyView(text: text, size: size).equatable()
     }
 }
 
@@ -1826,7 +1885,11 @@ struct AgentPage: View {
         ConnectCard()
         .task(id: prefs.agentPath) {
             looked = false
-            found = await Agent.locate(custom: prefs.agentPath)?.program.path
+            if let cached = await AgentEngine.shared.binary(for: .graff, customGraff: prefs.agentPath)?.program.path {
+                found = cached
+            } else {
+                found = await Agent.locate(custom: prefs.agentPath)?.program.path
+            }
             looked = true
         }
     }

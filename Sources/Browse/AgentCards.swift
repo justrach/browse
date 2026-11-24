@@ -28,7 +28,7 @@ struct StepCard: View {
                 Rectangle().fill(Palette.hairline).frame(height: 1)
                 Group {
                     if let diff = entry.diff {
-                        DiffView(diff: diff)
+                        DiffView(diff: diff).equatable()
                     } else {
                         ScrollView {
                             Text(entry.output)
@@ -184,8 +184,18 @@ struct TodoCard: View {
 /// An edit's diff, Harness's way: a hunk header, then each line with its
 /// old and new numbers — removed in red, added in green, the rest plain —
 /// with three lines of context round each change.
-struct DiffView: View {
+struct DiffView: View, Equatable {
     let diff: StepDiff
+
+    static func == (lhs: DiffView, rhs: DiffView) -> Bool {
+        lhs.diff == rhs.diff
+    }
+
+    private struct CacheKey: Hashable {
+        let path: String
+        let old: String?
+        let new: String
+    }
 
     private struct Line: Identifiable {
         let id: Int
@@ -196,7 +206,26 @@ struct DiffView: View {
         let sign: Character
     }
 
+    @MainActor private static let cacheLimit = 32
+    @MainActor private static var lineCache: [CacheKey: [Line]] = [:]
+    @MainActor private static var cacheRing: [CacheKey?] = Array(repeating: nil, count: 32)
+    @MainActor private static var cacheCursor = 0
+
+    @MainActor
     private var lines: [Line] {
+        let key = CacheKey(path: diff.path, old: diff.old, new: diff.new)
+        if let hit = Self.lineCache[key] { return hit }
+        let computed = Self.computeLines(diff)
+        if let evicted = Self.cacheRing[Self.cacheCursor] {
+            Self.lineCache.removeValue(forKey: evicted)
+        }
+        Self.cacheRing[Self.cacheCursor] = key
+        Self.cacheCursor = (Self.cacheCursor + 1) % Self.cacheLimit
+        Self.lineCache[key] = computed
+        return computed
+    }
+
+    private static func computeLines(_ diff: StepDiff) -> [Line] {
         let before = diff.old.map { $0.components(separatedBy: "\n") } ?? []
         let after = diff.new.components(separatedBy: "\n")
         let change = after.difference(from: before)

@@ -359,15 +359,19 @@ struct NanoComposerField: NSViewRepresentable {
 final class NanoTextView: NSTextView {
     weak var coordinator: NanoComposerField.Coordinator?
     private var appliedSize: CGFloat = 0
+    private var appliedAppearance: NSAppearance.Name?
 
-    func applyTypography(size: CGFloat) {
+    func applyTypography(size: CGFloat, force: Bool = false) {
+        let appearanceName = effectiveAppearance.name
+        guard force || abs(appliedSize - size) > 0.1 || self.font == nil || appliedAppearance != appearanceName else {
+            return
+        }
         let ink = Palette.NS.ink
         let accent = NSColor(Palette.accent)
         let font = NSFont.systemFont(ofSize: size)
-        if abs(appliedSize - size) > 0.1 || self.font == nil {
-            appliedSize = size
-            self.font = font
-        }
+        appliedSize = size
+        appliedAppearance = appearanceName
+        self.font = font
         self.textColor = ink
         self.insertionPointColor = accent
         self.selectedTextAttributes = [
@@ -386,7 +390,7 @@ final class NanoTextView: NSTextView {
 
     override func viewDidChangeEffectiveAppearance() {
         super.viewDidChangeEffectiveAppearance()
-        applyTypography(size: appliedSize > 0 ? appliedSize : 13.5)
+        applyTypography(size: appliedSize > 0 ? appliedSize : 13.5, force: true)
     }
 
     override func becomeFirstResponder() -> Bool {
