@@ -304,6 +304,7 @@ struct SettingsPanel: View {
         SearchEntry(.general, "Float the video when you switch tabs", "Automatic picture-in-picture when leaving a tab", keywords: "pip youtube video float"),
         SearchEntry(.general, "Float the video when you switch apps", "Automatic picture-in-picture when switching applications", keywords: "pip youtube video float background"),
         SearchEntry(.general, "Full-screen video fills this window", "Use this window instead of a new macOS Space", keywords: "video fullscreen window space youtube"),
+        SearchEntry(.general, "Space and arrow keys control videos", "Play/pause with Space and seek ±5s with arrows on native videos", keywords: "video spacebar arrow keys seek play pause"),
         SearchEntry(.general, "Let a script drive browse", "Local bench automation socket", keywords: "bench automation cli testing socket"),
 
         // Themes
@@ -322,6 +323,7 @@ struct SettingsPanel: View {
         SearchEntry(.tabs, "Memory profile", "Relaxed, Balanced, or Low RAM tab sleeping schedule", keywords: "ram memory relaxed low balanced sleep now"),
         SearchEntry(.tabs, "Spaces", "Separate sets of tabs and profiles switched with ⌃1–⌃9", keywords: "workspaces profiles containers arc"),
         SearchEntry(.tabs, "Use the same pinned tabs across spaces", "Share live pinned tabs between spaces that share sign-ins", keywords: "shared pins spaces arc workspaces"),
+        SearchEntry(.tabs, "Links from pinned tabs open in a new tab", "Keep pinned tabs on their page when clicking links", keywords: "pins links new tab arc peek"),
 
         // Extensions
         SearchEntry(.extensions, "Chrome extensions", "Install and manage Chrome Web Store or unpacked extensions", keywords: "addons plugins chrome web store"),
@@ -626,6 +628,10 @@ struct SettingsPanel: View {
                 Switch(on: $prefs.fullScreenInWindow)
             }
             Rule()
+            Line("Space and arrow keys control videos", "Click a native video to play/pause with Space and skip 5 seconds with ← →") {
+                Switch(on: $prefs.videoKeys)
+            }
+            Rule()
             Line("Let a script drive browse", "A local socket for testing. Its tabs open beside yours with a flask on them and never take over — see ./bench") {
                 Switch(on: $prefs.bench)
             }
@@ -719,6 +725,10 @@ struct SettingsPanel: View {
                     options: [(0, "Never"), (12, "12h"), (24, "24h"), (168, "7d")],
                     selection: $prefs.autoArchiveHours
                 )
+            }
+            Rule()
+            Line("Links from pinned tabs open in a new tab", "Clicking a link in a pinned tab opens a new tab while keeping the pin on its page") {
+                Switch(on: $prefs.pinLinksOpenTabs)
             }
             Rule()
             Line("Spaces", "Separate sets of tabs, signed in where the others are or starting afresh, switched with ⌃1–⌃9, two fingers sideways over the column, or the space's icon. Mission Control's own ⌃1–⌃9, if you turned them on, take those keys first.") {

@@ -31,10 +31,17 @@ struct Split: Equatable {
     var right: Tab.ID
     /// How much of the stage the left page has.
     var fraction: CGFloat = 0.5
+    /// When true, scrolling either pane scrolls its partner by the same delta.
+    var syncsScroll: Bool = false
 
     enum Side { case left, right }
 
     func has(_ id: Tab.ID?) -> Bool { id == left || id == right }
+    func other(than id: Tab.ID) -> Tab.ID? {
+        if id == left { return right }
+        if id == right { return left }
+        return nil
+    }
 
     /// The frame around and between the two pages, their corners, and the
     /// strip over each that names it.
@@ -165,6 +172,47 @@ extension Browser {
         for tab in [pair.left, pair.right] where tab.id != activeID {
             if !tab.wake() { tab.revive() }
         }
+        applySyncScroll(previous: nil)
+    }
+
+    func evenSplit() {
+        guard split != nil else { return }
+        split?.fraction = 0.5
+    }
+
+    func closeSplit() {
+        guard let pair = shownSplit else { return }
+        split = nil
+        close(pair.right)
+        close(pair.left)
+    }
+
+    func toggleSyncScroll() {
+        guard split != nil else { return }
+        split?.syncsScroll.toggle()
+    }
+
+    func applySyncScroll(previous: Split?) {
+        let on = split?.syncsScroll == true
+        if let prev = previous {
+            for id in [prev.left, prev.right] where !(split?.has(id) == true && on) {
+                tabs.first(where: { $0.id == id })?.setSplitScrollSync(false)
+            }
+        }
+        guard let cur = split else { return }
+        for id in [cur.left, cur.right] {
+            tabs.first(where: { $0.id == id })?.setSplitScrollSync(on)
+        }
+    }
+
+    func syncScroll(from tab: Tab, by dy: Double) {
+        guard let pair = split, pair.syncsScroll,
+              pair.has(tab.id), let partnerID = pair.other(than: tab.id),
+              dy.isFinite, dy != 0,
+              let web = tabs.first(where: { $0.id == partnerID })?.built
+        else { return }
+        let js = "window.scrollBy({ top: \(dy), left: 0, behavior: 'instant' }); window.__browseSynced = window.scrollY; 0"
+        web.evaluateJavaScript(js, in: nil, in: Web.world) { _ in }
     }
 
     /// The two next to each other in the list, left above right, so the
@@ -383,6 +431,7 @@ private final class SplitContainerView<Overlay: View>: NSView {
     ) {
         leftSlot.update(browser: browser, tab: left, overlay: leftOverlay, front: leftFront, darkChrome: darkChrome)
         rightSlot.update(browser: browser, tab: right, overlay: rightOverlay, front: rightFront, darkChrome: darkChrome)
+        divider.update(browser: browser)
         divider.setChrome(dark: darkChrome)
         ratioPill.setChrome(dark: darkChrome)
         if !isDragging && snapLink == nil && abs(liveFraction - fraction) > 0.0005 {
@@ -867,6 +916,11 @@ private final class SplitHeaderView: NSView {
         menu.addItem(withTitle: "Just This One", action: #selector(justThisOne), keyEquivalent: "").target = self
         menu.addItem(withTitle: "Close This Side", action: #selector(closeSide), keyEquivalent: "").target = self
         menu.addItem(.separator())
+        let sync = NSMenuItem(title: "Sync Scrolling", action: #selector(toggleSync), keyEquivalent: "")
+        sync.target = self
+        sync.state = browser?.split?.syncsScroll == true ? .on : .off
+        menu.addItem(sync)
+        menu.addItem(.separator())
         menu.addItem(withTitle: "Leave Split View", action: #selector(leaveSplit), keyEquivalent: "").target = self
         return menu
     }
@@ -874,6 +928,7 @@ private final class SplitHeaderView: NSView {
     @objc private func swapSides() { browser?.swapSplit() }
     @objc private func justThisOne() { if let tab { browser?.alone(tab) } }
     @objc private func closeSide() { if let tab { browser?.dropSide(tab) } }
+    @objc private func toggleSync() { browser?.toggleSyncScroll() }
     @objc private func leaveSplit() { browser?.unsplit() }
 }
 
@@ -923,10 +978,15 @@ private final class SplitHeaderButton: NSButton {
 /// guide rail, tactile accent grab capsule, and double-click snap back to 50 : 50.
 @MainActor
 private final class SplitDividerView: NSView {
+    weak var browser: Browser?
     var onDragBegin: (() -> Void)?
     var onDragDelta: ((CGFloat) -> Void)?
     var onDragEnd: (() -> Void)?
     var onDoubleClick: (() -> Void)?
+
+    func update(browser: Browser) {
+        self.browser = browser
+    }
 
     private let guideLine = CALayer()
     private let pill = CALayer()
@@ -1011,6 +1071,27 @@ private final class SplitDividerView: NSView {
     override func mouseUp(with event: NSEvent) {
         onDragEnd?()
     }
+
+    override func menu(for event: NSEvent) -> NSMenu? {
+        let menu = NSMenu()
+        menu.addItem(withTitle: "Swap Sides", action: #selector(swapSides), keyEquivalent: "").target = self
+        menu.addItem(withTitle: "Equal Widths", action: #selector(equalWidths), keyEquivalent: "").target = self
+        menu.addItem(.separator())
+        let sync = NSMenuItem(title: "Sync Scrolling", action: #selector(toggleSync), keyEquivalent: "")
+        sync.target = self
+        sync.state = browser?.split?.syncsScroll == true ? .on : .off
+        menu.addItem(sync)
+        menu.addItem(.separator())
+        menu.addItem(withTitle: "Leave Split View", action: #selector(leaveSplit), keyEquivalent: "").target = self
+        menu.addItem(withTitle: "Close Both Sides", action: #selector(closeBoth), keyEquivalent: "").target = self
+        return menu
+    }
+
+    @objc private func swapSides() { browser?.swapSplit() }
+    @objc private func equalWidths() { browser?.evenSplit() }
+    @objc private func toggleSync() { browser?.toggleSyncScroll() }
+    @objc private func leaveSplit() { browser?.unsplit() }
+    @objc private func closeBoth() { browser?.closeSplit() }
 
     private func positionPill() {
         let active = hovering || dragging
@@ -1125,76 +1206,107 @@ private final class SplitRatioPill: NSView {
     }
 }
 
-/// The strip over a page in a split: what it is, and what can be done with
-/// it. A click puts it in front; pulled to the other side, the two change
-/// places.
-private struct PaneHeader: View {
-    @ObservedObject var browser: Browser
-    @ObservedObject var tab: Tab
-    let ink: Color
+/// Non-observable frame cache for sidebar rows so layout updates never trigger SwiftUI redraws.
+final class SplitRowFrames {
+    var rects: [Tab.ID: CGRect] = [:]
+}
 
-    @State private var hovering = false
-    @State private var travel: CGFloat = 0
+@MainActor
+final class SplitMergeState: ObservableObject {
+    static let shared = SplitMergeState()
 
-    private var front: Bool { tab.id == browser.activeID }
-    private var onLeft: Bool { browser.split?.left == tab.id }
-
-    var body: some View {
-        HStack(spacing: 7) {
-            if !tab.isBlank {
-                Mark(icon: tab.icon, letter: tab.monogram, size: 14)
-            }
-            Text(tab.label)
-                .font(.system(size: 12, weight: front ? .semibold : .regular))
-                .foregroundStyle(ink.opacity(front ? 0.9 : 0.6))
-                .lineLimit(1)
-                .truncationMode(.tail)
-            Spacer(minLength: 4)
-            HStack(spacing: 2) {
-                act("arrow.left.arrow.right", "Swap Sides") { browser.swapSplit() }
-                act("arrow.up.left.and.arrow.down.right", "Just This One") { browser.alone(tab) }
-                act("xmark", "Close This Side — the tab stays open") { browser.dropSide(tab) }
-            }
-            .opacity(hovering || front ? 1 : 0)
-        }
-        .padding(.horizontal, 6)
-        .frame(maxHeight: .infinity)
-        .contentShape(Rectangle())
-        .offset(x: travel)
-        .onHover { hovering = $0 }
-        .onTapGesture { if !front { browser.select(tab) } }
-        .gesture(
-            DragGesture(minimumDistance: 6)
-                .onChanged { travel = $0.translation.width }
-                .onEnded { value in
-                    // Pulled past a clear threshold towards the other side:
-                    // they change places.
-                    let across = onLeft ? value.translation.width : -value.translation.width
-                    if across > 120 { browser.swapSplit() }
-                    withAnimation(Motion.settle) { travel = 0 }
-                }
-        )
-        .contextMenu {
-            Button("Swap Sides") { browser.swapSplit() }
-            Button("Just This One") { browser.alone(tab) }
-            Button("Close This Side") { browser.dropSide(tab) }
-            Divider()
-            Button("Leave Split View") { browser.unsplit() }
-        }
-        .animation(Motion.quick, value: hovering)
-        .animation(Motion.quick, value: front)
+    struct Shown: Equatable {
+        let browserID: ObjectIdentifier
+        let targetID: Tab.ID
+        let sourceID: Tab.ID
+        let onLeft: Bool
     }
 
-    private func act(_ icon: String, _ help: String, _ run: @escaping () -> Void) -> some View {
-        Button(action: run) {
-            Image(systemName: icon)
-                .font(.system(size: 10, weight: .semibold))
-                .foregroundStyle(ink.opacity(0.55))
-                .frame(width: 22, height: 22)
-                .contentShape(Rectangle())
+    @Published var shown: Shown?
+    private init() {}
+}
+
+enum SplitMergeResolver {
+    static func resolve(
+        point: CGPoint,
+        dragging sourceID: Tab.ID,
+        in rects: [Tab.ID: CGRect],
+        browserID: ObjectIdentifier,
+        canSplit: Bool
+    ) -> SplitMergeState.Shown? {
+        guard canSplit else { return nil }
+        for (targetID, rect) in rects where targetID != sourceID {
+            guard rect.height > 0, rect.width > 0 else { continue }
+            let bandMinY = rect.minY + rect.height * 0.28
+            let bandMaxY = rect.maxY - rect.height * 0.28
+            guard point.x >= rect.minX - 6, point.x <= rect.maxX + 6,
+                  point.y >= bandMinY, point.y <= bandMaxY
+            else { continue }
+            return SplitMergeState.Shown(
+                browserID: browserID,
+                targetID: targetID,
+                sourceID: sourceID,
+                onLeft: point.x < rect.midX
+            )
         }
-        .buttonStyle(.plain)
-        .help(help)
+        return nil
+    }
+}
+
+/// Overlay on a sidebar row while another tab is held over its middle band,
+/// previewing the left/right Split View pair created on release.
+struct MergeHint: View {
+    @ObservedObject var browser: Browser
+    let tab: Tab
+    @ObservedObject private var merge = SplitMergeState.shared
+
+    private var shown: SplitMergeState.Shown? {
+        guard let shown = merge.shown, shown.targetID == tab.id,
+              shown.browserID == ObjectIdentifier(browser)
+        else { return nil }
+        return shown
+    }
+
+    var body: some View {
+        GeometryReader { geo in
+            if let shown, let source = browser.tabs.first(where: { $0.id == shown.sourceID }) {
+                let halfW = max(1, geo.size.width / 2)
+                let shape = RoundedRectangle(cornerRadius: 9, style: .continuous)
+                ZStack(alignment: .topLeading) {
+                    HalfLabel(tab: tab, emphasized: false)
+                        .frame(width: halfW, height: geo.size.height)
+                        .offset(x: shown.onLeft ? halfW : 0)
+                    HalfLabel(tab: source, emphasized: true)
+                        .frame(width: halfW, height: geo.size.height)
+                        .background(shape.fill(Palette.ink.opacity(0.08)))
+                        .offset(x: shown.onLeft ? 0 : halfW)
+                }
+                .frame(width: geo.size.width, height: geo.size.height, alignment: .topLeading)
+                .background(shape.fill(Palette.ground))
+                .overlay(shape.strokeBorder(Palette.accent.opacity(0.45), lineWidth: 1))
+                .animation(Motion.quick, value: shown.onLeft)
+            }
+        }
+        .allowsHitTesting(false)
+        .accessibilityHidden(true)
+    }
+
+    private struct HalfLabel: View {
+        @ObservedObject var tab: Tab
+        let emphasized: Bool
+
+        var body: some View {
+            HStack(spacing: 6) {
+                Mark(icon: tab.icon, letter: tab.monogram, size: 13, dim: tab.asleep)
+                Text(tab.label.isEmpty ? "New Tab" : tab.label)
+                    .font(.system(size: 11.5, weight: emphasized ? .medium : .regular))
+                    .foregroundStyle(emphasized ? Palette.ink : Palette.muted)
+                    .lineLimit(1)
+                    .truncationMode(.tail)
+                Spacer(minLength: 0)
+            }
+            .padding(.horizontal, 7)
+        }
     }
 }
 

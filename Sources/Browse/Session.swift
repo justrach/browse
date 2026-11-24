@@ -23,6 +23,8 @@ enum Session {
         /// Absent from sessions written before there was split view.
         var split: [Int]? = nil
         var share: Double? = nil
+        /// Sync Scrolling on for the split pair; absent from older session files.
+        var sync: Bool? = nil
     }
 
     /// The first space's is the session there always was; each other space

@@ -87,7 +87,9 @@ struct Fold: View {
     @State private var pointer = Pointer()
 
     /// How near the edge the pointer has to be.
-    private static let edge: CGFloat = 6
+    static let edge: CGFloat = 6
+    static let hiddenEdge: CGFloat = 10
+    static let fullScreenCorner: CGFloat = 28
     /// How far past the window's left edge the pointer still counts as on it.
     private static let overshoot: CGFloat = 48
     /// The grace before the column goes back in.

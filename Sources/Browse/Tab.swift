@@ -27,7 +27,7 @@ enum Web {
     /// opened by a link inherits its opener's configuration, handlers
     /// included, and registering a name twice is a hard crash.
     @MainActor static func release(_ controller: WKUserContentController) {
-        for name in [ScrollRelay.name, VeilRelay.name, FormRelay.name, ImageRelay.name,
+        for name in [ScrollRelay.name, SplitScrollSyncRelay.name, VeilRelay.name, FormRelay.name, ImageRelay.name,
                      StoreRelay.name, PasskeyRelay.name, MiddleRelay.name, SelectionRelay.name] {
             controller.removeScriptMessageHandler(forName: name, contentWorld: world)
             controller.removeScriptMessageHandler(forName: name, contentWorld: .page)
@@ -423,6 +423,12 @@ final class Tab: ObservableObject, Identifiable {
     /// The middle button was let go over a link. The browser opens it in a
     /// tab of its own beside this one, without leaving the page you are on.
     var onMiddleClick: ((Tab, URL) -> Void)?
+    /// Scroll delta callback used when Split View Sync Scrolling is enabled.
+    var onScrollBy: ((Tab, Double) -> Void)?
+    private var lastSplitScrollY: Double?
+    var syncsSplitScroll = false
+    /// Hover/press suppression check under folded sidebar or modal cover.
+    var isUnderCover: ((PageView, NSPoint, Bool) -> Bool)?
     /// Sent where this tab's view can't go: from an extension's page to the
     /// web or another extension, or from the web to an extension's page.
     /// WebKit keeps each kind of view to its own pages, so the tab has to be
@@ -433,6 +439,7 @@ final class Tab: ObservableObject, Identifiable {
     @Published var storePlaced: String?
 
     private let relay = ScrollRelay()
+    private let splitScrollRelay = SplitScrollSyncRelay()
     private let veils_ = VeilRelay()
     private let forms = FormRelay()
     private let images = ImageRelay()
@@ -558,6 +565,9 @@ final class Tab: ObservableObject, Identifiable {
             guard let self else { return }
             self.onAskSelection?(self, text)
         }
+        web.isUnderCover = { [weak self] view, point, press in
+            self?.isUnderCover?(view, point, press) ?? false
+        }
         web.holdForFirstFrame()
         // Pages follow the appearance of the window they are drawn in, and the
         // window follows Settings › Appearance — so a site that honours
@@ -577,6 +587,8 @@ final class Tab: ObservableObject, Identifiable {
         let controller = web.configuration.userContentController
         Web.release(controller)
         controller.add(relay, contentWorld: Web.world, name: ScrollRelay.name)
+        splitScrollRelay.tab = self
+        controller.add(splitScrollRelay, contentWorld: Web.world, name: SplitScrollSyncRelay.name)
         controller.add(veils_, contentWorld: Web.world, name: VeilRelay.name)
         controller.add(images, contentWorld: Web.world, name: ImageRelay.name)
         controller.add(shop, contentWorld: Web.world, name: StoreRelay.name)
@@ -729,6 +741,16 @@ final class Tab: ObservableObject, Identifiable {
         if AutoScroll.on {
             controller.addUserScript(
                 WKUserScript(source: AutoScroll.script, injectionTime: .atDocumentEnd, forMainFrameOnly: true, in: Web.world)
+            )
+        }
+        if VideoKeys.on {
+            controller.addUserScript(
+                WKUserScript(source: VideoKeys.script, injectionTime: .atDocumentStart, forMainFrameOnly: false, in: Web.world)
+            )
+        }
+        if syncsSplitScroll {
+            controller.addUserScript(
+                WKUserScript(source: SplitScrollSyncRelay.script, injectionTime: .atDocumentEnd, forMainFrameOnly: true, in: Web.world)
             )
         }
         // A bench tab keeps every request it made, not WebKit's first 250,
@@ -1010,6 +1032,7 @@ final class Tab: ObservableObject, Identifiable {
         pending = url
         stale = false
         pull = nil
+        Stuck.watch(built)
         discard()
     }
 
@@ -1300,7 +1323,10 @@ final class Tab: ObservableObject, Identifiable {
     /// Called when the tab is thrown away. Without it the view keeps running
     /// whatever the page left behind — timers, video, sockets.
     func close() {
+        if let built { Stuck.watch(built) }
         onZoom = nil
+        onScrollBy = nil
+        isUnderCover = nil
         onLink = nil
         onPick = nil
         onPickEnd = nil
@@ -1308,6 +1334,22 @@ final class Tab: ObservableObject, Identifiable {
         onField = nil
         onCredentials = nil
         discard()
+    }
+
+    func splitScrolled(to y: Double, first: Bool, echo: Bool) {
+        let was = lastSplitScrollY
+        lastSplitScrollY = y
+        if !first, !echo, let was, y != was {
+            onScrollBy?(self, y - was)
+        }
+    }
+
+    func setSplitScrollSync(_ on: Bool) {
+        guard syncsSplitScroll != on else { return }
+        syncsSplitScroll = on
+        if !on { lastSplitScrollY = nil }
+        arm(hiding: veils)
+        built?.evaluateInSearch(on ? SplitScrollSyncRelay.script : SplitScrollSyncRelay.off)
     }
 
     /// The view and everything listening to it, gone — timers, video,
@@ -1601,10 +1643,34 @@ final class PageView: WKWebView {
     /// Told the moment the page is reached for — a click, a scroll — so the
     /// picture of a tab waking up never stands between you and the page.
     var onTouch: (() -> Void)?
+    var isUnderCover: ((PageView, NSPoint, Bool) -> Bool)?
+    private var covered = false
+
+    private func underCover(_ event: NSEvent, press: Bool = false) -> Bool {
+        guard let window, event.window == nil || event.window === window,
+              isUnderCover?(self, event.locationInWindow, press) == true
+        else {
+            covered = false
+            return false
+        }
+        covered = true
+        return true
+    }
+
+    override func mouseMoved(with event: NSEvent) {
+        if underCover(event) { return }
+        super.mouseMoved(with: event)
+    }
 
     override func mouseDown(with event: NSEvent) {
+        if underCover(event, press: true) { return }
         onTouch?()
         super.mouseDown(with: event)
+    }
+
+    override func rightMouseDown(with event: NSEvent) {
+        if underCover(event, press: true) { return }
+        super.rightMouseDown(with: event)
     }
 
     /// Told when the keys start going to this page — a click, a Tab from
@@ -1624,6 +1690,7 @@ final class PageView: WKWebView {
     /// drivers settled on regardless, so it's what a mouse's own firmware
     /// is tuned to send.
     override func otherMouseDown(with event: NSEvent) {
+        if underCover(event, press: true) { return }
         switch event.buttonNumber {
         case 3 where canGoBack: goBack()
         case 4 where canGoForward: goForward()
@@ -2027,6 +2094,56 @@ final class ScrollRelay: NSObject, WKScriptMessageHandler {
       }, { passive: true });
       window.addEventListener('scrollend', tell, { passive: true });
       tell();
+    })();
+    """
+}
+
+/// Opt-in scroll relay installed only on tabs actively participating in a
+/// Split View with Sync Scrolling enabled (kept completely separate from
+/// `ScrollRelay` so 120 Hz scrolling on normal tabs pays zero overhead).
+final class SplitScrollSyncRelay: NSObject, WKScriptMessageHandler {
+    static let name = "browseSplitScroll"
+    static let off = "window.__browseSplitSync = false;"
+
+    weak var tab: Tab?
+
+    func userContentController(_ controller: WKUserContentController, didReceive message: WKScriptMessage) {
+        guard let body = message.body as? [String: Any],
+              let y = body["y"] as? Double
+        else { return }
+        let first = body["first"] as? Bool ?? false
+        let echo = body["echo"] as? Bool ?? false
+        MainActor.assumeIsolated {
+            tab?.splitScrolled(to: y, first: first, echo: echo)
+        }
+    }
+
+    static let script = """
+    (function () {
+      window.__browseSplitSync = true;
+      if (window.__browseSplitSyncInstalled) {
+        window.__browseSplitSyncReset && window.__browseSplitSyncReset();
+        return;
+      }
+      window.__browseSplitSyncInstalled = true;
+      var waiting = false;
+      function tell(first) {
+        if (!window.__browseSplitSync) return;
+        var root = document.documentElement;
+        var y = window.scrollY || (root && root.scrollTop) || 0;
+        var mark = window.__browseSynced;
+        window.__browseSynced = null;
+        var echo = mark != null && Math.abs(y - mark) < 1;
+        window.webkit.messageHandlers.\(name).postMessage({ y: y, first: !!first, echo: echo });
+      }
+      window.__browseSplitSyncReset = function () { tell(true); };
+      window.addEventListener('scroll', function () {
+        if (!window.__browseSplitSync || waiting) return;
+        waiting = true;
+        requestAnimationFrame(function () { waiting = false; tell(false); });
+      }, { passive: true });
+      window.addEventListener('pageshow', function (e) { if (e.persisted) tell(true); });
+      tell(true);
     })();
     """
 }

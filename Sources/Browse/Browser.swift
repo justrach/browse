@@ -102,7 +102,12 @@ final class Browser: NSObject, ObservableObject {
     /// Two tabs kept side by side (Split.swift). Shown whenever either is
     /// the tab in front.
     @Published var split: Split? {
-        didSet { if split != oldValue { rememberSession() } }
+        didSet {
+            if split != oldValue {
+                rememberSession()
+                applySyncScroll(previous: oldValue)
+            }
+        }
     }
     /// A tab carried out of the sidebar over the page, where it is in the
     /// window (SplitDropZone lights the half it's over).
@@ -509,7 +514,35 @@ final class Browser: NSObject, ObservableObject {
     /// ⌘S: the column folded away, and slid out over the page for a look
     /// while it is (see Fold.swift).
     @Published var folded = false
-    @Published var peeking = false
+    @Published var peeking = false {
+        didSet {
+            if oldValue, !peeking {
+                columnGoneAt = ProcessInfo.processInfo.systemUptime + Motion.panelSlideDuration
+            }
+        }
+    }
+    var columnGoneAt: TimeInterval = 0
+
+    func covers(_ page: NSView, at point: NSPoint, press: Bool = false) -> Bool {
+        guard let window = Links.window ?? NSApp.windows.first(where: { $0.contentView != nil && !($0 is NSPanel) }),
+              page.window === window,
+              let size = window.contentView?.bounds.size
+        else { return false }
+        if peekTab != nil, peekTab?.built !== page { return true }
+        if editing || hasModalOverlay { return true }
+        guard folded, active?.immersed != true else { return false }
+        func lies() -> Bool {
+            if !prefs.sidebar { return point.y >= size.height - Metrics.strip }
+            return point.x <= prefs.sideWidth
+        }
+        if peeking { return lies() }
+        guard !press else { return false }
+        if ProcessInfo.processInfo.systemUptime < columnGoneAt { return lies() }
+        if !prefs.sidebar { return point.y >= size.height - Fold.edge }
+        if window.styleMask.contains(.fullScreen), size.height - point.y < Fold.fullScreenCorner { return false }
+        let zone = prefs.sideHides ? Fold.hiddenEdge : Fold.edge
+        return point.x < zone
+    }
     /// True while this browser window is in macOS Full Screen mode.
     @Published var fullScreen = false
     /// True while the auto-hidden fullscreen top bar (`AsideBar` / `TabBar`)
@@ -1844,7 +1877,7 @@ final class Browser: NSObject, ObservableObject {
     override init() {
         super.init()
         Shield.shared.enabled = prefs.shielded
-        Shield.shared.compile()
+        if prefs.shielded { Shield.shared.compile() }
         Connect.shared.start(for: self)
         if #available(macOS 15.4, *) { Extensions.shared.start(for: self) }
         if prefs.bench {
@@ -2031,7 +2064,7 @@ final class Browser: NSObject, ObservableObject {
             made[at] = tab
         }
         if let pair = saved.split, pair.count == 2, let left = made[pair[0]], let right = made[pair[1]], left !== right {
-            split = Split(left: left.id, right: right.id, fraction: CGFloat(saved.share ?? 0.5))
+            split = Split(left: left.id, right: right.id, fraction: CGFloat(saved.share ?? 0.5), syncsScroll: saved.sync ?? false)
         }
         guard !tabs.isEmpty else {
             adopt(Tab())
@@ -2088,6 +2121,7 @@ final class Browser: NSObject, ObservableObject {
             .sink { [weak self] on in
                 guard let self else { return }
                 Shield.shared.enabled = on
+                if on, Shield.shared.lists.isEmpty { Shield.shared.compile() }
                 Shield.shared.apply(to: tabs.compactMap { $0.built?.configuration.userContentController })
                 announce(on ? "Ads and trackers blocked" : "Blocking off — reload to see the difference")
             }
@@ -2142,6 +2176,17 @@ final class Browser: NSObject, ObservableObject {
                 for tab in tabs + parkedTabs {
                     tab.arm(hiding: curtain.css(on: curtain.host(of: tab.address)))
                     tab.built?.evaluateInSearch(on ? AutoScroll.script : AutoScroll.off)
+                }
+            }
+            .store(in: &bag)
+
+        prefs.$videoKeys
+            .dropFirst()
+            .sink { [weak self] on in
+                guard let self else { return }
+                for tab in tabs + parkedTabs {
+                    tab.arm(hiding: curtain.css(on: curtain.host(of: tab.address)))
+                    tab.built?.evaluateInSearch(on ? VideoKeys.script : VideoKeys.off)
                 }
             }
             .store(in: &bag)
@@ -2260,7 +2305,8 @@ final class Browser: NSObject, ObservableObject {
                 tabs: entries,
                 active: active,
                 split: pair,
-                share: pair == nil ? nil : Double(split?.fraction ?? 0.5)
+                share: pair == nil ? nil : Double(split?.fraction ?? 0.5),
+                sync: (pair != nil && split?.syncsScroll == true) ? true : nil
             )
         )
         ICloudSync.shared.tabsChanged()
@@ -2438,12 +2484,11 @@ final class Browser: NSObject, ObservableObject {
         // looking at before. Only Unpin takes it out of the row.
         if tab.pin != nil {
             tab.rest()
-            // Ordinary tabs first. Falling back to the most recent tab of any
-            // kind meant closing one pin landed you on another pin, and ⌘W
-            // bounced between the two instead of getting you out of them.
+            // Prefer the most recently viewed awake tab (including another pin)
+            // rather than bouncing back onto an unrelated loose tab; since `tab`
+            // just went to sleep above, `others` never bounces back to it.
             let others = tabs.filter { $0.id != tab.id && !$0.asleep }
-            let loose = others.filter { $0.pin == nil }
-            if let back = (loose.isEmpty ? others : loose).max(by: { $0.touched < $1.touched }) {
+            if let back = others.max(by: { $0.touched < $1.touched }) {
                 select(back)
             } else {
                 newTab(immediate: true)
@@ -3062,6 +3107,10 @@ final class Browser: NSObject, ObservableObject {
             select(tab)
         }
 
+        tab.onScrollBy = { [weak self] tab, dy in self?.syncScroll(from: tab, by: dy) }
+        tab.isUnderCover = { [weak self] view, point, press in
+            self?.covers(view, at: point, press: press) ?? false
+        }
         tab.onZoom = { [weak self] _, value in
             guard let self else { return }
             let percent = Int((value * 100).rounded())
@@ -4067,6 +4116,18 @@ extension Browser: WKNavigationDelegate, WKUIDelegate {
         // its own, and letting this one through would take the page there too.
         if action.navigationType == .linkActivated, action.buttonNumber == 4 {
             decisionHandler(.cancel)
+            return
+        }
+        // Pin links to new tabs, when Settings › Tabs asks for it.
+        if prefs.pinLinksOpenTabs, action.navigationType == .linkActivated,
+           action.targetFrame?.isMainFrame == true,
+           action.modifierFlags.intersection([.shift, .command, .option, .control]).isEmpty,
+           let from = tab(for: webView), from.pin != nil,
+           Browser.leavesPin(url, from: webView.url) {
+            decisionHandler(.cancel)
+            DispatchQueue.main.async { [weak self] in
+                self?.open(url, foreground: true, from: from)
+            }
             return
         }
         // Shift-click, when Settings says so: a peek at the link, over this

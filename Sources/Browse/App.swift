@@ -1240,6 +1240,7 @@ struct ContentView: View {
 
     private func dress(_ window: NSWindow) {
         Links.window = window
+        window.isExcludedFromWindowsMenu = false
         updateNarrowThreshold(for: window.frame.width)
         browser.fullScreen = window.styleMask.contains(.fullScreen)
         // Light or dark is the app's to say (Settings › Appearance); the

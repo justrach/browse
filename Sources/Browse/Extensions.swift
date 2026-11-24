@@ -610,6 +610,7 @@ final class Extensions: NSObject, ObservableObject {
         loadsThisRun.remove(id)
         loadedBefore.remove(id)
         Store.settings.removeObject(forKey: "extensions.newtab.\(id)")
+        ExtensionPopup.forget(id)
         installed.removeAll { $0.id == id }
         save()
         try? FileManager.default.removeItem(at: Extensions.folder(for: id))
