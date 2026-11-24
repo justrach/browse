@@ -180,12 +180,20 @@ final class Browser: NSObject, ObservableObject {
     /// True when the dedicated Agent tab group is folded into its header pill.
     @Published var agentGroupCollapsed = false
 
+    /// User-created collapsible tab groups for the active Space (`TabGroup.swift`).
+    @Published var tabGroups: [TabGroup] = []
+    @Published var editingGroupID: UUID? = nil
+
+    /// Docked right-hand extension side panel state (`ExtensionSidePanel.swift`).
+    @Published var sidePanel: SidePanelContent? = nil
+    @Published var sidePanelShown = false
+
     /// Tabs opened by or assigned to the agentic browser (kept in their own
     /// collapsible group, separate from personal tabs).
     var agentTabs: [Tab] { tabs.filter { $0.isAgentTab } }
 
-    /// Personal unpinned tabs (everything outside Pinned and the Agent group).
-    var personalLooseTabs: [Tab] { tabs.filter { $0.pin == nil && !$0.isAgentTab } }
+    /// Personal unpinned tabs outside any group (shown under Today).
+    var personalLooseTabs: [Tab] { tabs.filter { $0.pin == nil && !$0.isAgentTab && $0.userGroupID == nil } }
 
     /// The settings panel.
     @Published var tuning = false { didSet { if tuning { dismissOverlays(keeping: .settings) } } }
@@ -1648,6 +1656,7 @@ final class Browser: NSObject, ObservableObject {
     func pin(_ tab: Tab) {
         if tab.pin == nil {
             tab.agentGroup = nil
+            tab.userGroupID = nil
             tab.pin = tab.monogram
             // Pinned tabs live at the head of the row, in the order they were
             // pinned, so their letters never move under your hand.
@@ -2038,6 +2047,7 @@ final class Browser: NSObject, ObservableObject {
     func restoreSession() {
         let saved = Session.read(space: spaceID)
         guard !saved.tabs.isEmpty else {
+            tabGroups = []
             // A blank tab costs nothing until it is asked for its page. Its
             // web view — and with it WebKit's helper processes — is built a
             // moment after the window is up, so that the first address typed
@@ -2051,6 +2061,7 @@ final class Browser: NSObject, ObservableObject {
             }
             return
         }
+        tabGroups = saved.groups ?? []
         // Which tab each saved entry became, for the pair.
         var made: [Int: Tab] = [:]
         for (at, entry) in saved.tabs.enumerated() {
@@ -2060,9 +2071,11 @@ final class Browser: NSObject, ObservableObject {
             tab.restore(url: url, title: entry.title, name: entry.name)
             tab.pin = entry.pin
             tab.agentGroup = entry.pin == nil ? entry.agentGroup : nil
+            tab.userGroupID = (entry.pin == nil && entry.agentGroup == nil) ? entry.groupID : nil
             tabs.append(tab)
             made[at] = tab
         }
+        pruneOrphanGroups()
         if let pair = saved.split, pair.count == 2, let left = made[pair[0]], let right = made[pair[1]], left !== right {
             split = Split(left: left.id, right: right.id, fraction: CGFloat(saved.share ?? 0.5), syncsScroll: saved.sync ?? false)
         }
@@ -2285,7 +2298,8 @@ final class Browser: NSObject, ObservableObject {
             written[tab.id] = entries.count
             entries.append(Session.Entry(
                 url: url.absoluteString, title: tab.title, pin: tab.pin, name: tab.name,
-                agentGroup: tab.isAgentTab ? tab.agentGroup : nil
+                agentGroup: tab.isAgentTab ? tab.agentGroup : nil,
+                groupID: (tab.pin == nil && !tab.isAgentTab) ? tab.userGroupID : nil
             ))
         }
         // The tab you were on isn't kept — a private or blank one: the one
@@ -2306,7 +2320,8 @@ final class Browser: NSObject, ObservableObject {
                 active: active,
                 split: pair,
                 share: pair == nil ? nil : Double(split?.fraction ?? 0.5),
-                sync: (pair != nil && split?.syncsScroll == true) ? true : nil
+                sync: (pair != nil && split?.syncsScroll == true) ? true : nil,
+                groups: tabGroups.isEmpty ? nil : tabGroups
             )
         )
         ICloudSync.shared.tabsChanged()
@@ -2422,6 +2437,10 @@ final class Browser: NSObject, ObservableObject {
         if tab.isAgentTab, agentGroupCollapsed {
             agentGroupCollapsed = false
         }
+        if tab.pin == nil, !tab.isAgentTab, let gid = tab.userGroupID,
+           let gIdx = tabGroups.firstIndex(where: { $0.id == gid }), tabGroups[gIdx].collapsed {
+            tabGroups[gIdx].collapsed = false
+        }
         // A peek is over the tab it was opened from; another tab puts it away.
         if peekTab != nil, tab.id != activeID { closePeek() }
         cancelTabEdit()
@@ -2441,6 +2460,7 @@ final class Browser: NSObject, ObservableObject {
         // screen: nothing of it floats off.
         if !showing(inSplit: tab) { leaving() }
         activeID = tab.id
+        sidePanelFollows(tab)
         tab.touch()
         // A tab brought back from last time, or waking from ⌘W while pinned,
         // opens the moment you look at it — and only if there was nothing to
@@ -2515,9 +2535,15 @@ final class Browser: NSObject, ObservableObject {
         }
 
         remember(tab, at: index)
+        SidePanelPages.shared.unbind(tab.id, in: self)
+        let closedGroupID = tab.userGroupID
         submittedSearches[tab.id] = nil
         tab.close()
         tabs.remove(at: index)
+        if let closedGroupID, tabs(inGroup: closedGroupID).isEmpty {
+            tabGroups.removeAll { $0.id == closedGroupID }
+            if editingGroupID == closedGroupID { editingGroupID = nil }
+        }
         if activeID == tab.id {
             // The neighbour on the right, or the last one if there is no
             // right — through select(), same as everywhere else you land on
@@ -2545,11 +2571,11 @@ final class Browser: NSObject, ObservableObject {
     /// doesn't land on a pinned tile and wake its page on the way. Tabs in the
     /// Agent group have their own Clear button. ⌘⇧T brings them back.
     func clearLoose() {
-        guard tabs.contains(where: { $0.pin == nil && !$0.isAgentTab && !$0.bench }) else { return }
+        guard tabs.contains(where: { $0.pin == nil && !$0.isAgentTab && $0.userGroupID == nil && !$0.bench }) else { return }
         // newTab(immediate: true) may bring an empty tab already open to the front rather
         // than make one; whichever it lands on stays.
         newTab(immediate: true)
-        let going = tabs.filter { $0.pin == nil && !$0.isAgentTab && !$0.bench && $0.id != activeID }
+        let going = tabs.filter { $0.pin == nil && !$0.isAgentTab && $0.userGroupID == nil && !$0.bench && $0.id != activeID }
         for tab in going { close(tab) }
         guard !going.isEmpty else { return }
         announce(going.count == 1 ? "Closed one tab — ⌘⇧T brings it back" : "Closed \(going.count) tabs — ⌘⇧T brings them back")
@@ -2571,6 +2597,7 @@ final class Browser: NSObject, ObservableObject {
     func moveToAgentGroup(_ tab: Tab) {
         guard !tab.isAgentTab else { return }
         if tab.pin != nil { tab.pin = nil }
+        tab.userGroupID = nil
         tab.agentGroup = "Agent"
         agentGroupCollapsed = false
         let target = pinnedCount + agentTabs.count - 1
@@ -2677,12 +2704,20 @@ final class Browser: NSObject, ObservableObject {
         }
         let group = agentGroup ?? source?.agentGroup
         tab.agentGroup = group
+        let inheritedGroup = (group == nil && source?.pin == nil) ? source?.userGroupID : nil
+        tab.userGroupID = inheritedGroup
         prepare(tab)
         let index: Int
         if group != nil {
             if foreground { agentGroupCollapsed = false }
             let lastAgent = tabs.lastIndex(where: { $0.isAgentTab })
             index = lastAgent.map { $0 + 1 } ?? pinnedCount
+        } else if let inheritedGroup {
+            if foreground, let gi = tabGroups.firstIndex(where: { $0.id == inheritedGroup }) {
+                tabGroups[gi].collapsed = false
+            }
+            let lastMember = tabs.lastIndex(where: { $0.userGroupID == inheritedGroup })
+            index = lastMember.map { $0 + 1 } ?? placeForNew()
         } else {
             index = atEnd ? tabs.count : placeForNew()
         }
@@ -2724,6 +2759,7 @@ final class Browser: NSObject, ObservableObject {
         fresh.pin = tab.pin
         fresh.name = tab.name
         fresh.agentGroup = tab.agentGroup
+        fresh.userGroupID = (tab.pin == nil && tab.agentGroup == nil) ? tab.userGroupID : nil
         prepare(fresh)
         let wasActive = activeID == tab.id
         tabs[index] = fresh
@@ -2915,10 +2951,11 @@ final class Browser: NSObject, ObservableObject {
             tab.restore(url: url, title: entry.title, name: entry.name)
             tab.pin = entry.pin
             tab.agentGroup = entry.pin == nil ? entry.agentGroup : nil
+            tab.userGroupID = (entry.pin == nil && entry.agentGroup == nil) ? entry.groupID : nil
             row.append(tab)
         }
         let active = row.indices.contains(saved.active) ? row[saved.active].id : row.first?.id
-        return Parked(tabs: row, active: active)
+        return Parked(tabs: row, active: active, groups: saved.groups ?? [])
     }
 
     /// Another space's row put on screen in place of this one (see

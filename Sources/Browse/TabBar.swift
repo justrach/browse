@@ -66,9 +66,18 @@ struct TabBar: View {
                                         let visibleTabs = displayedTabs
                                         let hasAgent = !browser.agentTabs.isEmpty
                                         let firstAgentID = browser.agentTabs.first?.id
+                                        let firstGroupTabs = firstTabPerExpandedGroup(in: visibleTabs)
+                                        let collapsedGroups = browser.tabGroups.filter { $0.collapsed && !browser.tabs(inGroup: $0.id).isEmpty }
                                         ForEach(Array(visibleTabs.enumerated()), id: \.element.id) { index, tab in
                                             if hasAgent && tab.id == firstAgentID {
                                                 agentGroupChip
+                                            }
+                                            if let expandedGroup = firstGroupTabs[tab.id] {
+                                                UserGroupChip(
+                                                    browser: browser,
+                                                    group: expandedGroup,
+                                                    count: browser.tabs(inGroup: expandedGroup.id).count
+                                                )
                                             }
                                             // A pinned square moves among pinned squares, a title
                                             // among titles: each has its own stride.
@@ -87,6 +96,13 @@ struct TabBar: View {
                                                 if tab.isAgentTab {
                                                     Capsule()
                                                         .fill(Palette.accent.opacity(0.55))
+                                                        .frame(height: 2)
+                                                        .padding(.horizontal, 10)
+                                                        .padding(.bottom, 1)
+                                                        .allowsHitTesting(false)
+                                                } else if let group = browser.group(for: tab) {
+                                                    Capsule()
+                                                        .fill(Spaces.colours[(group.colour ?? 0) % Spaces.colours.count].opacity(0.65))
                                                         .frame(height: 2)
                                                         .padding(.horizontal, 10)
                                                         .padding(.bottom, 1)
@@ -111,6 +127,13 @@ struct TabBar: View {
                                         }
                                         if hasAgent && browser.agentGroupCollapsed {
                                             agentGroupChip
+                                        }
+                                        ForEach(collapsedGroups) { group in
+                                            UserGroupChip(
+                                                browser: browser,
+                                                group: group,
+                                                count: browser.tabs(inGroup: group.id).count
+                                            )
                                         }
                                     }
                                     .frame(height: Metrics.strip)
@@ -284,8 +307,31 @@ struct TabBar: View {
     }
 
     private var displayedTabs: [Tab] {
-        guard browser.agentGroupCollapsed else { return browser.tabs }
-        return browser.tabs.filter { !$0.isAgentTab }
+        let collapsedUserIDs = Set(browser.tabGroups.filter(\.collapsed).map(\.id))
+        return browser.tabs.filter { tab in
+            if browser.agentGroupCollapsed && tab.isAgentTab { return false }
+            if tab.pin == nil && !tab.isAgentTab, let gid = tab.userGroupID, collapsedUserIDs.contains(gid) { return false }
+            return true
+        }
+    }
+
+    private func firstTabPerExpandedGroup(in visible: [Tab]) -> [Tab.ID: TabGroup] {
+        var out: [Tab.ID: TabGroup] = [:]
+        var seen: Set<UUID> = []
+        for tab in visible where tab.pin == nil && !tab.isAgentTab {
+            guard let gid = tab.userGroupID, !seen.contains(gid),
+                  let group = browser.tabGroups.first(where: { $0.id == gid && !$0.collapsed })
+            else { continue }
+            seen.insert(gid)
+            out[tab.id] = group
+        }
+        return out
+    }
+
+    private var userGroupChipWidth: CGFloat {
+        let count = browser.tabGroups.filter { !browser.tabs(inGroup: $0.id).isEmpty }.count
+        guard count > 0 else { return 0 }
+        return CGFloat(count) * (UserGroupChip.chipWidth + Metrics.tabGap)
     }
 
     private func moveVisibleTab(_ tab: Tab, to visibleIndex: Int, in visibleTabs: [Tab]) {
@@ -347,7 +393,7 @@ struct TabBar: View {
         let pinned = CGFloat(browser.pinnedCount)
         let loose = CGFloat(shown.count) - pinned
         let agentChip: CGFloat = browser.agentTabs.isEmpty ? 0 : (TabBar.agentChipWidth + Metrics.tabGap)
-        var total = pinned * Metrics.pinWidth + loose * each + agentChip
+        var total = pinned * Metrics.pinWidth + loose * each + agentChip + userGroupChipWidth
             + CGFloat(max(0, shown.count - 1)) * Metrics.tabGap
         if let id = browser.editingTab, let tab = shown.first(where: { $0.id == id }) {
             total += min(340, strip - Metrics.lights - 12) - (tab.pin != nil ? Metrics.pinWidth : each)
@@ -376,7 +422,7 @@ struct TabBar: View {
     /// mark and its air. Past that, the run scrolls. The pinned squares take
     /// their room off the top.
     private func width(in strip: CGFloat) -> CGFloat {
-        let extraChip: CGFloat = browser.agentTabs.isEmpty ? 0 : (TabBar.agentChipWidth + Metrics.tabGap)
+        let extraChip: CGFloat = (browser.agentTabs.isEmpty ? 0 : (TabBar.agentChipWidth + Metrics.tabGap)) + userGroupChipWidth
         return width(in: strip - extraChip, pinned: browser.pinnedCount, count: displayedTabs.count)
     }
 
@@ -1182,6 +1228,24 @@ struct TabMenu: View {
                 Button("Move to My Tabs") { browser.moveOutOfAgentGroup(tab) }
             } else if !tab.isBlank {
                 Button("Move to Agent Group") { browser.moveToAgentGroup(tab) }
+                Button("Add to New Group") { browser.createTabGroup(from: tab) }
+                if !browser.tabGroups.isEmpty {
+                    Menu("Add to Group") {
+                        ForEach(browser.tabGroups) { group in
+                            Button {
+                                browser.addTab(tab, toGroup: group.id)
+                            } label: {
+                                HStack {
+                                    Text(group.name)
+                                    if tab.userGroupID == group.id { Image(systemName: "checkmark") }
+                                }
+                            }
+                        }
+                    }
+                }
+                if tab.userGroupID != nil {
+                    Button("Remove from Group") { browser.removeTabFromGroup(tab) }
+                }
             }
         } else {
             Button("Change Letter") { browser.editLetter(tab) }

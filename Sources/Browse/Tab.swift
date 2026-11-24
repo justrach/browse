@@ -488,6 +488,9 @@ final class Tab: ObservableObject, Identifiable {
     /// promotes it out of the Agent group into the pinned grid).
     var isAgentTab: Bool { agentGroup != nil && pin == nil }
 
+    /// Optional user-created Tab Group ID (mutually exclusive with `pin` and `agentGroup`).
+    @Published var userGroupID: UUID? = nil
+
     /// When you last looked at it. The summon lists pages by this, because
     /// what you were just reading is what you are most likely to want back.
     private(set) var touched = Date()
@@ -1372,6 +1375,7 @@ final class Tab: ObservableObject, Identifiable {
         web.onSearch = nil
         web.canAskSelection = nil
         web.onAskSelection = nil
+        web.stopWheelGlide()
         web.stopLoading()
         web.navigationDelegate = nil
         web.uiDelegate = nil
@@ -1541,6 +1545,16 @@ final class PageView: WKWebView {
         } else {
             endLiveResize()
         }
+    }
+
+    private lazy var wheelGlide = WheelGlide(self)
+
+    func glide(_ event: NSEvent) {
+        super.scrollWheel(with: event)
+    }
+
+    func stopWheelGlide() {
+        wheelGlide.stop()
     }
 
     func endLiveResize() {
@@ -1893,6 +1907,7 @@ final class PageView: WKWebView {
 
     override func scrollWheel(with event: NSEvent) {
         onTouch?()
+        if wheelGlide.take(event) { return }
         // The page gets every event first and scrolls as it always did. The
         // swipe is only read, never taken.
         super.scrollWheel(with: event)

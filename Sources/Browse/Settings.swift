@@ -299,6 +299,7 @@ struct SettingsPanel: View {
         SearchEntry(.general, "Handoff", "Continue the active page on iPhone, iPad, or another Mac", keywords: "continuity apple account iphone ipad"),
         SearchEntry(.general, "Show where links go", "Status preview bar at the bottom of the page when hovering links", keywords: "status bar url hover bottom"),
         SearchEntry(.general, "Scroll with the middle button", "Middle-click autoscroll", keywords: "mouse wheel autoscroll windows"),
+        SearchEntry(.general, "Smooth scrolling with a mouse wheel", "Eases notched mouse-wheel scroll steps over display frames", keywords: "smooth scroll mouse wheel glide"),
         SearchEntry(.general, "Pages at 120 Hz", "Smooth 120 FPS ProMotion scrolling and animations", keywords: "120fps promotion refresh rate battery 60hz smooth"),
         SearchEntry(.general, "Flick the floating video to a corner", "Two-finger flick gesture for picture-in-picture video", keywords: "pip picture in picture gesture"),
         SearchEntry(.general, "Float the video when you switch tabs", "Automatic picture-in-picture when leaving a tab", keywords: "pip youtube video float"),
@@ -315,7 +316,9 @@ struct SettingsPanel: View {
         SearchEntry(.tabs, "Tabs in a sidebar", "Vertical sidebar on the left instead of top tab strip", keywords: "arc dia vertical sidebar layout"),
         SearchEntry(.tabs, "Hide the sidebar until the pointer reaches the edge", "Auto-hide sidebar for full-width reading", keywords: "fold autohide edge peek"),
         SearchEntry(.tabs, "Colour the sidebar like the page", "Tint the frosted sidebar glass with the active page hue", keywords: "color tint glass theme ambient"),
+        SearchEntry(.tabs, "Tint the title bar like the page", "Match the top title strip colour to the active page in top-tab mode", keywords: "color tint title bar top strip chrome"),
         SearchEntry(.tabs, "Compact top address bar", "Aside-style unified top bar with URL pill and graff toggle", keywords: "header toolbar url bar aside"),
+        SearchEntry(.tabs, "Always keep address bar visible", "Keep a compact address bar visible above the page in top-tab and folded modes", keywords: "always visible address url toolbar bar"),
         SearchEntry(.tabs, "Tabs show", "Favicons or letters on tabs and pins", keywords: "icons favicons monogram letters glyph"),
         SearchEntry(.tabs, "Show the bookmarks bar", "Bookmarks row above the page", keywords: "favorites bar folders"),
         SearchEntry(.tabs, "Show how far you've read", "Reading progress fill on the active tab", keywords: "scroll progress indicator"),
@@ -608,6 +611,10 @@ struct SettingsPanel: View {
                 Switch(on: $prefs.autoScroll)
             }
             Rule()
+            Line("Smooth scrolling with a mouse wheel", "Eases notched mouse wheel steps over display frames; trackpads already scroll smoothly") {
+                Switch(on: $prefs.smoothWheel)
+            }
+            Rule()
             Line("Pages at 120 Hz", "Smooth 120 FPS scrolling and animations on ProMotion displays. Turn off to cap pages near 60 Hz for battery life") {
                 Switch(on: $prefs.fastPages)
             }
@@ -669,6 +676,14 @@ struct SettingsPanel: View {
             Rule()
             Line("Compact top address bar", "Aside-style bar with domain | page title, sidebar toggle, passwords, extensions, and top-right Ask pill when tabs are in the sidebar or folded away") {
                 Switch(on: $prefs.compactTopBar)
+            }
+            Rule()
+            Line("Always keep address bar visible", "Shows a compact address bar above the page in classic top-tab mode too, and when the sidebar is folded") {
+                Switch(on: $prefs.alwaysShowAddressBar)
+            }
+            Rule()
+            Line("Tint the title bar like the page", "Matches the top window strip subtly to the active page's colour in top-tab mode") {
+                Switch(on: $prefs.tintedTitleBar)
             }
             Rule()
             Line("Tabs show", "Beside the title, and on a pinned square") {

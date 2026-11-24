@@ -383,33 +383,53 @@ struct ContentView: View {
         browser.prefs.sideTint ? PageTint(browser.activeHue, over: scheme) : nil
     }
 
+    private var topTitleTint: PageTint? {
+        guard !arcFrame, browser.prefs.tintedTitleBar, !browser.fullScreen, browser.active?.immersed != true else {
+            return nil
+        }
+        return PageTint(browser.activeHue, over: scheme)
+    }
+
     private var darkCanvas: Bool {
         browser.fullScreen || (windowTint?.dark ?? (scheme == .dark))
+    }
+
+    @ViewBuilder
+    private var windowBackdrop: some View {
+        if browser.active?.immersed == true || browser.fullScreen {
+            Color.black
+        } else if arcFrame {
+            ZStack {
+                SideGlass(dark: windowTint?.dark)
+                if let tint = windowTint {
+                    tint.wash
+                } else {
+                    Palette.ground.opacity(scheme == .dark ? 0.42 : 0.48)
+                }
+            }
+            .animation(Motion.glide, value: windowTint)
+        } else if let tint = topTitleTint {
+            ZStack(alignment: .top) {
+                Palette.ground
+                tint.wash
+                    .frame(height: band + (barShown ? BookmarksBar.height : 0))
+                    .overlay(alignment: .bottom) {
+                        Rectangle()
+                            .fill(tint.dark ? Color.white.opacity(0.08) : Palette.hairline)
+                            .frame(height: 0.75)
+                    }
+            }
+            .animation(Motion.glide, value: tint)
+        } else {
+            Palette.ground
+        }
     }
 
     /// The window: unified frosted canvas, floating rounded stage card, and
     /// seamless sidebar/top-bar chrome.
     private var window_: some View {
         ZStack(alignment: .topLeading) {
-            // Pure #000000 black in macOS Full Screen (or fullscreen video) so
-            // the slim frame and gutter melt seamlessly into the black menu bar
-            // and physical display bezel; unified frosted glass canvas in
-            // windowed Arc/Dia mode; plain ground in classic top-tab mode.
-            if browser.active?.immersed == true || browser.fullScreen {
-                Color.black
-            } else if arcFrame {
-                ZStack {
-                    SideGlass(dark: windowTint?.dark)
-                    if let tint = windowTint {
-                        tint.wash
-                    } else {
-                        Palette.ground.opacity(scheme == .dark ? 0.42 : 0.48)
-                    }
-                }
-                .animation(Motion.glide, value: windowTint)
-            } else {
-                Palette.ground
-            }
+            windowBackdrop
 
             // One stage, always, bound directly to `chrome` and `agentTrailing`
             // (zero `@State` mirror lag, zero delayed post-slide snap). WebKit
@@ -432,7 +452,16 @@ struct ContentView: View {
 
             if topTabBarShown {
                 TabBar(browser: browser)
+                    .environment(\.colorScheme, topTitleTint.map { $0.dark ? .dark : .light } ?? scheme)
                     .transition(.move(edge: .top).combined(with: .opacity))
+            }
+
+            if embeddedAddressBarShown {
+                EmbeddedAddressBar(browser: browser, tint: topTitleTint)
+                    .padding(.leading, chrome.width)
+                    .padding(.trailing, agentTrailing)
+                    .padding(.top, Metrics.strip)
+                    .transition(.opacity)
             }
 
             if asideBarShown {
@@ -523,6 +552,16 @@ struct ContentView: View {
                     // A tab carried out of the sidebar: the half it would
                     // open on (Split.swift).
                     .overlay { SplitDropZone(browser: browser) }
+                if browser.sidePanelShown, !browser.sidePanelHeld {
+                    SidePanelBeside(
+                        browser: browser,
+                        prefs: browser.prefs,
+                        card: arcFrame,
+                        width: min(browser.prefs.sidePanelWidth, 540),
+                        darkCanvas: darkCanvas
+                    )
+                    .transition(.move(edge: .trailing).combined(with: .opacity))
+                }
                 if consulting && !fullHeightAgent && !floatingAgentDrawer {
                     AgentColumn(browser: browser, agent: browser.agent, prefs: browser.prefs, darkCanvas: darkCanvas)
                         .transition(.move(edge: .trailing).combined(with: .opacity))
@@ -1183,7 +1222,7 @@ struct ContentView: View {
 
     /// True when the compact Aside-style top bar is enabled for the current layout.
     private var asideBarWanted: Bool {
-        browser.prefs.compactTopBar
+        (browser.prefs.compactTopBar || browser.prefs.alwaysShowAddressBar)
             && (browser.prefs.sidebar || browser.folded)
             && browser.active?.immersed != true
     }
@@ -1201,6 +1240,11 @@ struct ContentView: View {
             && browser.active?.immersed != true
     }
 
+    /// True when opt-in always-visible address bar shows beneath the top tab strip.
+    private var embeddedAddressBarShown: Bool {
+        topTabBarShown && browser.prefs.alwaysShowAddressBar
+    }
+
     /// True in macOS Full Screen when the top bar (`AsideBar` or `TabBar`) has
     /// been freed up and replaced by the slim top-edge hint gutter.
     private var fullScreenTopHidden: Bool {
@@ -1215,7 +1259,10 @@ struct ContentView: View {
         guard browser.active?.immersed != true else { return 0 }
         if asideBarShown { return Metrics.strip }
         if fullScreenTopHidden { return Fold.fullScreenGutter }
-        return topTabBarShown ? Metrics.strip : 0
+        if topTabBarShown {
+            return Metrics.strip + (embeddedAddressBarShown ? EmbeddedAddressBar.height : 0)
+        }
+        return 0
     }
 
     /// Put the resting circles in the title bar, exactly over the buttons.

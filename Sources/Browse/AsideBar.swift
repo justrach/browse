@@ -633,6 +633,52 @@ private struct AsideDownloadsButton: View {
     }
 }
 
+struct EmbeddedAddressBar: View {
+    @ObservedObject var browser: Browser
+    let tint: PageTint?
+    @Environment(\.colorScheme) private var scheme
+    @State private var addressHover = false
+
+    static let height: CGFloat = 34
+
+    var body: some View {
+        let isDark = tint?.dark ?? (scheme == .dark)
+        HStack(spacing: 8) {
+            if let tab = browser.active {
+                AddressSummaryButton(tab: tab, browser: browser, isDark: isDark, hovering: $addressHover)
+            } else {
+                Button { browser.edit() } label: {
+                    Text("Search or enter website name")
+                        .font(.system(size: 12.5))
+                        .foregroundStyle(Palette.muted)
+                        .lineLimit(1)
+                        .padding(.horizontal, 8)
+                        .padding(.vertical, 4)
+                }
+                .buttonStyle(.plain)
+            }
+            Spacer(minLength: 0)
+        }
+        .padding(.horizontal, 12)
+        .frame(height: Self.height)
+        .frame(maxWidth: .infinity)
+        .background {
+            if let tint {
+                tint.wash
+            } else {
+                Palette.ground
+            }
+        }
+        .overlay(alignment: .bottom) {
+            Rectangle()
+                .fill(isDark ? Color.white.opacity(0.08) : Palette.hairline)
+                .frame(height: 0.75)
+        }
+        .environment(\.colorScheme, tint.map { $0.dark ? .dark : .light } ?? scheme)
+        .animation(Motion.glide, value: tint)
+    }
+}
+
 /// Folded-sidebar indicator for background tabs actively playing audio.
 private struct AsideBackgroundAudioButton: View {
     @ObservedObject var browser: Browser
