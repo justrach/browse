@@ -1005,11 +1005,15 @@ struct ContentView: View {
     /// A page asking to see or hear you. Named by the site, in its own words,
     /// with the answer remembered so it is asked once and not every call.
     private func captureAsking(_ ask: Browser.CaptureAsk) -> some View {
-        HStack(spacing: 12) {
-            Image(systemName: ask.wants == "microphone" ? "mic" : "video")
+        let icon = ask.wants == "notifications" ? "bell" : (ask.wants == "microphone" ? "mic" : "video")
+        let message = ask.wants == "notifications"
+            ? "\(ask.host) wants to send notifications"
+            : "\(ask.host) wants to use your \(ask.wants)"
+        return HStack(spacing: 12) {
+            Image(systemName: icon)
                 .font(.system(size: 11, weight: .medium))
                 .foregroundStyle(Palette.muted)
-            Text("\(ask.host) wants to use your \(ask.wants)")
+            Text(message)
                 .font(.system(size: 12.5))
                 .foregroundStyle(Palette.ink)
             Button { browser.allowCapture() } label: {

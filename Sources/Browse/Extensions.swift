@@ -156,6 +156,9 @@ final class Extensions: NSObject, ObservableObject {
                         try? await Task.sleep(for: .milliseconds(400))
                     }
                 }
+                if let problem = ExtensionProxy.sync(owner: self) {
+                    noteError(problem.issue, for: problem.id)
+                }
                 markStarted()
                 checkForUpdates()
             }
@@ -340,6 +343,9 @@ final class Extensions: NSObject, ObservableObject {
             if contexts[item.id] == nil, loadsThisRun.contains(item.id) { loadedBefore.insert(item.id) }
             loadsThisRun.insert(item.id)
             contexts[item.id] = context
+            if started, let problem = ExtensionProxy.sync(owner: self) {
+                noteError(problem.issue, for: problem.id)
+            }
             actionsChanged += 1
             return true
         } catch {
@@ -614,6 +620,9 @@ final class Extensions: NSObject, ObservableObject {
         ExtensionPopup.forget(id)
         installed.removeAll { $0.id == id }
         save()
+        if let problem = ExtensionProxy.sync(owner: self) {
+            noteError(problem.issue, for: problem.id)
+        }
         try? FileManager.default.removeItem(at: Extensions.folder(for: id))
     }
 
@@ -672,6 +681,9 @@ final class Extensions: NSObject, ObservableObject {
             Task { await load(installed[index]) }
         } else {
             unload(id)
+            if let problem = ExtensionProxy.sync(owner: self) {
+                noteError(problem.issue, for: problem.id)
+            }
         }
     }
 

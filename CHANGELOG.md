@@ -6,6 +6,12 @@ All notable changes to **browse** are documented here, newest first.
 
 ## Unreleased
 
+### Added
+
+- **`chrome.proxy` extension support (`ExtensionProxy.swift`, `ExtensionShims.swift`, `Extensions.swift`, `Spaces.swift`, `Tab.swift`)**: Parses `fixed_servers` (`singleProxy`, `proxyForHttp`, `proxyForHttps`, `fallbackProxy`, HTTP/HTTPS/SOCKS5, credentials, `<local>` and wildcard `bypassList` normalization) and `system`/`direct` configs into `Network.ProxyConfiguration` across Space and extension-enabled private `WKWebsiteDataStore` instances, while flagging unsupported modes (`pac_script`, `socks4`) cleanly.
+- **Open-tab Web Notifications (`WebNotifications.swift`, `Tab.swift`, `Browser.swift`, `App.swift`, `Links.swift`)**: Bridges secure-origin `window.Notification` requests and banners to `UNUserNotificationCenter` using per-site prompts synced with **Settings › Privacy** (`PermissionSites`) and click activation back to the originating tab, leaving private tabs and insecure HTTP origins denied.
+- **Universal macOS (`arm64` + `x86_64`) Intel Mac packaging (`build.sh`, `.github/workflows/release.yml`)**: Builds fat `arm64` + `x86_64` binaries (`lipo`) with universal `.dSYM` extraction automatically for `dmg`/`ship` releases and `SEARCH_UNIVERSAL=1` builds.
+
 ## 1.11.0 — 24 November 2026
 
 ### Added

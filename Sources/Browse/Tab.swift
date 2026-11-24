@@ -28,7 +28,7 @@ enum Web {
     /// included, and registering a name twice is a hard crash.
     @MainActor static func release(_ controller: WKUserContentController) {
         for name in [ScrollRelay.name, SplitScrollSyncRelay.name, VeilRelay.name, FormRelay.name, ImageRelay.name,
-                     StoreRelay.name, PasskeyRelay.name, MiddleRelay.name, SelectionRelay.name] {
+                     StoreRelay.name, PasskeyRelay.name, MiddleRelay.name, SelectionRelay.name, WebNotifications.name] {
             controller.removeScriptMessageHandler(forName: name, contentWorld: world)
             controller.removeScriptMessageHandler(forName: name, contentWorld: .page)
         }
@@ -79,7 +79,12 @@ enum Web {
         // › Extensions says they may. The controller has to be there when the
         // view is made; it can't be added after.
         if #available(macOS 15.4, *), !shy || Store.settings.bool(forKey: "extensions.private") {
-            MainActor.assumeIsolated { Extensions.attach(config) }
+            MainActor.assumeIsolated {
+                Extensions.attach(config)
+                if shy, !ExtensionProxy.current.isEmpty {
+                    ExtensionProxy.apply(to: [config.websiteDataStore])
+                }
+            }
         }
         // Left alone, WKWebView says only "AppleWebKit … (KHTML, like Gecko)" —
         // no browser, no version. Google reads that as something it doesn't
@@ -423,6 +428,8 @@ final class Tab: ObservableObject, Identifiable {
     /// WebKit keeps each kind of view to its own pages, so the tab has to be
     /// swapped for one built for the address (see Browser.replace).
     var onCross: ((Tab, URL) -> Void)?
+    /// Prompt callback for `window.Notification.requestPermission()`.
+    var onNotificationPermission: ((String, String, @escaping (Bool) -> Void) -> Void)?
     /// The extension whose store page has its own "Add to Search" button in
     /// place — so the bar at the bottom of the window doesn't offer it twice.
     @Published var storePlaced: String?
@@ -437,6 +444,7 @@ final class Tab: ObservableObject, Identifiable {
     private let passkeyRelay = PasskeyRelay()
     private let hovered = HoveredLink()
     private let selectionRelay = SelectionRelay()
+    private let notifications = WebNotificationRelay()
     private let ears = AudioWatch()
 
     /// A tab that keeps nothing: its own cookies, no history, no place in the
@@ -590,6 +598,7 @@ final class Tab: ObservableObject, Identifiable {
         controller.add(hovered, contentWorld: .defaultClient, name: HoveredLink.name)
         controller.add(middles, contentWorld: Web.world, name: MiddleRelay.name)
         controller.add(selectionRelay, contentWorld: Web.world, name: SelectionRelay.name)
+        controller.add(notifications, contentWorld: Web.world, name: WebNotifications.name)
         Shield.shared.protect(controller)
         built = web
         // A tab muted before it went to sleep wakes muted.
@@ -674,6 +683,10 @@ final class Tab: ObservableObject, Identifiable {
         shop.tab = self
         middles.tab = self
         selectionRelay.tab = self
+        notifications.tab = self
+        notifications.onRequest = { [weak self] host, origin, done in
+            self?.onNotificationPermission?(host, origin, done)
+        }
         ears.watch(web) { [weak self] on in self?.noisy = on }
         return web
     }
@@ -804,6 +817,12 @@ final class Tab: ObservableObject, Identifiable {
         }
         controller.addUserScript(
             WKUserScript(source: PasskeyRelay.bridge, injectionTime: .atDocumentStart, forMainFrameOnly: false, in: Web.world)
+        )
+        controller.addUserScript(
+            WKUserScript(source: WebNotifications.page, injectionTime: .atDocumentStart, forMainFrameOnly: true, in: .page)
+        )
+        controller.addUserScript(
+            WKUserScript(source: WebNotifications.bridge, injectionTime: .atDocumentStart, forMainFrameOnly: true, in: Web.world)
         )
         guard !css.isEmpty else { return }
         controller.addUserScript(
@@ -1325,6 +1344,7 @@ final class Tab: ObservableObject, Identifiable {
         onSignIn = nil
         onField = nil
         onCredentials = nil
+        onNotificationPermission = nil
         discard()
     }
 
@@ -1351,6 +1371,8 @@ final class Tab: ObservableObject, Identifiable {
     private func discard() {
         watch = []
         ears.stop()
+        notifications.tab = nil
+        notifications.onRequest = nil
         guard let web = built else { return }
         built = nil
         Passkeys.shared.forget(web)

@@ -1085,9 +1085,18 @@ enum ExtensionShims {
             mine[name] = nil
         default:
             let value = mine[name] ?? defaultSetting(name, owner: owner)
-            return ["value": value ?? NSNull(), "levelOfControl": mine[name] != nil ? "controlled_by_this_extension" : "controllable_by_this_extension"]
+            let controlledByOther = name == "proxy.settings"
+                && ExtensionProxy.activeExtensionID != nil
+                && ExtensionProxy.activeExtensionID != id
+            let level = controlledByOther
+                ? "controlled_by_other_extensions"
+                : (mine[name] != nil ? "controlled_by_this_extension" : "controllable_by_this_extension")
+            return ["value": value ?? NSNull(), "levelOfControl": level]
         }
         Extensions.setSettings(mine, for: id)
+        if name == "proxy.settings", let problem = ExtensionProxy.sync(owner: owner) {
+            owner.noteError(problem.issue, for: problem.id)
+        }
         owner.objectWillChange.send()
         return nil
     }

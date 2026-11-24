@@ -37,6 +37,7 @@ set -euo pipefail
 cd "$(dirname "$0")"
 CONFIG="${1:-release}"
 STEP="${2:-app}"
+UNIVERSAL="${SEARCH_UNIVERSAL:-$( [ "$STEP" = "dmg" ] || [ "$STEP" = "ship" ] && echo 1 || echo 0 )}"
 NAME="browse"
 SLUG="browse"
 APP="build/$NAME.app"
@@ -101,18 +102,35 @@ else
   # A build number that only ever goes up, so the updater can tell newer
   # builds from older ones without parsing version strings.
   BUILD="$(date +%Y%m%d%H%M)"
+  SWIFT_FLAGS=(-c "$CONFIG")
   if [ "$CONFIG" = "release" ]; then
-    swift build -c release -Xswiftc -Osize -Xlinker -dead_strip
-  else
-    swift build -c "$CONFIG"
+    SWIFT_FLAGS+=(-Xswiftc -Osize -Xlinker -dead_strip)
   fi
-  BINARY=".build/$CONFIG/Browse"
-  MCP_BINARY=".build/$CONFIG/browse-mcp"
 
   rm -rf "$APP"
   mkdir -p "$APP/Contents/MacOS" "$APP/Contents/Resources"
-  cp "$BINARY" "$APP/Contents/MacOS/Browse"
-  if [ -x "$MCP_BINARY" ]; then cp "$MCP_BINARY" "$APP/Contents/MacOS/browse-mcp"; fi
+
+  if [ "$UNIVERSAL" = "1" ]; then
+    ARM_SCRATCH=".build/universal-arm64"
+    X86_SCRATCH=".build/universal-x86_64"
+    swift build "${SWIFT_FLAGS[@]}" --triple arm64-apple-macosx --scratch-path "$ARM_SCRATCH"
+    swift build "${SWIFT_FLAGS[@]}" --triple x86_64-apple-macosx --scratch-path "$X86_SCRATCH"
+    ARM_DIR="$(swift build "${SWIFT_FLAGS[@]}" --triple arm64-apple-macosx --scratch-path "$ARM_SCRATCH" --show-bin-path)"
+    X86_DIR="$(swift build "${SWIFT_FLAGS[@]}" --triple x86_64-apple-macosx --scratch-path "$X86_SCRATCH" --show-bin-path)"
+    lipo -create "$ARM_DIR/Browse" "$X86_DIR/Browse" -output "$APP/Contents/MacOS/Browse"
+    if [ -x "$ARM_DIR/browse-mcp" ] && [ -x "$X86_DIR/browse-mcp" ]; then
+      lipo -create "$ARM_DIR/browse-mcp" "$X86_DIR/browse-mcp" -output "$APP/Contents/MacOS/browse-mcp"
+    fi
+    DSYM_TARGET="$APP/Contents/MacOS/Browse"
+  else
+    swift build "${SWIFT_FLAGS[@]}"
+    BIN_DIR="$(swift build "${SWIFT_FLAGS[@]}" --show-bin-path)"
+    BINARY="$BIN_DIR/Browse"
+    MCP_BINARY="$BIN_DIR/browse-mcp"
+    cp "$BINARY" "$APP/Contents/MacOS/Browse"
+    if [ -x "$MCP_BINARY" ]; then cp "$MCP_BINARY" "$APP/Contents/MacOS/browse-mcp"; fi
+    DSYM_TARGET="$BINARY"
+  fi
   cp LICENSE "$APP/Contents/Resources/"
   cp docs/legal/upstream-mit.txt "$APP/Contents/Resources/LICENSE.MIT"
 
@@ -123,7 +141,7 @@ else
 # (Console, or atos -o "build/browse.app.dSYM/Contents/Resources/DWARF/Browse").
 if [ "$CONFIG" = "release" ]; then
   rm -rf "$APP.dSYM"
-  dsymutil "$BINARY" -o "$APP.dSYM" 2>/dev/null || echo "no dSYM this time" >&2
+  dsymutil "$DSYM_TARGET" -o "$APP.dSYM" 2>/dev/null || echo "no dSYM this time" >&2
   strip "$APP/Contents/MacOS/Browse"
   if [ -f "$APP/Contents/MacOS/browse-mcp" ]; then strip "$APP/Contents/MacOS/browse-mcp"; fi
 fi
