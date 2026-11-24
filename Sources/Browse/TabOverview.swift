@@ -1,73 +1,186 @@
 import SwiftUI
 import AppKit
+import Combine
 
 /// Lightweight in-memory snapshot cache for open tabs, shared between the
-/// `⌘K` Command Switcher sneak-peek pane and the `⇧⌘\` Visual Tab Overview grid.
+/// `⌘K` Command Switcher sneak-peek pane, `⌃Tab` HUD, and `⇧⌘\` Visual Tab Overview grid.
 /// Captures on demand via `Tab.capturePreview` so idle browsing uses zero extra RAM.
 @MainActor
 final class TabPreviewCache: ObservableObject {
     static let shared = TabPreviewCache()
 
-    private final class Entry: NSObject {
-        let url: URL?
-        let image: NSImage
-        let capturedAt: Date
-        init(url: URL?, image: NSImage, capturedAt: Date) {
-            self.url = url
-            self.image = image
-            self.capturedAt = capturedAt
-        }
+    /// Per-tab observable slot so landing a captured thumbnail invalidates
+    /// ONLY that tab's thumbnail view instead of every open card/HUD item.
+    @MainActor
+    final class Slot: ObservableObject {
+        @Published fileprivate(set) var image: NSImage?
+        @Published fileprivate(set) var revision = 0
+        fileprivate var url: URL?
+        fileprivate var capturedAt: Date?
     }
 
-    private let cache: NSCache<NSUUID, Entry> = {
-        let c = NSCache<NSUUID, Entry>()
+    private let cache: NSCache<NSUUID, Slot> = {
+        let c = NSCache<NSUUID, Slot>()
         c.countLimit = 48
         return c
     }()
+    private let slots = NSMapTable<NSUUID, Slot>.strongToWeakObjects()
     private var inFlight: Set<Tab.ID> = []
-    /// Bumped when a newly captured snapshot lands so observing preview cards refresh.
-    @Published private(set) var revision = 0
+    private var pending: [(tab: Tab, width: CGFloat)] = []
+    private static let maxConcurrentCaptures = 4
+
+    func slot(for tab: Tab) -> Slot {
+        let key = tab.id as NSUUID
+        if let existing = cache.object(forKey: key) {
+            return existing
+        }
+        if let existing = slots.object(forKey: key) {
+            cache.setObject(existing, forKey: key)
+            return existing
+        }
+        let created = Slot()
+        slots.setObject(created, forKey: key)
+        cache.setObject(created, forKey: key)
+        return created
+    }
+
+    func displayImage(for tab: Tab, slot: Slot) -> NSImage? {
+        if slot.url == tab.address, let img = slot.image {
+            return img
+        }
+        return tab.cover
+    }
 
     func image(for tab: Tab) -> NSImage? {
-        if let entry = cache.object(forKey: tab.id as NSUUID), entry.url == tab.address {
-            return entry.image
+        let key = tab.id as NSUUID
+        if let entry = cache.object(forKey: key) ?? slots.object(forKey: key),
+           entry.url == tab.address,
+           let img = entry.image {
+            return img
         }
         return tab.cover
     }
 
     func request(_ tab: Tab, width: CGFloat = 560) {
         guard !tab.isBlank else { return }
-        if let entry = cache.object(forKey: tab.id as NSUUID),
+        let key = tab.id as NSUUID
+        if let entry = cache.object(forKey: key) ?? slots.object(forKey: key),
            entry.url == tab.address,
-           Date().timeIntervalSince(entry.capturedAt) < 120 {
+           entry.image != nil,
+           let capturedAt = entry.capturedAt,
+           Date().timeIntervalSince(capturedAt) < 120 {
             return
         }
-        capture(tab, width: width)
+        enqueueCapture(tab, width: width)
     }
 
     func refresh(_ tab: Tab, width: CGFloat = 640) {
         guard !tab.isBlank else { return }
-        capture(tab, width: width)
+        enqueueCapture(tab, width: width)
     }
 
     func trim() {
+        pending.removeAll()
+        if let enumerator = slots.objectEnumerator() {
+            while let obj = enumerator.nextObject() as? Slot {
+                obj.image = nil
+                obj.url = nil
+                obj.capturedAt = nil
+                obj.revision &+= 1
+            }
+        }
         cache.removeAllObjects()
     }
 
-    private func capture(_ tab: Tab, width: CGFloat) {
+    private func enqueueCapture(_ tab: Tab, width: CGFloat) {
         guard !inFlight.contains(tab.id) else { return }
+        if let index = pending.firstIndex(where: { $0.tab.id == tab.id }) {
+            if width > pending[index].width { pending[index].width = width }
+            return
+        }
+        if inFlight.count >= Self.maxConcurrentCaptures {
+            pending.append((tab: tab, width: width))
+            return
+        }
+        startCapture(tab, width: width)
+    }
+
+    private func startCapture(_ tab: Tab, width: CGFloat) {
         inFlight.insert(tab.id)
         let tabID = tab.id
         let url = tab.address
-        tab.capturePreview(width: width) { [weak self] image in
+        tab.capturePreview(width: width) { [weak self, weak tab] image in
             Task { @MainActor in
                 guard let self else { return }
                 self.inFlight.remove(tabID)
-                guard let image else { return }
-                self.cache.setObject(Entry(url: url, image: image, capturedAt: Date()), forKey: tabID as NSUUID)
-                self.revision &+= 1
+                if let image, let tab {
+                    let target = self.slot(for: tab)
+                    target.url = url
+                    target.capturedAt = Date()
+                    target.image = image
+                    target.revision &+= 1
+                }
+                self.drainPending()
             }
         }
+    }
+
+    private func drainPending() {
+        while inFlight.count < Self.maxConcurrentCaptures, !pending.isEmpty {
+            let next = pending.removeFirst()
+            guard !next.tab.isBlank, !inFlight.contains(next.tab.id) else { continue }
+            startCapture(next.tab, width: next.width)
+        }
+    }
+}
+
+/// Memoizes `Browser.switcherItems` and `switcherFallbackActions` across hover/keyboard
+/// selection moves while the query and browser tab list remain unchanged.
+@MainActor
+private final class SwitcherResultsCache {
+    struct Snapshot {
+        let items: [SwitcherItem]
+        let totalOpenCount: Int
+        let fallbackActions: [SwitcherAction]
+    }
+
+    private var cancellable: AnyCancellable?
+    private weak var subscribedBrowser: Browser?
+    private var generation = 0
+    private var cachedGen = -1
+    private var cachedQuery = ""
+    private var cachedMode: TabSwitcherMode = .palette
+    private var cachedSnapshot = Snapshot(items: [], totalOpenCount: 0, fallbackActions: [])
+
+    func invalidate() {
+        cachedGen = -1
+    }
+
+    func snapshot(browser: Browser, query: String, mode: TabSwitcherMode) -> Snapshot {
+        if subscribedBrowser !== browser {
+            subscribedBrowser = browser
+            generation &+= 1
+            cachedGen = -1
+            cancellable = browser.objectWillChange.sink { [weak self] _ in
+                self?.generation &+= 1
+            }
+        }
+        if cachedGen == generation && cachedQuery == query && cachedMode == mode {
+            return cachedSnapshot
+        }
+        cachedGen = generation
+        cachedQuery = query
+        cachedMode = mode
+
+        let items = browser.switcherItems(matching: query, mode: mode)
+        let trimmed = query.trimmingCharacters(in: .whitespacesAndNewlines)
+        let total = trimmed.isEmpty ? items.count : browser.switcherItems(matching: "", mode: mode).count
+        let actions = mode == .palette
+            ? browser.switcherFallbackActions(for: query, excluding: items, limit: items.isEmpty ? 7 : 4)
+            : []
+        let snap = Snapshot(items: items, totalOpenCount: total, fallbackActions: actions)
+        cachedSnapshot = snap
+        return snap
     }
 }
 
@@ -105,40 +218,34 @@ struct TabSwitcherLayer: View {
 private struct TabPaletteView: View {
     @ObservedObject var browser: Browser
     @ObservedObject var state: TabSwitcherState
-    @ObservedObject private var previews = TabPreviewCache.shared
     @FocusState private var searchFocused: Bool
     @Environment(\.colorScheme) private var scheme
+    @State private var resultsCache = SwitcherResultsCache()
 
-    private var items: [SwitcherItem] {
-        browser.switcherItems(matching: state.query, mode: .palette)
-    }
+    private let previews = TabPreviewCache.shared
 
-    private var fallbackActions: [SwitcherAction] {
-        browser.switcherFallbackActions(
-            for: state.query,
-            excluding: items,
-            limit: items.isEmpty ? 7 : 4
-        )
-    }
-
-    private var selectedAction: SwitcherAction? {
+    private func resolvedSelection(in snapshot: SwitcherResultsCache.Snapshot) -> (item: SwitcherItem?, action: SwitcherAction?) {
+        let items = snapshot.items
+        let actions = snapshot.fallbackActions
         if let actionID = state.selectedActionID,
-           let match = fallbackActions.first(where: { $0.id == actionID }) {
-            return match
+           let match = actions.first(where: { $0.id == actionID }) {
+            return (nil, match)
         }
-        return items.isEmpty ? fallbackActions.first : nil
+        if items.isEmpty {
+            return (nil, actions.first)
+        }
+        return (items.first { $0.id == state.selectedID } ?? items.first, nil)
     }
-
-    private var selectedItem: SwitcherItem? {
-        guard selectedAction == nil else { return nil }
-        return items.first { $0.id == state.selectedID } ?? items.first
-    }
-
-    private var selectedTab: Tab? { selectedItem?.tab }
 
     var body: some View {
         let dark = scheme == .dark
         let cardShape = RoundedRectangle(cornerRadius: 16, style: .continuous)
+        let snapshot = resultsCache.snapshot(browser: browser, query: state.query, mode: .palette)
+        let items = snapshot.items
+        let fallbackActions = snapshot.fallbackActions
+        let selection = resolvedSelection(in: snapshot)
+        let selectedItem = selection.item
+        let selectedAction = selection.action
 
         ZStack {
             // Subtle dim scrim — tap anywhere outside the palette to dismiss.
@@ -147,30 +254,36 @@ private struct TabPaletteView: View {
                 .onTapGesture { browser.closeTabSwitcher() }
 
             VStack(spacing: 0) {
-                searchHeader(dark: dark)
+                searchHeader(dark: dark, itemCount: items.count, totalCount: snapshot.totalOpenCount)
                 Divider().overlay(Palette.hairline)
 
                 if items.isEmpty {
                     if !fallbackActions.isEmpty {
-                        webFallback(dark: dark)
+                        webFallback(dark: dark, actions: fallbackActions, selectedAction: selectedAction)
                     } else {
                         emptyState
                     }
                 } else {
                     HStack(spacing: 0) {
-                        tabList(dark: dark)
-                            .frame(width: 336)
+                        tabList(
+                            dark: dark,
+                            items: items,
+                            actions: fallbackActions,
+                            selectedItem: selectedItem,
+                            selectedAction: selectedAction
+                        )
+                        .frame(width: 336)
                         Rectangle()
                             .fill(Palette.hairline)
                             .frame(width: 1)
-                        sneakPeek(dark: dark)
+                        sneakPeek(dark: dark, selectedItem: selectedItem, selectedAction: selectedAction)
                             .frame(maxWidth: .infinity, maxHeight: .infinity)
                     }
                     .frame(maxHeight: .infinity)
                 }
 
                 Divider().overlay(Palette.hairline)
-                footerBar(dark: dark)
+                footerBar(dark: dark, itemsEmpty: items.isEmpty, selectedAction: selectedAction)
             }
             .frame(width: 780, height: 472)
             .background {
@@ -190,24 +303,32 @@ private struct TabPaletteView: View {
             .padding(.bottom, 24)
         }
         .onAppear {
-            syncSelection()
+            resultsCache.invalidate()
+            let current = resultsCache.snapshot(browser: browser, query: state.query, mode: .palette)
+            syncSelection(snapshot: current)
             DispatchQueue.main.async { searchFocused = true }
-            if let tab = selectedTab { previews.request(tab, width: 640) }
+            if let tab = resolvedSelection(in: current).item?.tab {
+                previews.request(tab, width: 640)
+            }
         }
         .onChange(of: state.focusTick) { _, _ in
             DispatchQueue.main.async { searchFocused = true }
         }
         .onChange(of: state.query) { _, _ in
-            syncSelection()
+            let current = resultsCache.snapshot(browser: browser, query: state.query, mode: .palette)
+            syncSelection(snapshot: current)
         }
         .onChange(of: state.selectedID) { _, _ in
-            if let tab = selectedTab { previews.request(tab, width: 640) }
+            let current = resultsCache.snapshot(browser: browser, query: state.query, mode: .palette)
+            if let tab = resolvedSelection(in: current).item?.tab {
+                previews.request(tab, width: 640)
+            }
         }
     }
 
-    private func syncSelection() {
-        let list = items
-        let actions = fallbackActions
+    private func syncSelection(snapshot: SwitcherResultsCache.Snapshot) {
+        let list = snapshot.items
+        let actions = snapshot.fallbackActions
         if let currentAction = state.selectedActionID,
            actions.contains(where: { $0.id == currentAction }) {
             state.selectedID = nil
@@ -225,14 +346,12 @@ private struct TabPaletteView: View {
         state.selectedActionID = actions.first?.id
     }
 
-    private var filteringBadge: String {
+    private func filteringBadgeText(itemCount: Int, totalCount: Int) -> String {
         let filtering = !state.query.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
-        guard filtering else { return "\(items.count) open" }
-        let total = browser.switcherItems(matching: "", mode: .palette).count
-        return "\(items.count) of \(total)"
+        return filtering ? "\(itemCount) of \(totalCount)" : "\(itemCount) open"
     }
 
-    private func searchHeader(dark: Bool) -> some View {
+    private func searchHeader(dark: Bool, itemCount: Int, totalCount: Int) -> some View {
         HStack(spacing: 10) {
             Image(systemName: "magnifyingglass")
                 .font(.system(size: 14, weight: .medium))
@@ -257,7 +376,7 @@ private struct TabPaletteView: View {
                 .help("Clear search")
             }
 
-            Text(filteringBadge)
+            Text(filteringBadgeText(itemCount: itemCount, totalCount: totalCount))
                 .font(.system(size: 11, weight: .medium))
                 .monospacedDigit()
                 .foregroundStyle(Palette.muted)
@@ -291,9 +410,14 @@ private struct TabPaletteView: View {
         .frame(height: 50)
     }
 
-    private func tabList(dark: Bool) -> some View {
-        let actions = fallbackActions
-        return ScrollViewReader { proxy in
+    private func tabList(
+        dark: Bool,
+        items: [SwitcherItem],
+        actions: [SwitcherAction],
+        selectedItem: SwitcherItem?,
+        selectedAction: SwitcherAction?
+    ) -> some View {
+        ScrollViewReader { proxy in
             ScrollView {
                 LazyVStack(spacing: 2) {
                     if !actions.isEmpty {
@@ -382,46 +506,33 @@ private struct TabPaletteView: View {
     }
 
     @ViewBuilder
-    private func sneakPeek(dark: Bool) -> some View {
+    private func sneakPeek(dark: Bool, selectedItem: SwitcherItem?, selectedAction: SwitcherAction?) -> some View {
         if let item = selectedItem {
             let tab = item.tab
-            let _ = previews.revision
-            let preview = previews.image(for: tab)
             let isActive = item.space == nil && tab.id == browser.activeID
             let prettyURL = tab.address.map { Address.pretty($0) } ?? "New Tab"
 
             VStack(alignment: .leading, spacing: 12) {
                 // Visual 16:10 sneak-peek browser card (bounded height so header
                 // and footer never overflow the 472pt palette).
-                ZStack(alignment: .top) {
-                    if let preview {
-                        Image(nsImage: preview)
-                            .resizable()
-                            .interpolation(.high)
-                            .scaledToFill()
-                            .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
-                            .clipped()
-                    } else {
-                        TabPlaceholderSurface(tab: tab, dark: dark)
+                TabPreviewSurface(tab: tab, slot: previews.slot(for: tab), dark: dark)
+                    .frame(maxWidth: .infinity)
+                    .frame(height: 234)
+                    .background(dark ? Color.white.opacity(0.04) : Color.black.opacity(0.03))
+                    .clipShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
+                    .overlay(
+                        RoundedRectangle(cornerRadius: 10, style: .continuous)
+                            .strokeBorder(
+                                dark ? Color.white.opacity(0.12) : Color.black.opacity(0.09),
+                                lineWidth: 0.75
+                            )
+                    )
+                    .shadow(color: .black.opacity(dark ? 0.30 : 0.08), radius: 12, y: 4)
+                    .contentShape(Rectangle())
+                    .onTapGesture {
+                        browser.selectFromSwitcher(item)
                     }
-                }
-                .frame(maxWidth: .infinity)
-                .frame(height: 234)
-                .background(dark ? Color.white.opacity(0.04) : Color.black.opacity(0.03))
-                .clipShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
-                .overlay(
-                    RoundedRectangle(cornerRadius: 10, style: .continuous)
-                        .strokeBorder(
-                            dark ? Color.white.opacity(0.12) : Color.black.opacity(0.09),
-                            lineWidth: 0.75
-                        )
-                )
-                .shadow(color: .black.opacity(dark ? 0.30 : 0.08), radius: 12, y: 4)
-                .contentShape(Rectangle())
-                .onTapGesture {
-                    browser.selectFromSwitcher(item)
-                }
-                .onAppear { previews.request(tab, width: 640) }
+                    .onAppear { previews.request(tab, width: 640) }
 
                 // Metadata & quick actions.
                 VStack(alignment: .leading, spacing: 4) {
@@ -644,9 +755,8 @@ private struct TabPaletteView: View {
         .padding(16)
     }
 
-    private func webFallback(dark: Bool) -> some View {
-        let actions = fallbackActions
-        return ScrollViewReader { proxy in
+    private func webFallback(dark: Bool, actions: [SwitcherAction], selectedAction: SwitcherAction?) -> some View {
+        ScrollViewReader { proxy in
             ScrollView {
                 LazyVStack(spacing: 4) {
                     HStack {
@@ -705,7 +815,7 @@ private struct TabPaletteView: View {
         .frame(maxWidth: .infinity, maxHeight: .infinity)
     }
 
-    private func footerBar(dark: Bool) -> some View {
+    private func footerBar(dark: Bool, itemsEmpty: Bool, selectedAction: SwitcherAction?) -> some View {
         let onAction = selectedAction != nil
         let actionVerb: String = switch selectedAction?.kind {
         case .ask: "Ask"
@@ -714,7 +824,7 @@ private struct TabPaletteView: View {
         default: "Open"
         }
         return HStack(spacing: 14) {
-            KeyHint(keys: "↑↓", label: items.isEmpty ? "Select" : "Preview")
+            KeyHint(keys: "↑↓", label: itemsEmpty ? "Select" : "Preview")
             KeyHint(keys: "↩", label: onAction ? actionVerb : "Switch")
             if selectedAction?.kind != .ask {
                 KeyHint(keys: "⌘D", label: "Split")
@@ -949,17 +1059,11 @@ private struct TabPaletteRow: View {
 private struct TabOverviewGridView: View {
     @ObservedObject var browser: Browser
     @ObservedObject var state: TabSwitcherState
-    @ObservedObject private var previews = TabPreviewCache.shared
     @FocusState private var searchFocused: Bool
     @Environment(\.colorScheme) private var scheme
+    @State private var resultsCache = SwitcherResultsCache()
 
-    private var items: [SwitcherItem] {
-        browser.switcherItems(matching: state.query, mode: .grid)
-    }
-
-    private var selectedItem: SwitcherItem? {
-        items.first { $0.id == state.selectedID } ?? items.first
-    }
+    private let previews = TabPreviewCache.shared
 
     private let columns = [
         GridItem(.adaptive(minimum: 256, maximum: 320), spacing: 18),
@@ -967,6 +1071,9 @@ private struct TabOverviewGridView: View {
 
     var body: some View {
         let dark = scheme == .dark
+        let snapshot = resultsCache.snapshot(browser: browser, query: state.query, mode: .grid)
+        let items = snapshot.items
+        let selectedID = items.first { $0.id == state.selectedID }?.id ?? items.first?.id
 
         ZStack {
             // Full-window frosted glass canvas; click empty space to dismiss.
@@ -978,7 +1085,7 @@ private struct TabOverviewGridView: View {
             .onTapGesture { browser.closeTabSwitcher() }
 
             VStack(spacing: 0) {
-                topBar(dark: dark)
+                topBar(dark: dark, count: items.count)
                     .padding(.top, 46)
                     .padding(.horizontal, 28)
                     .padding(.bottom, 18)
@@ -1004,7 +1111,7 @@ private struct TabOverviewGridView: View {
                                     TabOverviewCard(
                                         tab: tab,
                                         space: item.space,
-                                        selected: item.id == selectedItem?.id,
+                                        selected: item.id == selectedID,
                                         active: item.space == nil && tab.id == browser.activeID,
                                         inSplit: item.space == nil && browser.split?.has(tab.id) == true,
                                         dark: dark,
@@ -1047,12 +1154,14 @@ private struct TabOverviewGridView: View {
             }
         }
         .onAppear {
-            if state.selectedID == nil || !items.contains(where: { $0.id == state.selectedID }) {
-                state.selectedID = browser.activeID ?? items.first?.id
+            resultsCache.invalidate()
+            let current = resultsCache.snapshot(browser: browser, query: state.query, mode: .grid).items
+            if state.selectedID == nil || !current.contains(where: { $0.id == state.selectedID }) {
+                state.selectedID = browser.activeID ?? current.first?.id
             }
             DispatchQueue.main.async { searchFocused = true }
             // Prime previews for the visible set smoothly.
-            for item in items.prefix(12) {
+            for item in current.prefix(12) {
                 previews.request(item.tab, width: 520)
             }
         }
@@ -1060,18 +1169,19 @@ private struct TabOverviewGridView: View {
             DispatchQueue.main.async { searchFocused = true }
         }
         .onChange(of: state.query) { _, _ in
-            if let current = state.selectedID, items.contains(where: { $0.id == current }) { return }
-            state.selectedID = items.first?.id
+            let current = resultsCache.snapshot(browser: browser, query: state.query, mode: .grid).items
+            if let id = state.selectedID, current.contains(where: { $0.id == id }) { return }
+            state.selectedID = current.first?.id
         }
     }
 
-    private func topBar(dark: Bool) -> some View {
+    private func topBar(dark: Bool, count: Int) -> some View {
         ZStack {
             HStack(spacing: 10) {
                 Text("Open Tabs")
                     .font(.system(size: 16, weight: .semibold, design: .rounded))
                     .foregroundStyle(Palette.ink)
-                Text("\(items.count)")
+                Text("\(count)")
                     .font(.system(size: 11.5, weight: .semibold))
                     .foregroundStyle(Palette.muted)
                     .padding(.horizontal, 7)
@@ -1179,7 +1289,6 @@ private struct TabOverviewGridView: View {
 
 private struct TabOverviewCard: View {
     @ObservedObject var tab: Tab
-    @ObservedObject private var previews = TabPreviewCache.shared
     let space: Space?
     let selected: Bool
     let active: Bool
@@ -1192,8 +1301,6 @@ private struct TabOverviewCard: View {
     @State private var hovering = false
 
     var body: some View {
-        let _ = previews.revision
-        let preview = previews.image(for: tab)
         let host = tab.address.map { Address.pretty($0) } ?? "New Tab"
         let shape = RoundedRectangle(cornerRadius: 12, style: .continuous)
 
@@ -1283,22 +1390,11 @@ private struct TabOverviewCard: View {
                 .frame(height: 1)
 
             // 16:10 visual snapshot surface.
-            ZStack(alignment: .top) {
-                if let preview {
-                    Image(nsImage: preview)
-                        .resizable()
-                        .interpolation(.high)
-                        .scaledToFill()
-                        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
-                        .clipped()
-                } else {
-                    TabPlaceholderSurface(tab: tab, dark: dark)
-                }
-            }
-            .frame(maxWidth: .infinity)
-            .aspectRatio(16 / 10, contentMode: .fit)
-            .background(dark ? Color.white.opacity(0.03) : Color.black.opacity(0.025))
-            .clipped()
+            TabPreviewSurface(tab: tab, slot: TabPreviewCache.shared.slot(for: tab), dark: dark)
+                .frame(maxWidth: .infinity)
+                .aspectRatio(16 / 10, contentMode: .fit)
+                .background(dark ? Color.white.opacity(0.03) : Color.black.opacity(0.025))
+                .clipped()
 
             // Compact bottom domain footer.
             HStack(spacing: 6) {
@@ -1328,16 +1424,46 @@ private struct TabOverviewCard: View {
                 lineWidth: selected ? 2 : 0.75
             )
         )
-        .shadow(
-            color: .black.opacity(dark ? (hovering || selected ? 0.42 : 0.24) : (hovering || selected ? 0.14 : 0.06)),
-            radius: hovering || selected ? 16 : 8,
-            y: hovering || selected ? 6 : 2
-        )
+        .background {
+            shape
+                .fill(Palette.ground)
+                .shadow(
+                    color: .black.opacity(dark ? (hovering || selected ? 0.42 : 0.24) : (hovering || selected ? 0.14 : 0.06)),
+                    radius: 12,
+                    y: 4
+                )
+        }
         .animation(Motion.quick, value: hovering)
         .animation(Motion.quick, value: selected)
         .contentShape(shape)
         .onHover { hovering = $0 }
         .onTapGesture(perform: onSelect)
+    }
+}
+
+/// Isolated thumbnail renderer so async snapshot completions refresh ONLY the
+/// owning tab's image slot instead of cascading across the palette or overview grid.
+private struct TabPreviewSurface: View {
+    @ObservedObject var tab: Tab
+    @ObservedObject var slot: TabPreviewCache.Slot
+    let dark: Bool
+
+    var body: some View {
+        let _ = slot.revision
+        let preview = TabPreviewCache.shared.displayImage(for: tab, slot: slot)
+
+        ZStack(alignment: .top) {
+            if let preview {
+                Image(nsImage: preview)
+                    .resizable()
+                    .interpolation(.high)
+                    .scaledToFill()
+                    .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
+                    .clipped()
+            } else {
+                TabPlaceholderSurface(tab: tab, dark: dark)
+            }
+        }
     }
 }
 

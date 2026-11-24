@@ -30,10 +30,20 @@ struct TabBar: View {
         // riding at the very top of the strip while the traffic lights centre
         // themselves halfway down it.
         GeometryReader { geo in
+            let layout = makeLayout(in: geo.size.width)
+            let roomForEdit = geo.size.width - Metrics.lights - 12
+            let activeID = browser.activeID
+            let talkOnStage = browser.talkOnStage
+            let editingTab = browser.editingTab
+            let editingPin = browser.editingPin
+            let showsIcon = browser.prefs.glyph == .icons
+            let showsReading = browser.prefs.showsReading
+            let refusals = browser.refusals
+
             ZStack(alignment: .leading) {
                 // The empty half of the strip is what you grab to move the
                 // window; the tabs keep the run they sit on.
-                DragStrip(reserved: Metrics.lights + dot + (making ? min(540, room(in: geo.size.width)) : run(in: geo.size.width)) + Metrics.tabGap + Metrics.plusWidth, trailing: Metrics.helm + 26 + 24, onDoubleClick: browser.newTab)
+                DragStrip(reserved: Metrics.lights + dot + (making ? min(540, layout.roomWidth) : layout.runWidth) + Metrics.tabGap + Metrics.plusWidth, trailing: Metrics.helm + 26 + 24, onDoubleClick: browser.newTab)
                 // And the corner the lights sit in, which is title bar too —
                 // the one stretch left to take hold of when tabs fill the row.
                 DragStrip()
@@ -63,32 +73,33 @@ struct TabBar: View {
                             ScrollViewReader { reader in
                                 ScrollView(.horizontal, showsIndicators: false) {
                                     HStack(spacing: Metrics.tabGap) {
-                                        let visibleTabs = displayedTabs
-                                        let hasAgent = !browser.agentTabs.isEmpty
-                                        let firstAgentID = browser.agentTabs.first?.id
-                                        let firstGroupTabs = firstTabPerExpandedGroup(in: visibleTabs)
-                                        let collapsedGroups = browser.tabGroups.filter { $0.collapsed && !browser.tabs(inGroup: $0.id).isEmpty }
+                                        let visibleTabs = layout.visibleTabs
                                         ForEach(Array(visibleTabs.enumerated()), id: \.element.id) { index, tab in
-                                            if hasAgent && tab.id == firstAgentID {
-                                                agentGroupChip
+                                            if layout.agentCount > 0 && tab.id == layout.firstAgentID {
+                                                agentGroupChip(count: layout.agentCount)
                                             }
-                                            if let expandedGroup = firstGroupTabs[tab.id] {
+                                            if let expandedGroup = layout.firstGroupTabs[tab.id] {
                                                 UserGroupChip(
                                                     browser: browser,
                                                     group: expandedGroup,
-                                                    count: browser.tabs(inGroup: expandedGroup.id).count
+                                                    count: layout.groupCounts[expandedGroup.id] ?? 0
                                                 )
                                             }
                                             // A pinned square moves among pinned squares, a title
                                             // among titles: each has its own stride.
-                                            let step = (tab.pin != nil ? Metrics.pinWidth : width(in: geo.size.width)) + Metrics.tabGap
+                                            let step = (tab.pin != nil ? Metrics.pinWidth : layout.eachWidth) + Metrics.tabGap
+                                            let isEditing = editingTab == tab.id
                                             TabPill(
                                                 browser: browser,
-                                                prefs: browser.prefs,
                                                 tab: tab,
-                                                live: tab.id == browser.activeID && !browser.talkOnStage,
-                                                width: width(in: geo.size.width),
-                                                room: geo.size.width - Metrics.lights - 12,
+                                                live: tab.id == activeID && !talkOnStage,
+                                                editing: isEditing,
+                                                editingPin: editingPin == tab.id,
+                                                showsIcon: showsIcon,
+                                                showsReading: showsReading,
+                                                width: layout.eachWidth,
+                                                room: roomForEdit,
+                                                refusalTick: isEditing ? refusals : 0,
                                                 pill: pill,
                                                 close: { browser.close(tab) }
                                             )
@@ -100,7 +111,7 @@ struct TabBar: View {
                                                         .padding(.horizontal, 10)
                                                         .padding(.bottom, 1)
                                                         .allowsHitTesting(false)
-                                                } else if let group = browser.group(for: tab) {
+                                                } else if tab.pin == nil, let gid = tab.userGroupID, let group = layout.groupByID[gid] {
                                                     Capsule()
                                                         .fill(Spaces.colours[(group.colour ?? 0) % Spaces.colours.count].opacity(0.65))
                                                         .frame(height: 2)
@@ -125,26 +136,26 @@ struct TabBar: View {
                                             })
                                             .id(tab.id)
                                         }
-                                        if hasAgent && browser.agentGroupCollapsed {
-                                            agentGroupChip
+                                        if layout.agentCount > 0 && browser.agentGroupCollapsed {
+                                            agentGroupChip(count: layout.agentCount)
                                         }
-                                        ForEach(collapsedGroups) { group in
+                                        ForEach(layout.collapsedGroups) { group in
                                             UserGroupChip(
                                                 browser: browser,
                                                 group: group,
-                                                count: browser.tabs(inGroup: group.id).count
+                                                count: layout.groupCounts[group.id] ?? 0
                                             )
                                         }
                                     }
                                     .frame(height: Metrics.strip)
                                 }
-                                .scrollDisabled(!overflowing(in: geo.size.width))
-                                .frame(width: run(in: geo.size.width))
-                                .onAppear { reveal(reader, in: geo.size.width) }
-                                .onChange(of: overflowing(in: geo.size.width)) { _, _ in reveal(reader, in: geo.size.width) }
-                                .onChange(of: browser.activeID) { _, _ in reveal(reader, in: geo.size.width, gliding: true) }
+                                .scrollDisabled(!layout.overflowing)
+                                .frame(width: layout.runWidth)
+                                .onAppear { reveal(reader, overflowing: layout.overflowing) }
+                                .onChange(of: layout.overflowing) { _, nowOverflowing in reveal(reader, overflowing: nowOverflowing) }
+                                .onChange(of: browser.activeID) { _, _ in reveal(reader, overflowing: layout.overflowing, gliding: true) }
                             }
-                                .offset(y: browser.spaceSwipe)
+                            .offset(y: browser.spaceSwipe)
                         }
                         if browser.spaceSwipe > 0, spaceAt > 0 {
                             page(spaceAt - 1, in: geo.size.width, pill: above)
@@ -155,9 +166,11 @@ struct TabBar: View {
                                 .offset(y: browser.spaceSwipe + Metrics.strip)
                         }
                     }
-                    .frame(width: making ? min(540, room(in: geo.size.width)) : run(in: geo.size.width), height: Metrics.strip, alignment: .leading)
-                    // Only up and down: a neighbour's row may run wider than this one.
-                    .mask(Rectangle().frame(width: 4000, height: Metrics.strip))
+                    .frame(width: making ? min(540, layout.roomWidth) : layout.runWidth, height: Metrics.strip, alignment: .leading)
+                    .clipped()
+                    .animation(Motion.glide, value: browser.activeID)
+                    .animation(Motion.glide, value: browser.editingTab)
+                    .animation(Motion.settle, value: layout.visibleTabs.map(\.id))
 
                     // The way to a new page, right after the tabs rather than
                     // at the end of their run, so it is there however far the
@@ -230,12 +243,6 @@ struct TabBar: View {
         }
         .background(landing ? Palette.hover : .clear)
         .animation(Motion.quick, value: landing)
-        .animation(Motion.glide, value: browser.activeID)
-        // The row makes room for the field on the same spring as everything
-        // else. Without this the widths changed between one frame and the next
-        // and the tabs appeared to jump aside.
-        .animation(Motion.glide, value: browser.editingTab)
-        .animation(Motion.settle, value: browser.tabs.map(\.id))
     }
 
     // MARK: - the spaces, one above the other
@@ -251,6 +258,99 @@ struct TabBar: View {
     /// Another space's row, drawn with the same pills as this one's so the
     /// two read as one bar while they pass — nothing to press until it is
     /// the one on screen. Past the last, the row for a new space.
+    private struct StripLayout {
+        let visibleTabs: [Tab]
+        let agentCount: Int
+        let firstAgentID: Tab.ID?
+        let firstGroupTabs: [Tab.ID: TabGroup]
+        let groupByID: [UUID: TabGroup]
+        let groupCounts: [UUID: Int]
+        let collapsedGroups: [TabGroup]
+        let eachWidth: CGFloat
+        let roomWidth: CGFloat
+        let runWidth: CGFloat
+        let overflowing: Bool
+    }
+
+    private func makeLayout(in stripWidth: CGFloat) -> StripLayout {
+        var groupByID: [UUID: TabGroup] = [:]
+        groupByID.reserveCapacity(browser.tabGroups.count)
+        var collapsedUserIDs: Set<UUID> = []
+        for group in browser.tabGroups {
+            groupByID[group.id] = group
+            if group.collapsed { collapsedUserIDs.insert(group.id) }
+        }
+
+        var visibleTabs: [Tab] = []
+        visibleTabs.reserveCapacity(browser.tabs.count)
+        var groupCounts: [UUID: Int] = [:]
+        var firstGroupTabs: [Tab.ID: TabGroup] = [:]
+        var seenExpandedGroups: Set<UUID> = []
+        var agentCount = 0
+        var firstAgentID: Tab.ID?
+        var pinnedTotal = 0
+        var editedIsPin: Bool?
+        let agentCollapsed = browser.agentGroupCollapsed
+        let editingID = browser.editingTab
+
+        for tab in browser.tabs {
+            if tab.pin != nil { pinnedTotal += 1 }
+            if tab.isAgentTab {
+                agentCount += 1
+                if firstAgentID == nil { firstAgentID = tab.id }
+                if agentCollapsed { continue }
+            } else if tab.pin == nil, let gid = tab.userGroupID {
+                groupCounts[gid, default: 0] += 1
+                if collapsedUserIDs.contains(gid) { continue }
+                if !seenExpandedGroups.contains(gid), let group = groupByID[gid] {
+                    seenExpandedGroups.insert(gid)
+                    firstGroupTabs[tab.id] = group
+                }
+            }
+            if tab.id == editingID {
+                editedIsPin = (tab.pin != nil)
+            }
+            visibleTabs.append(tab)
+        }
+
+        var collapsedGroups: [TabGroup] = []
+        var nonEmptyGroupCount = 0
+        for group in browser.tabGroups {
+            let count = groupCounts[group.id] ?? 0
+            guard count > 0 else { continue }
+            nonEmptyGroupCount += 1
+            if group.collapsed { collapsedGroups.append(group) }
+        }
+
+        let agentChipW: CGFloat = agentCount > 0 ? (TabBar.agentChipWidth + Metrics.tabGap) : 0
+        let userGroupChipW: CGFloat = nonEmptyGroupCount > 0
+            ? CGFloat(nonEmptyGroupCount) * (UserGroupChip.chipWidth + Metrics.tabGap)
+            : 0
+        let extraChip = agentChipW + userGroupChipW
+        let eachWidth = width(in: stripWidth - extraChip, pinned: pinnedTotal, count: visibleTabs.count)
+        let pinnedF = CGFloat(pinnedTotal)
+        let looseF = CGFloat(visibleTabs.count) - pinnedF
+        var contentWidth = pinnedF * Metrics.pinWidth + looseF * eachWidth + extraChip
+            + CGFloat(max(0, visibleTabs.count - 1)) * Metrics.tabGap
+        if let editedIsPin {
+            contentWidth += min(340, stripWidth - Metrics.lights - 12) - (editedIsPin ? Metrics.pinWidth : eachWidth)
+        }
+        let roomWidth = room(in: stripWidth)
+        return StripLayout(
+            visibleTabs: visibleTabs,
+            agentCount: agentCount,
+            firstAgentID: firstAgentID,
+            firstGroupTabs: firstGroupTabs,
+            groupByID: groupByID,
+            groupCounts: groupCounts,
+            collapsedGroups: collapsedGroups,
+            eachWidth: eachWidth,
+            roomWidth: roomWidth,
+            runWidth: min(contentWidth, roomWidth),
+            overflowing: contentWidth > roomWidth + 0.5
+        )
+    }
+
     @ViewBuilder
     private func page(_ index: Int, in strip: CGFloat, pill: Namespace.ID) -> some View {
         if index == browser.spaces.count {
@@ -263,15 +363,21 @@ struct TabBar: View {
                 ? Parked(tabs: browser.tabs, active: browser.activeID)
                 : browser.parked[space.id] ?? Parked(tabs: [], active: nil)
             let each = width(in: strip, pinned: row.tabs.filter { $0.pin != nil }.count, count: row.tabs.count)
+            let showsIcon = browser.prefs.glyph == .icons
+            let showsReading = browser.prefs.showsReading
             HStack(spacing: Metrics.tabGap) {
                 ForEach(row.tabs) { tab in
                     TabPill(
                         browser: browser,
-                        prefs: browser.prefs,
                         tab: tab,
                         live: tab.id == row.active,
+                        editing: false,
+                        editingPin: false,
+                        showsIcon: showsIcon,
+                        showsReading: showsReading,
                         width: each,
                         room: strip - Metrics.lights - 12,
+                        refusalTick: 0,
                         pill: pill,
                         close: {}
                     )
@@ -285,8 +391,8 @@ struct TabBar: View {
     /// Brings the tab you are on into view once the run scrolls: at once
     /// when the window first shows it, on the strip's spring when you pick
     /// another. A turn of the run loop later, so the run has been laid out.
-    private func reveal(_ reader: ScrollViewProxy, in strip: CGFloat, gliding: Bool = false) {
-        guard overflowing(in: strip), let id = browser.activeID else { return }
+    private func reveal(_ reader: ScrollViewProxy, overflowing: Bool, gliding: Bool = false) {
+        guard overflowing, let id = browser.activeID else { return }
         DispatchQueue.main.async {
             if gliding {
                 withAnimation(Motion.glide) { reader.scrollTo(id) }
@@ -294,44 +400,6 @@ struct TabBar: View {
                 reader.scrollTo(id)
             }
         }
-    }
-
-    /// How wide the run of tabs is: as wide as the tabs while they fit, as
-    /// wide as the room there is once they don't.
-    private func run(in strip: CGFloat) -> CGFloat {
-        min(content(in: strip), room(in: strip))
-    }
-
-    private func overflowing(in strip: CGFloat) -> Bool {
-        content(in: strip) > room(in: strip) + 0.5
-    }
-
-    private var displayedTabs: [Tab] {
-        let collapsedUserIDs = Set(browser.tabGroups.filter(\.collapsed).map(\.id))
-        return browser.tabs.filter { tab in
-            if browser.agentGroupCollapsed && tab.isAgentTab { return false }
-            if tab.pin == nil && !tab.isAgentTab, let gid = tab.userGroupID, collapsedUserIDs.contains(gid) { return false }
-            return true
-        }
-    }
-
-    private func firstTabPerExpandedGroup(in visible: [Tab]) -> [Tab.ID: TabGroup] {
-        var out: [Tab.ID: TabGroup] = [:]
-        var seen: Set<UUID> = []
-        for tab in visible where tab.pin == nil && !tab.isAgentTab {
-            guard let gid = tab.userGroupID, !seen.contains(gid),
-                  let group = browser.tabGroups.first(where: { $0.id == gid && !$0.collapsed })
-            else { continue }
-            seen.insert(gid)
-            out[tab.id] = group
-        }
-        return out
-    }
-
-    private var userGroupChipWidth: CGFloat {
-        let count = browser.tabGroups.filter { !browser.tabs(inGroup: $0.id).isEmpty }.count
-        guard count > 0 else { return 0 }
-        return CGFloat(count) * (UserGroupChip.chipWidth + Metrics.tabGap)
     }
 
     private func moveVisibleTab(_ tab: Tab, to visibleIndex: Int, in visibleTabs: [Tab]) {
@@ -345,8 +413,7 @@ struct TabBar: View {
     private static let agentChipWidth: CGFloat = 78
 
     /// Compact collapsible pill for the Agent tab group in Top Tabs mode.
-    private var agentGroupChip: some View {
-        let count = browser.agentTabs.count
+    private func agentGroupChip(count: Int) -> some View {
         let collapsed = browser.agentGroupCollapsed
         return Button {
             withAnimation(Motion.quick) { browser.agentGroupCollapsed.toggle() }
@@ -385,22 +452,6 @@ struct TabBar: View {
         }
     }
 
-    /// Everything in the run at the width the tabs get — and the address
-    /// field's width for a tab being edited, which grows to take it.
-    private func content(in strip: CGFloat) -> CGFloat {
-        let shown = displayedTabs
-        let each = width(in: strip)
-        let pinned = CGFloat(browser.pinnedCount)
-        let loose = CGFloat(shown.count) - pinned
-        let agentChip: CGFloat = browser.agentTabs.isEmpty ? 0 : (TabBar.agentChipWidth + Metrics.tabGap)
-        var total = pinned * Metrics.pinWidth + loose * each + agentChip + userGroupChipWidth
-            + CGFloat(max(0, shown.count - 1)) * Metrics.tabGap
-        if let id = browser.editingTab, let tab = shown.first(where: { $0.id == id }) {
-            total += min(340, strip - Metrics.lights - 12) - (tab.pin != nil ? Metrics.pinWidth : each)
-        }
-        return total
-    }
-
     /// The strip, less the lights, the plus, the doors at the far end and
     /// the air around them. The doors are measured; until they have been,
     /// the three of the helm and the bookmarks stand in for them.
@@ -414,16 +465,6 @@ struct TabBar: View {
     private var dot: CGFloat {
         (browser.prefs.usesSpaces ? SpaceDot.width + Metrics.tabGap : 0)
             + (browser.prefs.usesAgent ? AskTab.compactWidth(for: shortcuts.key(for: .toggleAgent)?.display) + Metrics.tabGap : 0)
-    }
-
-    /// Every loose tab is the same width, so the cross is always in the same
-    /// place. Past a dozen or so they start giving ground; too narrow for a
-    /// title they show their mark alone (Metrics.tabTitled), down to the
-    /// mark and its air. Past that, the run scrolls. The pinned squares take
-    /// their room off the top.
-    private func width(in strip: CGFloat) -> CGFloat {
-        let extraChip: CGFloat = (browser.agentTabs.isEmpty ? 0 : (TabBar.agentChipWidth + Metrics.tabGap)) + userGroupChipWidth
-        return width(in: strip - extraChip, pinned: browser.pinnedCount, count: displayedTabs.count)
     }
 
     private func width(in strip: CGFloat, pinned pins: Int, count: Int) -> CGFloat {
@@ -762,20 +803,23 @@ private struct HistoryNavDoor: View {
 }
 
 private struct TabPill: View {
-    @ObservedObject var browser: Browser
-    @ObservedObject var prefs: Preferences
+    let browser: Browser
     @ObservedObject var tab: Tab
     let live: Bool
+    let editing: Bool
+    let editingPin: Bool
+    let showsIcon: Bool
+    let showsReading: Bool
     let width: CGFloat
     /// How much of the strip there is, for the field that grows over it.
     let room: CGFloat
+    let refusalTick: Int
     let pill: Namespace.ID
     let close: () -> Void
 
     @State private var hovering = false
     @State private var shake: CGFloat = 0
 
-    private var editing: Bool { browser.editingTab == tab.id }
     private var pinned: Bool { tab.pin != nil && !editing }
     /// Too narrow for a title: the site's mark alone, the title in the
     /// tooltip, and ⌘W or the menu to close it — a cross on something this
@@ -796,9 +840,9 @@ private struct TabPill: View {
         Group {
             if pinned {
                 Group {
-                    if browser.editingPin == tab.id {
+                    if editingPin {
                         PinField(browser: browser, tab: tab)
-                    } else if prefs.glyph == .icons, let icon = tab.icon {
+                    } else if showsIcon, let icon = tab.icon {
                         Mark(icon: icon, letter: tab.pin ?? "", size: 16, dim: tab.asleep)
                     } else {
                         Text(tab.pin ?? "")
@@ -846,7 +890,7 @@ private struct TabPill: View {
         .animation(Motion.quick, value: hovering)
         .animation(Motion.glide, value: editing)
         .animation(Motion.glide, value: tab.pin)
-        .onChange(of: browser.refusals) { _, _ in
+        .onChange(of: refusalTick) { _, _ in
             guard editing else { return }
             shake = 0
             withAnimation(.easeOut(duration: 0.5)) { shake = 1 }
@@ -862,7 +906,7 @@ private struct TabPill: View {
                 if tab.loading {
                     Ring()
                 } else {
-                    Mark(icon: prefs.glyph == .icons ? tab.icon : nil, letter: tab.monogram, size: 15, dim: tab.asleep)
+                    Mark(icon: showsIcon ? tab.icon : nil, letter: tab.monogram, size: 15, dim: tab.asleep)
                 }
             }
             .frame(width: 16, height: 16)
@@ -879,7 +923,7 @@ private struct TabPill: View {
                 TabAddressField(browser: browser)
                     .frame(height: 16)
             } else {
-                if prefs.glyph == .icons, !tab.isBlank {
+                if showsIcon, !tab.isBlank {
                     Mark(icon: tab.icon, letter: tab.monogram, size: 15, dim: tab.asleep)
                 }
                 if tab.bench {
@@ -966,7 +1010,7 @@ private struct TabPill: View {
                 // points of grey filling from the left behind a single letter
                 // says nothing about anything — it needs the width of a title
                 // to read as progress at all.
-                if !pinned && !compact && prefs.showsReading {
+                if !pinned && !compact && showsReading {
                     ReadingFill(meter: tab.meter, width: span)
                 }
             }
@@ -1063,7 +1107,7 @@ struct Carried: ViewModifier {
                             let resolved = SplitMergeResolver.resolve(
                                 point: value.location,
                                 dragging: draggingTab.id,
-                                in: rowFrames.rects,
+                                in: rowFrames.currentRects(),
                                 browserID: browserID,
                                 canSplit: !draggingTab.isBlank && draggingTab.pin == nil
                             )
@@ -1220,6 +1264,17 @@ struct TabMenu: View {
     @ObservedObject var tab: Tab
     let close: () -> Void
 
+    private static let groupDotImages: [NSImage] = Spaces.colours.map { color in
+        let size = NSSize(width: 9, height: 9)
+        let image = NSImage(size: size, flipped: false) { rect in
+            NSColor(color).setFill()
+            NSBezierPath(ovalIn: rect.insetBy(dx: 0.5, dy: 0.5)).fill()
+            return true
+        }
+        image.isTemplate = false
+        return image
+    }
+
     var body: some View {
         if tab.pin == nil {
             Button("Pin") { browser.pin(tab) }
@@ -1232,12 +1287,16 @@ struct TabMenu: View {
                 if !browser.tabGroups.isEmpty {
                     Menu("Add to Group") {
                         ForEach(browser.tabGroups) { group in
-                            Button {
-                                browser.addTab(tab, toGroup: group.id)
-                            } label: {
-                                HStack {
+                            let paletteCount = Self.groupDotImages.count
+                            let idx = ((group.colour ?? 0) % paletteCount + paletteCount) % paletteCount
+                            Toggle(isOn: Binding(
+                                get: { tab.userGroupID == group.id },
+                                set: { _ in browser.addTab(tab, toGroup: group.id) }
+                            )) {
+                                Label {
                                     Text(group.name)
-                                    if tab.userGroupID == group.id { Image(systemName: "checkmark") }
+                                } icon: {
+                                    Image(nsImage: Self.groupDotImages[idx])
                                 }
                             }
                         }

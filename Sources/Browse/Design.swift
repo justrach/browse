@@ -381,6 +381,13 @@ struct PageTint: Equatable {
 struct SideGlass: NSViewRepresentable {
     var dark: Bool?
 
+    final class Coordinator {
+        var hasApplied = false
+        var appliedDark: Bool?
+    }
+
+    func makeCoordinator() -> Coordinator { Coordinator() }
+
     func makeNSView(context: Context) -> NSVisualEffectView {
         let view = NSVisualEffectView()
         view.material = .sidebar
@@ -391,6 +398,10 @@ struct SideGlass: NSViewRepresentable {
     }
 
     func updateNSView(_ view: NSVisualEffectView, context: Context) {
+        let coord = context.coordinator
+        guard !coord.hasApplied || coord.appliedDark != dark else { return }
+        coord.hasApplied = true
+        coord.appliedDark = dark
         view.appearance = dark.map { NSAppearance(named: $0 ? .darkAqua : .aqua) } ?? nil
     }
 }
@@ -495,52 +506,14 @@ struct PageShimmerRim: View {
     let working: Bool
     let settling: Bool
 
-    @State private var spin: Double = 0
     @State private var sweep: CGFloat = -0.35
 
     var body: some View {
         let shape = RoundedRectangle(cornerRadius: corner, style: .continuous)
         ZStack {
             if working {
-                let colors: [Color] = dark
-                    ? [
-                        Color.white.opacity(0.03),
-                        Palette.accent.opacity(0.50),
-                        Color(red: 0.56, green: 0.78, blue: 1.0).opacity(0.42),
-                        Color.white.opacity(0.03),
-                    ]
-                    : [
-                        Color.black.opacity(0.02),
-                        Palette.accent.opacity(0.42),
-                        Color(red: 0.36, green: 0.62, blue: 0.98).opacity(0.34),
-                        Color.black.opacity(0.02),
-                    ]
-                let gradient = AngularGradient(
-                    gradient: Gradient(colors: colors),
-                    center: .center,
-                    angle: .degrees(Motion.reduced ? 45 : spin)
-                )
-                // Lightweight dual-stroke luminous rim without a full-window
-                // Gaussian `.blur()` pass so scrolling heavy SPAs (like X.com)
-                // stays locked at 120 FPS even while the agent is working.
-                ZStack {
-                    shape
-                        .strokeBorder(gradient, lineWidth: 2.5)
-                        .opacity(dark ? 0.28 : 0.22)
-                    shape
-                        .strokeBorder(gradient, lineWidth: 1.25)
-                }
-                .drawingGroup()
-                .clipShape(shape)
-                .transition(.opacity)
-                .onAppear {
-                    guard !Motion.reduced else { return }
-                    spin = 0
-                    withAnimation(.linear(duration: 3.6).repeatForever(autoreverses: false)) {
-                        spin = 360
-                    }
-                }
-                .onDisappear { spin = 0 }
+                ShimmerRimLayerView(corner: corner, dark: dark, active: true, reduced: Motion.reduced)
+                    .transition(.opacity)
             }
 
             if settling {
@@ -549,7 +522,7 @@ struct PageShimmerRim: View {
                 LinearGradient(
                     stops: [
                         .init(color: .clear, location: max(0, sweep - 0.35)),
-                        .init(color: (dark ? Color.white : Color.white).opacity(dark ? 0.08 : 0.42), location: max(0, min(1, sweep))),
+                        .init(color: Color.white.opacity(dark ? 0.08 : 0.42), location: max(0, min(1, sweep))),
                         .init(color: .clear, location: min(1, sweep + 0.35)),
                     ],
                     startPoint: .leading,
@@ -569,5 +542,210 @@ struct PageShimmerRim: View {
         .allowsHitTesting(false)
         .animation(.easeOut(duration: 0.24), value: working)
         .animation(.easeOut(duration: 0.18), value: settling)
+    }
+}
+
+private struct ShimmerRimLayerView: NSViewRepresentable {
+    let corner: CGFloat
+    let dark: Bool
+    let active: Bool
+    let reduced: Bool
+
+    func makeNSView(context: Context) -> ShimmerRimNSView {
+        ShimmerRimNSView()
+    }
+
+    func updateNSView(_ view: ShimmerRimNSView, context: Context) {
+        view.configure(corner: corner, dark: dark, active: active, reduced: reduced)
+    }
+}
+
+/// CoreAnimation conic border rotated in WindowServer so active tabs shimmer
+/// smoothly at 120 Hz without SwiftUI frame updates or offscreen `.drawingGroup`.
+private final class ShimmerRimNSView: NSView {
+    private static let spinKey = "pageShimmerSpin"
+
+    private let rimContainer = CALayer()
+    private let conicLayer = CAGradientLayer()
+    private let maskRoot = CALayer()
+    private let outerMask = CAShapeLayer()
+    private let innerMask = CAShapeLayer()
+
+    private var corner: CGFloat = -1
+    private var dark: Bool?
+    private var active = false
+    private var reduced = false
+    private var lastAccent: CGColor?
+    private var lastBounds: CGRect = .zero
+
+    override var isFlipped: Bool { true }
+    override func hitTest(_ point: NSPoint) -> NSView? { nil }
+
+    override init(frame frameRect: NSRect) {
+        super.init(frame: frameRect)
+        wantsLayer = true
+        let noAnim: [String: CAAction] = [
+            "bounds": NSNull(),
+            "position": NSNull(),
+            "frame": NSNull(),
+            "cornerRadius": NSNull(),
+            "colors": NSNull(),
+            "strokeColor": NSNull(),
+            "path": NSNull(),
+            "sublayers": NSNull(),
+        ]
+        layer?.masksToBounds = true
+        layer?.cornerCurve = .continuous
+        layer?.actions = noAnim
+
+        rimContainer.actions = noAnim
+        conicLayer.type = .conic
+        conicLayer.startPoint = CGPoint(x: 0.5, y: 0.5)
+        conicLayer.endPoint = CGPoint(x: 1.0, y: 0.5)
+        conicLayer.anchorPoint = CGPoint(x: 0.5, y: 0.5)
+        conicLayer.locations = [0, 0.3333, 0.6667, 1.0]
+        conicLayer.actions = noAnim
+
+        maskRoot.actions = noAnim
+        outerMask.fillColor = nil
+        outerMask.lineWidth = 2.5
+        outerMask.actions = noAnim
+        innerMask.fillColor = nil
+        innerMask.lineWidth = 1.25
+        innerMask.strokeColor = NSColor.white.cgColor
+        innerMask.actions = noAnim
+
+        maskRoot.addSublayer(outerMask)
+        maskRoot.addSublayer(innerMask)
+        rimContainer.addSublayer(conicLayer)
+        rimContainer.mask = maskRoot
+        layer?.addSublayer(rimContainer)
+    }
+
+    @available(*, unavailable)
+    required init?(coder: NSCoder) { fatalError() }
+
+    func configure(corner: CGFloat, dark: Bool, active: Bool, reduced: Bool) {
+        let accent = resolvedAccent(dark: dark)
+        let appearanceChanged = self.dark != dark || lastAccent != accent
+        let geometryChanged = self.corner != corner
+        let stateChanged = self.active != active || self.reduced != reduced
+
+        guard appearanceChanged || geometryChanged || stateChanged else { return }
+
+        self.dark = dark
+        self.active = active
+        self.reduced = reduced
+        self.lastAccent = accent
+
+        CATransaction.begin()
+        CATransaction.setDisableActions(true)
+
+        if geometryChanged {
+            self.corner = corner
+            layer?.cornerRadius = corner
+            updatePaths(force: true)
+        }
+
+        if appearanceChanged {
+            conicLayer.colors = Self.gradientColors(dark: dark, accent: accent)
+            outerMask.strokeColor = NSColor.white.withAlphaComponent(dark ? 0.28 : 0.22).cgColor
+        }
+
+        CATransaction.commit()
+        syncAnimation()
+    }
+
+    override func layout() {
+        super.layout()
+        guard bounds != lastBounds else { return }
+        CATransaction.begin()
+        CATransaction.setDisableActions(true)
+        updatePaths(force: true)
+        CATransaction.commit()
+        syncAnimation()
+    }
+
+    override func viewDidMoveToWindow() {
+        super.viewDidMoveToWindow()
+        conicLayer.contentsScale = window?.backingScaleFactor ?? 2
+        syncAnimation()
+    }
+
+    override func viewDidChangeBackingProperties() {
+        super.viewDidChangeBackingProperties()
+        conicLayer.contentsScale = window?.backingScaleFactor ?? 2
+    }
+
+    private func updatePaths(force: Bool) {
+        guard force || bounds != lastBounds else { return }
+        lastBounds = bounds
+        rimContainer.frame = bounds
+        maskRoot.frame = bounds
+        outerMask.frame = bounds
+        innerMask.frame = bounds
+
+        guard bounds.width > 0, bounds.height > 0 else {
+            outerMask.path = nil
+            innerMask.path = nil
+            conicLayer.bounds = .zero
+            return
+        }
+
+        let diameter = ceil(hypot(bounds.width, bounds.height)) + 4
+        conicLayer.bounds = CGRect(x: 0, y: 0, width: diameter, height: diameter)
+        conicLayer.position = CGPoint(x: bounds.midX, y: bounds.midY)
+
+        outerMask.path = strokePath(inset: 1.25)
+        innerMask.path = strokePath(inset: 0.625)
+    }
+
+    private func strokePath(inset: CGFloat) -> CGPath? {
+        let rect = bounds.insetBy(dx: inset, dy: inset)
+        guard rect.width > 0, rect.height > 0 else { return nil }
+        let r = max(0, min(corner - inset, min(rect.width, rect.height) / 2))
+        return CGPath(roundedRect: rect, cornerWidth: r, cornerHeight: r, transform: nil)
+    }
+
+    private func syncAnimation() {
+        guard active, !reduced, window != nil, bounds.width > 0, bounds.height > 0 else {
+            conicLayer.removeAnimation(forKey: Self.spinKey)
+            conicLayer.transform = (active && reduced)
+                ? CATransform3DMakeRotation(.pi / 4, 0, 0, 1)
+                : CATransform3DIdentity
+            return
+        }
+        conicLayer.transform = CATransform3DIdentity
+        if conicLayer.animation(forKey: Self.spinKey) == nil {
+            let spin = CABasicAnimation(keyPath: "transform.rotation.z")
+            spin.fromValue = 0.0
+            spin.toValue = Double.pi * 2.0
+            spin.duration = 3.6
+            spin.repeatCount = .infinity
+            spin.isRemovedOnCompletion = false
+            conicLayer.add(spin, forKey: Self.spinKey)
+        }
+    }
+
+    private func resolvedAccent(dark: Bool) -> CGColor {
+        var resolved: NSColor?
+        if let appearance = NSAppearance(named: dark ? .darkAqua : .aqua) {
+            appearance.performAsCurrentDrawingAppearance {
+                resolved = Palette.NS.accent.usingColorSpace(.sRGB) ?? Palette.NS.accent
+            }
+        }
+        return (resolved ?? Palette.NS.accent).cgColor
+    }
+
+    private static func gradientColors(dark: Bool, accent: CGColor) -> [CGColor] {
+        let edge = dark
+            ? NSColor.white.withAlphaComponent(0.03).cgColor
+            : NSColor.black.withAlphaComponent(0.02).cgColor
+        let accentColor = (NSColor(cgColor: accent) ?? .controlAccentColor)
+            .withAlphaComponent(dark ? 0.50 : 0.42).cgColor
+        let secondary = (dark
+            ? NSColor(srgbRed: 0.56, green: 0.78, blue: 1.0, alpha: 0.42)
+            : NSColor(srgbRed: 0.36, green: 0.62, blue: 0.98, alpha: 0.34)).cgColor
+        return [edge, accentColor, secondary, edge]
     }
 }

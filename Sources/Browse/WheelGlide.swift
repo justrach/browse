@@ -1,4 +1,5 @@
 import AppKit
+import QuartzCore
 
 /// A mouse wheel's notched steps, glided smoothly over display frames.
 /// WebKit on macOS jumps a whole notch per frame (40 pt per line) whereas
@@ -17,6 +18,9 @@ final class WheelGlide: NSObject {
     static let tau: CFTimeInterval = 0.045
 
     private weak var view: PageView?
+    private weak var probedWindow: NSWindow?
+    private var probedWindowNumber = 0
+    private var probePassed = false
     private var template: CGEvent?
     private var target = CGVector.zero
     private var done = CGVector.zero
@@ -44,11 +48,20 @@ final class WheelGlide: NSObject {
         guard add.dx != 0 || add.dy != 0 else { return false }
 
         template = cg
-        guard let check = make(0, 3), check.hasPreciseScrollingDeltas, check.scrollingDeltaY == 3,
-              check.window === event.window, check.locationInWindow == event.locationInWindow
-        else {
-            template = nil
-            return false
+        let win = event.window
+        let winNum = win?.windowNumber ?? 0
+        if !(probePassed && probedWindow === win && probedWindowNumber == winNum) {
+            guard let check = make(0, 3), check.hasPreciseScrollingDeltas, check.scrollingDeltaY == 3,
+                  check.window === win, check.locationInWindow == event.locationInWindow
+            else {
+                template = nil
+                probePassed = false
+                probedWindow = nil
+                return false
+            }
+            probedWindow = win
+            probedWindowNumber = winNum
+            probePassed = true
         }
 
         let left = CGVector(dx: target.dx - moved.dx, dy: target.dy - moved.dy)
@@ -63,6 +76,7 @@ final class WheelGlide: NSObject {
             last = CACurrentMediaTime()
             if view.window?.occlusionState.contains(.visible) == true {
                 let displayLink = view.displayLink(target: self, selector: #selector(frame))
+                displayLink.preferredFrameRateRange = CAFrameRateRange(minimum: 60, maximum: 120, preferred: 120)
                 displayLink.add(to: .main, forMode: .common)
                 self.link = displayLink
             } else {

@@ -284,6 +284,22 @@ struct Fold: View {
         let size = window.frame.size
         let inWindow = point.x >= 0 && point.x < size.width && point.y >= 0 && point.y < size.height
         let topDistance = size.height - point.y
+        let windowNum = window.windowNumber
+
+        var cachedTopWindow: Int?
+        func topWindowNumber() -> Int {
+            if let cached = cachedTopWindow { return cached }
+            let hit = NSWindow.windowNumber(at: screen, belowWindowWithWindowNumber: 0)
+            cachedTopWindow = hit
+            return hit
+        }
+        var cachedOwnSiblingAtScreen: Bool?
+        func hasOwnSiblingAtScreen() -> Bool {
+            if let cached = cachedOwnSiblingAtScreen { return cached }
+            let hit = NSApp.windows.contains { $0 !== window && $0.isVisible && $0.frame.contains(screen) }
+            cachedOwnSiblingAtScreen = hit
+            return hit
+        }
 
         if folding {
             // Distance from the left edge for the column, from the top for the strip.
@@ -298,24 +314,30 @@ struct Fold: View {
             pointer.crossing = inWindow || overshot
             if browser.peeking {
                 pass()
-                // Only this window counts, not another app's window over it. One
-                // of this app's own windows, such as a popover opened from the
-                // column, counts as the column.
-                let top = NSWindow.windowNumber(at: screen, belowWindowWithWindowNumber: 0)
-                let onWindow = top == window.windowNumber
-                let onOwnPanel = !onWindow && NSApp.windows.contains { $0.windowNumber == top }
-                let reach = prefs.sidebar ? prefs.sideWidth : Metrics.strip
                 // An extension's popup hangs from its button in the column: the
                 // column stays out while it is up, or the popup is left hanging
-                // from nothing (see ExtensionPopup).
+                // from nothing (see ExtensionPopup). Check cheap local state
+                // before querying the window server synchronously.
                 let popup = if #available(macOS 15.4, *) { ExtensionPopup.shared.isUp } else { false }
-                let over = onOwnPanel || popup || holding || overshot || (onWindow && inWindow && distance < reach)
+                let reach = prefs.sidebar ? prefs.sideWidth : Metrics.strip
+                let inReach = inWindow && distance < reach
+                let over: Bool
+                if popup || holding || overshot {
+                    over = true
+                } else if !inReach && !hasOwnSiblingAtScreen() {
+                    over = false
+                } else {
+                    let top = topWindowNumber()
+                    let onWindow = top == windowNum
+                    let onOwnPanel = !onWindow && NSApp.windows.contains { $0.windowNumber == top }
+                    over = onOwnPanel || (onWindow && inReach)
+                }
                 if over != inside { inside = over }
                 peek(over)
             } else if inWindow, distance < Fold.edge {
                 // Which window is under the pointer is asked only here, at the
                 // edge: another app's window over it doesn't bring the column out.
-                if NSWindow.windowNumber(at: screen, belowWindowWithWindowNumber: 0) == window.windowNumber {
+                if topWindowNumber() == windowNum {
                     if arriving == nil { arrive() }
                 } else {
                     pass()
@@ -338,15 +360,23 @@ struct Fold: View {
             let inTopZone = inWindow && point.x >= minX
             if browser.topPeeking {
                 passTop()
-                let topWin = NSWindow.windowNumber(at: screen, belowWindowWithWindowNumber: 0)
-                let onWindow = topWin == window.windowNumber
-                let onOwnPanel = !onWindow && NSApp.windows.contains { $0.windowNumber == topWin }
                 let popup = if #available(macOS 15.4, *) { ExtensionPopup.shared.isUp } else { false }
-                let over = onOwnPanel || popup || holding || (onWindow && inTopZone && topDistance < Metrics.strip + 8)
+                let inReach = inTopZone && topDistance < Metrics.strip + 8
+                let over: Bool
+                if popup || holding {
+                    over = true
+                } else if !inReach && !hasOwnSiblingAtScreen() {
+                    over = false
+                } else {
+                    let topWin = topWindowNumber()
+                    let onWindow = topWin == windowNum
+                    let onOwnPanel = !onWindow && NSApp.windows.contains { $0.windowNumber == topWin }
+                    over = onOwnPanel || (onWindow && inReach)
+                }
                 if over != insideTop { insideTop = over }
                 peekTop(over)
             } else if inTopZone, topDistance < Fold.fullScreenGutter {
-                if NSWindow.windowNumber(at: screen, belowWindowWithWindowNumber: 0) == window.windowNumber {
+                if topWindowNumber() == windowNum {
                     if arrivingTop == nil { arriveTop() }
                 } else {
                     passTop()

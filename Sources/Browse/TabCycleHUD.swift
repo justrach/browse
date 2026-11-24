@@ -9,11 +9,9 @@ struct TabCycleHUD: View {
     let onSelect: (Tab) -> Void
 
     @Environment(\.colorScheme) private var scheme
-    @ObservedObject private var previews = TabPreviewCache.shared
 
     var body: some View {
         let dark = scheme == .dark
-        let _ = previews.revision
         let maxVisible = 7
         let selectedIndex = tabs.firstIndex { $0.id == selectedID } ?? 0
         let start = max(0, min(selectedIndex - maxVisible / 2, tabs.count - maxVisible))
@@ -66,12 +64,16 @@ struct TabCycleHUD: View {
     }
 
     private func card(for tab: Tab, active: Bool, dark: Bool) -> some View {
-        let preview = previews.image(for: tab)
         let cardFill: Color = active ? Palette.accent.opacity(dark ? 0.16 : 0.10) : .clear
 
         return Button { onSelect(tab) } label: {
             VStack(alignment: .leading, spacing: 6) {
-                thumbnail(for: tab, preview: preview, active: active, dark: dark)
+                TabCycleThumbnail(
+                    tab: tab,
+                    slot: TabPreviewCache.shared.slot(for: tab),
+                    active: active,
+                    dark: dark
+                )
                 titleRow(for: tab, active: active)
             }
             .padding(6)
@@ -83,12 +85,55 @@ struct TabCycleHUD: View {
         .buttonStyle(.plain)
     }
 
-    private func thumbnail(for tab: Tab, preview: NSImage?, active: Bool, dark: Bool) -> some View {
+    private func titleRow(for tab: Tab, active: Bool) -> some View {
+        HStack(spacing: 5) {
+            Mark(icon: tab.icon, letter: tab.monogram, size: 12, dim: tab.asleep)
+            Text(tab.label)
+                .font(.system(size: 11, weight: active ? .semibold : .medium))
+                .foregroundStyle(active ? Palette.ink : Palette.muted)
+                .lineLimit(1)
+                .truncationMode(.tail)
+        }
+        .frame(width: 132, alignment: .leading)
+    }
+
+    private func footer(for chosen: Tab) -> some View {
+        HStack(spacing: 6) {
+            Mark(icon: chosen.icon, letter: chosen.monogram, size: 13, dim: chosen.asleep)
+            Text(chosen.label)
+                .font(.system(size: 12, weight: .semibold))
+                .foregroundStyle(Palette.ink)
+                .lineLimit(1)
+            if let host = chosen.address?.host()?.replacingOccurrences(of: "www.", with: "") {
+                Text("· \(host)")
+                    .font(.system(size: 11.5))
+                    .foregroundStyle(Palette.muted)
+                    .lineLimit(1)
+            }
+            if chosen.asleep {
+                Text("· Asleep")
+                    .font(.system(size: 11, weight: .medium))
+                    .foregroundStyle(Palette.muted.opacity(0.8))
+            }
+        }
+        .padding(.top, 2)
+    }
+}
+
+private struct TabCycleThumbnail: View {
+    @ObservedObject var tab: Tab
+    @ObservedObject var slot: TabPreviewCache.Slot
+    let active: Bool
+    let dark: Bool
+
+    var body: some View {
         let placeholderFill: Color = dark ? Color.white.opacity(0.06) : Color.black.opacity(0.04)
         let idleBorder: Color = dark ? Color.white.opacity(0.10) : Color.black.opacity(0.08)
         let strokeColor: Color = active ? Palette.accent : idleBorder
+        let _ = slot.revision
+        let preview = TabPreviewCache.shared.displayImage(for: tab, slot: slot)
 
-        return ZStack {
+        ZStack {
             RoundedRectangle(cornerRadius: 8, style: .continuous)
                 .fill(placeholderFill)
             if let pic = preview {
@@ -135,39 +180,5 @@ struct TabCycleHUD: View {
             .padding(4)
             .background(Circle().fill(bg))
             .padding(5)
-    }
-
-    private func titleRow(for tab: Tab, active: Bool) -> some View {
-        HStack(spacing: 5) {
-            Mark(icon: tab.icon, letter: tab.monogram, size: 12, dim: tab.asleep)
-            Text(tab.label)
-                .font(.system(size: 11, weight: active ? .semibold : .medium))
-                .foregroundStyle(active ? Palette.ink : Palette.muted)
-                .lineLimit(1)
-                .truncationMode(.tail)
-        }
-        .frame(width: 132, alignment: .leading)
-    }
-
-    private func footer(for chosen: Tab) -> some View {
-        HStack(spacing: 6) {
-            Mark(icon: chosen.icon, letter: chosen.monogram, size: 13, dim: chosen.asleep)
-            Text(chosen.label)
-                .font(.system(size: 12, weight: .semibold))
-                .foregroundStyle(Palette.ink)
-                .lineLimit(1)
-            if let host = chosen.address?.host()?.replacingOccurrences(of: "www.", with: "") {
-                Text("· \(host)")
-                    .font(.system(size: 11.5))
-                    .foregroundStyle(Palette.muted)
-                    .lineLimit(1)
-            }
-            if chosen.asleep {
-                Text("· Asleep")
-                    .font(.system(size: 11, weight: .medium))
-                    .foregroundStyle(Palette.muted.opacity(0.8))
-            }
-        }
-        .padding(.top, 2)
     }
 }

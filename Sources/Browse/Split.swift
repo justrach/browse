@@ -569,6 +569,18 @@ private final class PassThroughHostingView<Content: View>: NSHostingView<Content
 /// card hosting `StageView` directly below (zero SwiftUI in the 120 Hz loop).
 @MainActor
 private final class SplitPaneSlot<Overlay: View>: NSView {
+    private struct OverlayKey: Equatable {
+        var browserID: ObjectIdentifier
+        var tabID: Tab.ID
+        var front: Bool
+        var showsLinks: Bool
+        var finding: Bool
+        var suggesting: Browser.Suggesting?
+        var pageSelection: PageSelection?
+        var viewport: CGSize
+        var usesAgent: Bool
+    }
+
     private let headerView: SplitHeaderView
     private let shadowView = NSView()
     private let clipView = NSView()
@@ -581,6 +593,7 @@ private final class SplitPaneSlot<Overlay: View>: NSView {
     private var lastCardSize: CGSize = .zero
     private var lastFront: Bool?
     private var lastDarkChrome: Bool?
+    private var lastOverlayKey: OverlayKey?
 
     override var isFlipped: Bool { true }
 
@@ -651,7 +664,25 @@ private final class SplitPaneSlot<Overlay: View>: NSView {
             browser.select(tab)
         }
         stageView.show(tab.isBlank || tab.asleep || tab.floating ? nil : tab.web)
-        overlayHost.rootView = overlay
+
+        let shownSuggesting = (browser.suggesting?.tab == tab.id) ? browser.suggesting : nil
+        let shownSelection = (front && browser.pageSelection?.tabID == tab.id) ? browser.pageSelection : nil
+        let overlayKey = OverlayKey(
+            browserID: ObjectIdentifier(browser),
+            tabID: tab.id,
+            front: front,
+            showsLinks: front && browser.prefs.showsLinks,
+            finding: front && browser.finding,
+            suggesting: shownSuggesting,
+            pageSelection: shownSelection,
+            viewport: shownSelection != nil ? (tab.built?.bounds.size ?? .zero) : .zero,
+            usesAgent: shownSelection != nil && browser.prefs.usesAgent
+        )
+        if lastOverlayKey != overlayKey {
+            lastOverlayKey = overlayKey
+            overlayHost.rootView = overlay
+        }
+
         headerView.update(browser: browser, tab: tab, front: front, darkChrome: darkChrome)
 
         if lastFront != front || lastDarkChrome != darkChrome {
@@ -714,6 +745,18 @@ private final class SplitPaneSlot<Overlay: View>: NSView {
 /// hover-revealed swap/expand/close buttons, drag-to-swap, and context menu.
 @MainActor
 private final class SplitHeaderView: NSView {
+    private struct Snapshot: Equatable {
+        let tabID: Tab.ID
+        let label: String
+        let isBlank: Bool
+        let iconID: ObjectIdentifier?
+        let monogram: String
+        let front: Bool
+        let darkChrome: Bool
+        let buttonsVisible: Bool
+        let accentCG: CGColor
+    }
+
     private let isLeft: Bool
     private let activeDot = CALayer()
     private let iconView = NSImageView()
@@ -725,6 +768,8 @@ private final class SplitHeaderView: NSView {
 
     private weak var browser: Browser?
     private weak var tab: Tab?
+    private weak var lastIcon: NSImage?
+    private var lastSnapshot: Snapshot?
     private var front = false
     private var darkChrome = false
     private var hovering = false
@@ -788,35 +833,78 @@ private final class SplitHeaderView: NSView {
         self.front = front
         self.darkChrome = darkChrome
 
-        let ink: NSColor = darkChrome ? .white : .black
-        activeDot.backgroundColor = NSColor(Palette.accent).cgColor
-        activeDot.opacity = front ? 0.9 : 0
-        titleField.stringValue = tab.label
-        titleField.font = NSFont.systemFont(ofSize: 11.5, weight: front ? .semibold : .regular)
-        titleField.textColor = ink.withAlphaComponent(front ? 0.9 : 0.55)
+        let label = tab.label
+        let isBlank = tab.isBlank
+        let icon = isBlank ? nil : tab.icon
+        let monogram = (isBlank || icon != nil) ? "" : tab.monogram
+        let buttonsVisible = hovering || front
+        let accentCG = resolvedAccentCGColor()
+        let snap = Snapshot(
+            tabID: tab.id,
+            label: label,
+            isBlank: isBlank,
+            iconID: icon.map { ObjectIdentifier($0) },
+            monogram: monogram,
+            front: front,
+            darkChrome: darkChrome,
+            buttonsVisible: buttonsVisible,
+            accentCG: accentCG
+        )
+        if lastSnapshot == snap, lastIcon === icon { return }
 
-        if tab.isBlank {
+        let prev = lastSnapshot
+        let needsGeometryLayout = prev == nil || prev?.front != front || prev?.isBlank != isBlank
+        lastSnapshot = snap
+        lastIcon = icon
+
+        let ink: NSColor = darkChrome ? .white : .black
+        activeDot.backgroundColor = accentCG
+        activeDot.opacity = front ? 0.9 : 0
+
+        if prev?.label != label {
+            titleField.stringValue = label
+        }
+        if prev?.front != front || prev?.darkChrome != darkChrome {
+            titleField.font = NSFont.systemFont(ofSize: 11.5, weight: front ? .semibold : .regular)
+            titleField.textColor = ink.withAlphaComponent(front ? 0.9 : 0.55)
+        }
+
+        if isBlank {
+            iconView.image = nil
             iconView.isHidden = true
             monogramField.isHidden = true
-        } else if let icon = tab.icon {
-            iconView.image = icon
+        } else if let icon {
+            if prev?.iconID != snap.iconID { iconView.image = icon }
             iconView.isHidden = false
             monogramField.isHidden = true
         } else {
+            iconView.image = nil
             iconView.isHidden = true
             monogramField.isHidden = false
-            monogramField.stringValue = tab.monogram
+            monogramField.stringValue = monogram
             monogramField.textColor = ink.withAlphaComponent(0.75)
             monogramField.layer?.backgroundColor = ink.withAlphaComponent(0.08).cgColor
         }
 
         let btnTint = ink.withAlphaComponent(0.55)
+        let btnHoverTint = ink.withAlphaComponent(0.08)
+        let btnAlpha: CGFloat = buttonsVisible ? 1 : 0
         for btn in [swapBtn, aloneBtn, closeBtn] {
-            btn.contentTintColor = btnTint
-            btn.setHoverTint(ink.withAlphaComponent(0.08))
-            btn.alphaValue = (hovering || front) ? 1 : 0
+            if prev?.darkChrome != darkChrome {
+                btn.contentTintColor = btnTint
+                btn.setHoverTint(btnHoverTint)
+            }
+            btn.alphaValue = btnAlpha
         }
-        needsLayout = true
+        if needsGeometryLayout { needsLayout = true }
+    }
+
+    private func resolvedAccentCGColor() -> CGColor {
+        var cg: CGColor?
+        effectiveAppearance.performAsCurrentDrawingAppearance {
+            cg = Palette.NS.accent.cgColor
+        }
+        return cg ?? Palette.NS.accent.cgColor
     }
 
     override func updateTrackingAreas() {
@@ -1209,6 +1297,11 @@ private final class SplitRatioPill: NSView {
 /// Non-observable frame cache for sidebar rows so layout updates never trigger SwiftUI redraws.
 final class SplitRowFrames {
     var rects: [Tab.ID: CGRect] = [:]
+    var resolver: (() -> [Tab.ID: CGRect])?
+
+    func currentRects() -> [Tab.ID: CGRect] {
+        resolver?() ?? rects
+    }
 }
 
 @MainActor
@@ -1256,7 +1349,7 @@ enum SplitMergeResolver {
 /// Overlay on a sidebar row while another tab is held over its middle band,
 /// previewing the left/right Split View pair created on release.
 struct MergeHint: View {
-    @ObservedObject var browser: Browser
+    let browser: Browser
     let tab: Tab
     @ObservedObject private var merge = SplitMergeState.shared
 
@@ -1268,23 +1361,25 @@ struct MergeHint: View {
     }
 
     var body: some View {
-        GeometryReader { geo in
+        Group {
             if let shown, let source = browser.tabs.first(where: { $0.id == shown.sourceID }) {
-                let halfW = max(1, geo.size.width / 2)
-                let shape = RoundedRectangle(cornerRadius: 9, style: .continuous)
-                ZStack(alignment: .topLeading) {
-                    HalfLabel(tab: tab, emphasized: false)
-                        .frame(width: halfW, height: geo.size.height)
-                        .offset(x: shown.onLeft ? halfW : 0)
-                    HalfLabel(tab: source, emphasized: true)
-                        .frame(width: halfW, height: geo.size.height)
-                        .background(shape.fill(Palette.ink.opacity(0.08)))
-                        .offset(x: shown.onLeft ? 0 : halfW)
+                GeometryReader { geo in
+                    let halfW = max(1, geo.size.width / 2)
+                    let shape = RoundedRectangle(cornerRadius: 9, style: .continuous)
+                    ZStack(alignment: .topLeading) {
+                        HalfLabel(tab: tab, emphasized: false)
+                            .frame(width: halfW, height: geo.size.height)
+                            .offset(x: shown.onLeft ? halfW : 0)
+                        HalfLabel(tab: source, emphasized: true)
+                            .frame(width: halfW, height: geo.size.height)
+                            .background(shape.fill(Palette.ink.opacity(0.08)))
+                            .offset(x: shown.onLeft ? 0 : halfW)
+                    }
+                    .frame(width: geo.size.width, height: geo.size.height, alignment: .topLeading)
+                    .background(shape.fill(Palette.ground))
+                    .overlay(shape.strokeBorder(Palette.accent.opacity(0.45), lineWidth: 1))
+                    .animation(Motion.quick, value: shown.onLeft)
                 }
-                .frame(width: geo.size.width, height: geo.size.height, alignment: .topLeading)
-                .background(shape.fill(Palette.ground))
-                .overlay(shape.strokeBorder(Palette.accent.opacity(0.45), lineWidth: 1))
-                .animation(Motion.quick, value: shown.onLeft)
             }
         }
         .allowsHitTesting(false)
