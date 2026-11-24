@@ -7,7 +7,8 @@
 //! hidden once it's on the page. They're compiled as two lists, so each
 //! stays well under the rules WebKit takes in one.
 //!
-//! One thing is put right on the way. A filter ending in `^` ends at a
+//! Two things are put right on the way. The lists' `$generichide`
+//! exceptions, which adblock drops, are put back (see `cosmetic`). And a filter ending in `^` ends at a
 //! separator — anything but a letter, a digit or `_ - . %` — or at the end
 //! of the address. adblock's conversion drops that `^`, and what's left
 //! matches as a prefix: `||google.com/log^`, EasyPrivacy's rule for
@@ -53,6 +54,81 @@ fn edge(line: &str) -> Edge {
     }
 }
 
+/// The hiding rules, with the lists' `$generichide` put back. EasyList says
+/// `@@||mail.google.com^$generichide`: on Gmail, hide only what's written
+/// for Gmail, not the thousands of `.ads` and `[data-ad-name]` meant for
+/// any site — which, applied to a mail client, hid the mail. adblock's
+/// conversion drops those exceptions, so they're made here: every rule for
+/// any site first, then an `ignore-previous-rules` for each such page, then
+/// the rules for particular sites, which it leaves alone.
+fn cosmetic(rules: Vec<CbRule>, texts: &[String]) -> Vec<serde_json::Value> {
+    let rules: Vec<serde_json::Value> = rules
+        .into_iter()
+        .map(|rule| serde_json::to_value(rule).expect("rules serialize"))
+        .collect();
+    let (particular, generic): (Vec<_>, Vec<_>) =
+        rules.into_iter().partition(|rule| rule["trigger"].get("if-domain").is_some());
+    let exceptions: Vec<serde_json::Value> = texts
+        .iter()
+        .flat_map(|text| text.lines())
+        .filter_map(|line| generichide(line.trim()))
+        .collect();
+    eprintln!("{} generichide exceptions put back", exceptions.len());
+    generic.into_iter().chain(exceptions).chain(particular).collect()
+}
+
+/// `@@PATTERN$generichide[,domain=a|b]` as a WebKit rule for every load on
+/// the page it names.
+fn generichide(line: &str) -> Option<serde_json::Value> {
+    let (pattern, options) = line.strip_prefix("@@")?.rsplit_once('$')?;
+    let options: Vec<&str> = options.split(',').collect();
+    if !options.iter().any(|o| matches!(*o, "generichide" | "ghide")) {
+        return None;
+    }
+    let domains: Vec<String> = options
+        .iter()
+        .filter_map(|o| o.strip_prefix("domain="))
+        .flat_map(|d| d.split('|'))
+        .filter(|d| !d.starts_with('~'))
+        .map(|d| format!("*{d}"))
+        .collect();
+
+    let (mut filter, body) = if let Some(rest) = pattern.strip_prefix("||") {
+        (String::from("^[^:]+:(//)?([^/]+\\.)?"), rest)
+    } else if let Some(rest) = pattern.strip_prefix('|') {
+        (String::from("^"), rest)
+    } else {
+        (String::new(), pattern)
+    };
+    // A host's end: in a page's address, always a `/` or a `:`.
+    let host_end = pattern.starts_with("||") && body.ends_with('^') && !body[..body.len() - 1].contains(['/', '*', '^']);
+    let body = body.strip_suffix('^').unwrap_or(body);
+    for c in body.chars() {
+        match c {
+            '*' => filter += ".*",
+            '^' => filter += "[^a-zA-Z0-9_.%-]",
+            '.' | '?' | '+' | '(' | ')' | '[' | ']' | '{' | '}' | '|' | '\\' | '$' => {
+                filter.push('\\');
+                filter.push(c);
+            }
+            _ => filter.push(c),
+        }
+    }
+    if host_end {
+        filter += "[/:]";
+    }
+    // Matched against the page, not the request: WebKit hides with what
+    // every load on the page matches, so an exception on the request alone
+    // ends with the page's first image from somewhere else.
+    let mut trigger = serde_json::json!({ "url-filter": ".*" });
+    if !domains.is_empty() {
+        trigger["if-domain"] = domains.into();
+    } else if !filter.is_empty() {
+        trigger["if-top-url"] = vec![filter].into();
+    }
+    Some(serde_json::json!({ "trigger": trigger, "action": { "type": "ignore-previous-rules" } }))
+}
+
 fn convert(line: &str, parse: ParseOptions) -> Vec<CbRule> {
     let mut set = FilterSet::new(true);
     set.add_filter_list(line.to_string(), parse);
@@ -87,7 +163,7 @@ fn main() {
     let (rules, used) = set.into_content_blocking().expect("a debug FilterSet converts");
     eprintln!("{} rules from {} filters", rules.len(), used.len());
     if !matches!(rule_types, RuleTypes::NetworkOnly) {
-        println!("{}", serde_json::to_string(&rules).expect("rules serialize"));
+        println!("{}", serde_json::to_string(&cosmetic(rules, &texts)).expect("rules serialize"));
         return;
     }
 

@@ -14,6 +14,10 @@ enum Agent {
     @MainActor static func rich(_ text: String) -> AttributedString { AttributedString(text) }
 }
 
+enum YouTubeHelper {
+    static func linkTimestamps(in text: String) -> String { text }
+}
+
 enum Citations {
     struct Source: Identifiable { let id = 0 }
     static func mark(_ text: String) -> (text: String, sources: [Source]) { (text, []) }

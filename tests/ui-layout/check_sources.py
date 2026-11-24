@@ -205,7 +205,8 @@ check(
 )
 
 # 14. Strict modal overlay mutual exclusion (⌘K + ⌘Y can never stack; matches Browse.OverlayMutex).
-browser_src = read("Sources/Browse/Browser.swift")
+browser_delegates_src = read("Sources/Browse/BrowserDelegates.swift") if (ROOT / "Sources/Browse/BrowserDelegates.swift").exists() else ""
+browser_src = read("Sources/Browse/Browser.swift") + ("\n" + browser_delegates_src if browser_delegates_src else "")
 app_src = read("Sources/Browse/App.swift")
 required_overlay_guards = [
     "dismissOverlays(keeping: .switcher)",
@@ -396,6 +397,28 @@ check(
     and "class FullScreenEscape" in app_src
     and "toggleInspectorDock" in inspector_src,
     "Upstream follow-up batch: Add Image to Photos + entitlements, Privacy PermissionSites, opt-in WindowFullScreen (0 MutationObservers), shared pins across Spaces, FullScreenEscape routing, doc-bound favicons, rename title guard, cross-Space PiP return, and dockable Web Inspector",
+)
+
+# 22. Roadmap batch & hygiene invariants (WheelGlide, User Tab Groups, Docked sidePanel, $generichide Shield, WS prewarm cleanup).
+wheel_glide_src = read("Sources/Browse/WheelGlide.swift")
+tab_group_src = read("Sources/Browse/TabGroup.swift")
+session_src = read("Sources/Browse/Session.swift")
+side_panel_src = read("Sources/Browse/ExtensionSidePanel.swift")
+user_groups_lean = read("lean-proofs/Browse/UserTabGroups.lean")
+agent_transport_src = read("Sources/Browse/AgentTransport.swift") if (ROOT / "Sources/Browse/AgentTransport.swift").exists() else ""
+agent_all_src = agent_src + "\n" + agent_transport_src
+check(
+    "static var on = false" in wheel_glide_src
+    and "addEventListener('wheel'" not in wheel_glide_src
+    and "struct TabGroup:" in tab_group_src
+    and "var groupID: UUID? = nil" in session_src
+    and "var groups: [TabGroup]? = nil" in session_src
+    and "namespace Browse.UserTabGroups" in user_groups_lean
+    and "final class SidePanelPages" in side_panel_src
+    and "struct SidePanelBeside" in side_panel_src
+    and "ignore-previous-rules" in shield_src
+    and "GRAFF_CODEX_WS" not in agent_all_src,
+    "PR 1-4 invariants: opt-in WheelGlide, UserTabGroups + optional Session fields + Lean proof, docked SidePanel, Shield $generichide preservation, zero GRAFF_CODEX_WS workaround",
 )
 
 if failures:

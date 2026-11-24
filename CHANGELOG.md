@@ -27,6 +27,12 @@ All notable changes to **browse** are documented here, newest first.
 - **Extension popup sizing & standards-mode HTML shims (`ExtensionPopup.swift`, `Extensions.swift`, `ExtensionShims.swift`)**: Persisted bounded `[25...800, 25...600]` popup dimensions across launches, tracked full-lifetime growth/shrinkage with zero `MutationObserver`s, cleared saved sizes on uninstall, and placed `<script>` shims after BOM/doctype/`<html>` while ignoring `<header>`.
 - **Navigation, Dock, Forms, Hover & Dvorak–QWERTY `⌘` polish (`Links.swift`, `App.swift`, `Fold.swift`, `Browser.swift`, `Forms.swift`, `KeyLayout.swift`, `Shortcuts.swift`, `Spaces.swift`)**: Added `Dvorak – QWERTY ⌘` shortcut resolution, captioned bare email field recognition, folded-edge hover suppression, Dock reopen/Window menu registration, recent awake pin navigation on `⌘W`, appearance-toned Space swatches, and fixed `agentRowsOrigin` drag-out coordinates in the sidebar.
 
+### Fixed
+
+- **Gmail / Google Workspace Shield exceptions (`tools/shield-lists/src/main.rs`, `Assets/Shield/`, `Shield.swift`)**: Restored EasyList `$generichide` `ignore-previous-rules` exceptions (`#38`) and preserved them inside `Shield.pruneSlowGlobalCosmetics` so global cosmetic selectors no longer hide Gmail, Calendar, Drive, Docs, or Meet elements.
+- **Zero-warning Swift build & test harness (`ExtensionShims.swift`, `Links.swift`, `Float.swift`, `Bench.swift`, `Tab.swift`, `tests/markdown-latex/main.swift`)**: Replaced deprecated `NSSpeechSynthesizer` with `AVSpeechSynthesizer`, fixed MainActor/Sendable closure capture warnings, removed unused `WKProcessPool`, discarded `fcntl` results cleanly, and restored `tests/markdown-latex.sh` execution.
+- **Mega-file modularization & source guardrails (`ExtensionShimsScript.swift`, `AgentTransport.swift`, `BrowserDelegates.swift`, `tests/ui-layout/check_sources.py`)**: Extracted the extension JS shim payload, ACP transport helpers, and WebKit navigation/download delegates into focused files alongside Guardrail #22.
+
 ## 1.10.1 — 24 November 2026
 
 ### Fixed
