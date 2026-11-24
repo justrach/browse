@@ -62,6 +62,25 @@ final class Preferences: ObservableObject {
     @Published var compactTopBar: Bool {
         didSet { store.set(compactTopBar, forKey: "chrome.asideBar") }
     }
+    /// Always show an address bar above the page (opt-in #15), including in top-tab mode.
+    @Published var alwaysShowAddressBar: Bool {
+        didSet { store.set(alwaysShowAddressBar, forKey: "toolbar.alwaysShowAddress") }
+    }
+    /// Tint the top window title strip to the active page's colour even in top-tab mode (#25).
+    @Published var tintedTitleBar: Bool {
+        didSet { store.set(tintedTitleBar, forKey: "chrome.tintedTitleBar") }
+    }
+    /// Eases notched mouse-wheel steps smoothly over frames (`WheelGlide`). Off unless turned on.
+    @Published var smoothWheel: Bool {
+        didSet {
+            store.set(smoothWheel, forKey: "scroll.smoothWheel")
+            WheelGlide.on = smoothWheel
+        }
+    }
+    /// Docked extension side panel width (`ExtensionSidePanel`).
+    @Published var sidePanelWidth: CGFloat {
+        didSet { store.set(Double(sidePanelWidth), forKey: "sidePanel.width") }
+    }
     /// The column folded away whenever the pointer isn't at the left edge,
     /// rather than only after ⌘S (see Fold.swift). Off unless asked for.
     @Published var sideHides: Bool {
@@ -475,6 +494,13 @@ final class Preferences: ObservableObject {
         sidebar = store.object(forKey: "sidebar") as? Bool
             ?? (store.string(forKey: "manner") == "side")
         compactTopBar = store.object(forKey: "chrome.asideBar") as? Bool ?? true
+        alwaysShowAddressBar = store.bool(forKey: "toolbar.alwaysShowAddress")
+        tintedTitleBar = store.bool(forKey: "chrome.tintedTitleBar")
+        let glide = store.bool(forKey: "scroll.smoothWheel")
+        smoothWheel = glide
+        WheelGlide.on = glide
+        let panelW = store.object(forKey: "sidePanel.width") as? Double ?? Double(Preferences.sidePanelStart)
+        sidePanelWidth = min(Preferences.sidePanelWidths.upperBound, max(Preferences.sidePanelWidths.lowerBound, CGFloat(panelW)))
         sideHides = store.bool(forKey: "sidebar.hides")
         sideTint = store.object(forKey: "sidebar.tint") as? Bool ?? true
         let width = store.object(forKey: "sidebar.width") as? Double ?? Double(Metrics.side)

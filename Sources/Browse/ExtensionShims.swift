@@ -39,7 +39,7 @@ enum ExtensionShims {
     /// one needs nothing redone, which matters at launch — preparing reads
     /// every script and page an extension ships.
     nonisolated static let stamp = ".search-shim"
-    nonisolated private static let preparation = "8"
+    nonisolated private static let preparation = "9"
     nonisolated static let version: String = {
         SHA256.hash(data: Data((script + PasskeyRelay.page + preparation).utf8)).prefix(8).map { String(format: "%02x", $0) }.joined() + (Store.testing ? "-test" : "")
     }()
@@ -85,6 +85,15 @@ enum ExtensionShims {
         // a module one imports it first, as its imports run before anything
         // written above them.
         if var background = manifest["background"] as? [String: Any] {
+            // Hybrid MV3 manifests (such as Vimium C) may list both `service_worker`
+            // and legacy `scripts`; WebKit picks `scripts` as a background page and
+            // fails when MV3 code expects a worker. Keep `service_worker` in MV3.
+            if (manifest["manifest_version"] as? Int) == 3,
+               let worker = background["service_worker"] as? String, !worker.isEmpty,
+               background["scripts"] != nil {
+                background.removeValue(forKey: "scripts")
+                background.removeValue(forKey: "persistent")
+            }
             // A manifest is not a way out of its own package: a worker path
             // that resolves outside the folder, or is a link, is left alone.
             if let worker = background["service_worker"] as? String,
@@ -1499,18 +1508,17 @@ enum ExtensionShims {
       // and the same page opened in a tab ("pop out"). They keep their
       // address, which extensions check (Dark Reader only answers its popup
       // at its own).
+      // Relay storage.onChanged to all non-background extension views (popups,
+      // popped-out tabs, options, side panel, offscreen) so auth/server changes
+      // (such as Bitwarden login/self-hosted URL) propagate cleanly everywhere.
       {
-        const manifest = (() => { try { return runtime.getManifest() || {}; } catch (e) { return {}; } })();
-        const action = manifest.action || manifest.browser_action || {};
-        let popupPath = null;
-        try { if (typeof action.default_popup === "string" && action.default_popup) popupPath = new URL(action.default_popup, location.origin + "/").pathname; } catch (e) {}
-        const relay = popupPath && !embedded && typeof BroadcastChannel === "function" ? new BroadcastChannel("search-storage") : null;
+        const relay = !inContent && !embedded && typeof BroadcastChannel === "function" ? new BroadcastChannel("search-storage") : null;
         if (relay && background && chrome.storage && chrome.storage.onChanged) {
           kept.add(chrome.storage.onChanged);
           chrome.storage.onChanged.addListener((changes, area) => {
             try { relay.postMessage({ changes, area }); } catch (e) {}
           });
-        } else if (relay && !background && typeof location !== "undefined" && location.pathname === popupPath && chrome.storage) {
+        } else if (relay && !background && !inContent && chrome.storage) {
           const all = new Set(), byArea = {};
           const mend = (ev, set) => {
             if (!ev || typeof ev !== "object") return;
@@ -2628,9 +2636,38 @@ enum ExtensionShims {
     /// Remembered per extension: the side panel it set, and whether its
     /// button should open it.
     static var panelPath: [String: String] = [:]
+    static var panelTabPath: [String: [UUID: String]] = [:]
     static var panelOnClick: Set<String> = []
     /// Offscreen documents, one per extension, as Chrome allows.
     static var offscreen: [String: WKWebView] = [:]
+    /// Hidden off-screen host window so offscreen WKWebViews stay scheduled
+    /// for timers and WebAssembly (e.g. Bitwarden Argon2) instead of throttling.
+    private static let offscreenHost: NSWindow = {
+        let w = NSWindow(
+            contentRect: NSRect(x: -10000, y: -10000, width: 800, height: 600),
+            styleMask: [.borderless],
+            backing: .buffered,
+            defer: false
+        )
+        w.alphaValue = 0
+        w.ignoresMouseEvents = true
+        w.isReleasedWhenClosed = false
+        w.orderOut(nil)
+        return w
+    }()
+
+    static func closeOffscreen(_ id: String) {
+        guard let page = offscreen.removeValue(forKey: id) else { return }
+        page.stopLoading()
+        page.removeFromSuperview()
+    }
+
+    private static func visibleTab(_ raw: Any?, in owner: Extensions) -> Tab? {
+        guard let index = (raw as? NSNumber)?.intValue,
+              index >= 0, owner.visibleTabs.indices.contains(index)
+        else { return nil }
+        return owner.visibleTabs[index]
+    }
     /// One voice for every extension that reads aloud.
     static let speaker = NSSpeechSynthesizer()
 
@@ -2863,12 +2900,21 @@ enum ExtensionShims {
         case "downloads.pause", "downloads.resume", "downloads.cancel", "downloads.removeFile", "downloads.getFileIcon":
             throw Unsupported(what: "\(api) isn't available in browse yet")
 
-        // MARK: side panel — a tab of its own, since this window has one column
+        // MARK: side panel — docked beside the page (falling back to a tab when unavailable)
         case "sidePanel.setOptions":
-            if let path = (first as? [String: Any])?["path"] as? String { panelPath[id] = path }
+            let opts = first as? [String: Any] ?? [:]
+            if let tab = visibleTab(opts["tabId"], in: owner) {
+                if let path = opts["path"] as? String {
+                    panelTabPath[id, default: [:]][tab.id] = path
+                }
+            } else if let path = opts["path"] as? String {
+                panelPath[id] = path
+            }
             return nil
         case "sidePanel.getOptions":
-            return ["enabled": true, "path": panelPath[id] ?? defaultPanel(context) ?? ""]
+            let opts = first as? [String: Any] ?? [:]
+            let tabSpecific = visibleTab(opts["tabId"], in: owner).flatMap { panelTabPath[id]?[$0.id] }
+            return ["enabled": true, "path": tabSpecific ?? panelPath[id] ?? defaultPanel(context) ?? ""]
         case "sidePanel.setPanelBehavior":
             if let on = (first as? [String: Any])?["openPanelOnActionClick"] as? Bool {
                 if on { panelOnClick.insert(id) } else { panelOnClick.remove(id) }
@@ -2877,7 +2923,8 @@ enum ExtensionShims {
         case "sidePanel.getPanelBehavior":
             return ["openPanelOnActionClick": panelOnClick.contains(id)]
         case "sidePanel.open":
-            openPanel(context, owner: owner)
+            let opts = first as? [String: Any] ?? [:]
+            openPanel(context, owner: owner, tab: visibleTab(opts["tabId"], in: owner)?.id)
             return nil
 
         // MARK: offscreen — a page with a DOM for a worker that has none
@@ -2886,8 +2933,10 @@ enum ExtensionShims {
             guard let path = (first as? [String: Any])?["url"] as? String,
                   let configuration = context.webViewConfiguration
             else { throw Unsupported(what: "No page for the offscreen document") }
-            let page = WKWebView(frame: NSRect(x: 0, y: 0, width: 800, height: 600), configuration: configuration)
+            let frame = offscreenHost.contentView?.bounds ?? NSRect(x: 0, y: 0, width: 800, height: 600)
+            let page = WKWebView(frame: frame, configuration: configuration)
             guard let url = ExtensionShims.page(path, in: context) else { throw Unsupported(what: "No page for the offscreen document") }
+            offscreenHost.contentView?.addSubview(page)
             page.load(URLRequest(url: url))
             offscreen[id] = page
             // Answered once the page has loaded, as Chrome does: the worker's
@@ -2898,7 +2947,7 @@ enum ExtensionShims {
             }
             return nil
         case "offscreen.closeDocument":
-            offscreen[id] = nil
+            closeOffscreen(id)
             return nil
         case "offscreen.hasDocument":
             return offscreen[id] != nil
@@ -2961,6 +3010,7 @@ enum ExtensionShims {
                 add("BACKGROUND", script.map { context.baseURL.appendingPathComponent($0) })
             }
             if ExtensionPopup.shared.extensionID == id { add("POPUP", ExtensionPopup.shared.view?.url) }
+            if let panelURL = SidePanelPages.shared.activeURL(for: id) { add("SIDE_PANEL", panelURL) }
             if let page = offscreen[id] { add("OFFSCREEN_DOCUMENT", page.url) }
             return found
 
@@ -3275,11 +3325,43 @@ enum ExtensionShims {
                         "workArea": ["left": v.minX, "top": v.minY, "width": v.width, "height": v.height]] as [String: Any]
             }
 
-        // MARK: tab groups — there are none
+        // MARK: tab groups
         case "tabGroups.query":
-            return []
-        case "tabGroups.get", "tabGroups.update", "tabGroups.move":
-            throw Unsupported(what: "Search has no tab groups")
+            let query = first as? [String: Any] ?? [:]
+            return browser.tabGroups.compactMap { g -> [String: Any]? in
+                if let collapsed = query["collapsed"] as? Bool, g.collapsed != collapsed { return nil }
+                if let title = query["title"] as? String, g.name != title { return nil }
+                return Self.chromeTabGroup(g)
+            }
+        case "tabGroups.get":
+            guard let wanted = (first as? NSNumber)?.intValue,
+                  let g = browser.tabGroups.first(where: { TabGroup.number($0.id) == wanted })
+            else { throw Unsupported(what: "No tab group with id \(first ?? "")") }
+            return Self.chromeTabGroup(g)
+        case "tabGroups.update":
+            guard let wanted = (first as? NSNumber)?.intValue,
+                  let g = browser.tabGroups.first(where: { TabGroup.number($0.id) == wanted })
+            else { throw Unsupported(what: "No tab group with id \(first ?? "")") }
+            let props = (args.count > 1 ? args[1] : nil) as? [String: Any] ?? [:]
+            if let title = props["title"] as? String { browser.renameTabGroup(g.id, to: title) }
+            if let collapsed = props["collapsed"] as? Bool, g.collapsed != collapsed {
+                browser.toggleTabGroup(g.id)
+            }
+            if let color = props["color"] as? String,
+               let idx = Self.chromeGroupColours.firstIndex(of: color) {
+                browser.setTabGroupColour(g.id, to: idx)
+            }
+            return browser.tabGroups.first(where: { $0.id == g.id }).map(Self.chromeTabGroup)
+        case "tabGroups.move":
+            guard let wanted = (first as? NSNumber)?.intValue,
+                  let g = browser.tabGroups.first(where: { TabGroup.number($0.id) == wanted })
+            else { throw Unsupported(what: "No tab group with id \(first ?? "")") }
+            let props = (args.count > 1 ? args[1] : nil) as? [String: Any] ?? [:]
+            if let idx = (props["index"] as? NSNumber)?.intValue {
+                let target = max(0, min(idx, max(0, browser.tabGroups.count - 1)))
+                browser.moveTabGroup(g.id, to: target)
+            }
+            return browser.tabGroups.first(where: { $0.id == g.id }).map(Self.chromeTabGroup)
 
         // MARK: identity
         case "identity.launchWebAuthFlow":
@@ -3443,13 +3525,35 @@ enum ExtensionShims {
         return url
     }
 
-    static func openPanel(_ context: WKWebExtensionContext, owner: Extensions) {
-        guard let path = panelPath[context.uniqueIdentifier] ?? defaultPanel(context) else { return }
-        // Resolved, not appended: a path can carry a query — Claude's names
-        // the tab its panel is for, sidepanel.html?tabId=… — which appended
-        // would be escaped into the file's name.
-        guard let url = ExtensionShims.page(path, in: context) else { return }
-        owner.browser?.open(url, foreground: true)
+    private static let chromeGroupColours = ["grey", "blue", "green", "orange", "red", "purple"]
+
+    private static func chromeTabGroup(_ g: TabGroup) -> [String: Any] {
+        let color = chromeGroupColours[max(0, g.colour ?? 0) % chromeGroupColours.count]
+        return [
+            "id": TabGroup.number(g.id),
+            "title": g.name,
+            "collapsed": g.collapsed,
+            "color": color,
+            "windowId": 1,
+        ]
+    }
+
+    static func openPanel(_ context: WKWebExtensionContext, owner: Extensions, tab: Tab.ID? = nil) {
+        let id = context.uniqueIdentifier
+        guard let path = tab.flatMap({ panelTabPath[id]?[$0] }) ?? panelPath[id] ?? defaultPanel(context) else { return }
+        guard let url = ExtensionShims.page(path, in: context), let browser = owner.browser else { return }
+        if browser.showSidePanel(context, url: url, for: tab) == .noPanel {
+            browser.open(url, foreground: true)
+        }
+    }
+
+    static func togglePanel(_ context: WKWebExtensionContext, owner: Extensions, tab: Tab.ID? = nil) {
+        let id = context.uniqueIdentifier
+        guard let path = tab.flatMap({ panelTabPath[id]?[$0] }) ?? panelPath[id] ?? defaultPanel(context) else { return }
+        guard let url = ExtensionShims.page(path, in: context), let browser = owner.browser else { return }
+        if browser.toggleSidePanel(context, url: url, for: tab) == .noPanel {
+            browser.open(url, foreground: true)
+        }
     }
 
     // MARK: - bookmarks, as Chrome shapes them

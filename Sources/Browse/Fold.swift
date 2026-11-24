@@ -235,7 +235,7 @@ struct Fold: View {
     }
 
     private var asideBarWanted: Bool {
-        prefs.compactTopBar && (prefs.sidebar || browser.folded) && browser.active?.immersed != true
+        (prefs.compactTopBar || prefs.alwaysShowAddressBar) && (prefs.sidebar || browser.folded) && browser.active?.immersed != true
     }
 
     private var asideBar: Bool {

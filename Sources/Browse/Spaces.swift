@@ -169,6 +169,7 @@ enum Spaces {
 struct Parked {
     var tabs: [Tab]
     var active: Tab.ID?
+    var groups: [TabGroup] = []
 }
 
 extension Browser {
@@ -201,12 +202,13 @@ extension Browser {
         // stream keeps playing in the space you left, as it does in a tab
         // you left. ⌘⇧M, or its speaker, stops it.
         let reusePins = prefs.sharedPins && Spaces.store(for: spaceID) === Spaces.store(for: id)
+        let savedGroups = tabGroups
         if reusePins {
             let livePins = tabs.filter { $0.pin != nil }
             let leavingLoose = tabs.filter { $0.pin == nil }
             let leavingActive = leavingLoose.contains(where: { $0.id == activeID }) ? activeID : nil
             let wasOnPinID = livePins.first(where: { $0.id == activeID })?.id
-            parked[spaceID] = Parked(tabs: leavingLoose, active: leavingActive)
+            parked[spaceID] = Parked(tabs: leavingLoose, active: leavingActive, groups: savedGroups)
 
             if parked[id] == nil { parked[id] = loadRow(id) }
             let dest = parked.removeValue(forKey: id) ?? Parked(tabs: [], active: nil)
@@ -220,9 +222,11 @@ extension Browser {
             Spaces.current = id
             Store.settings.set(id.uuidString, forKey: "space.current")
             if combined.isEmpty {
+                tabGroups = []
                 showRow([], active: nil)
                 restoreSession()
             } else {
+                tabGroups = dest.groups
                 let targetActive: Tab.ID? = if let da = dest.active, combined.contains(where: { $0.id == da }) {
                     da
                 } else if let wasOnPinID, combined.contains(where: { $0.id == wasOnPinID }) {
@@ -231,18 +235,22 @@ extension Browser {
                     (destLoose.first ?? combined.first)?.id
                 }
                 showRow(combined, active: targetActive)
+                pruneOrphanGroups()
                 if let active, !active.wake() { active.revive() }
             }
         } else {
-            parked[spaceID] = Parked(tabs: tabs, active: activeID)
+            parked[spaceID] = Parked(tabs: tabs, active: activeID, groups: savedGroups)
 
             spaceID = id
             Spaces.current = id
             Store.settings.set(id.uuidString, forKey: "space.current")
             if let back = parked.removeValue(forKey: id), !back.tabs.isEmpty {
+                tabGroups = back.groups
                 showRow(back.tabs, active: back.active)
+                pruneOrphanGroups()
                 if let active, !active.wake() { active.revive() }
             } else {
+                tabGroups = []
                 showRow([], active: nil)
                 restoreSession()
             }
@@ -346,6 +354,7 @@ extension Browser {
         if sharedStore {
             moved = tab
             moved.agentGroup = nil
+            moved.userGroupID = nil
         } else {
             moved = Tab(configuration: Web.configuration(space: targetID))
             prepare(moved)
@@ -383,7 +392,7 @@ extension Browser {
         announce("Moved to \(targetSpace.name)")
     }
 
-    private func writeParkedSession(space: UUID, row: Parked) {
+    func writeParkedSession(space: UUID, row: Parked) {
         var entries: [Session.Entry] = []
         var activeIndex = 0
         for tab in row.tabs {
@@ -397,10 +406,17 @@ extension Browser {
                 title: tab.title,
                 pin: tab.pin,
                 name: tab.name,
-                agentGroup: tab.isAgentTab ? tab.agentGroup : nil
+                agentGroup: tab.isAgentTab ? tab.agentGroup : nil,
+                groupID: (tab.pin == nil && !tab.isAgentTab) ? tab.userGroupID : nil
             ))
         }
-        Session.write(now: true, space: space, .init(tabs: entries, active: activeIndex, split: nil, share: nil))
+        Session.write(now: true, space: space, .init(
+            tabs: entries,
+            active: activeIndex,
+            split: nil,
+            share: nil,
+            groups: row.groups.isEmpty ? nil : row.groups
+        ))
     }
 
     /// A space, its tabs, and its cookies and sign-ins, gone. The first one

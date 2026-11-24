@@ -352,8 +352,9 @@ final class Extensions: NSObject, ObservableObject {
         guard let context = contexts[id] else { return }
         try? controller.unload(context)
         // What it kept going outside WebKit goes with it: its offscreen
-        // page, and a Mac kept awake on its behalf.
-        ExtensionShims.offscreen[id] = nil
+        // page, side panels, and a Mac kept awake on its behalf.
+        ExtensionShims.closeOffscreen(id)
+        SidePanelPages.shared.forget(id)
         if let held = ExtensionShims.awake.removeValue(forKey: id) { IOPMAssertionRelease(held) }
         // Its ports read as gone only once WebKit has had a turn.
         DispatchQueue.main.async { ExtensionNative.stopOrphans() }
@@ -911,7 +912,7 @@ final class Extensions: NSObject, ObservableObject {
         if let tab = activeAdapter { context.userGesturePerformed(in: tab) }
         // An extension that asked for its button to open its side panel.
         if ExtensionShims.panelOnClick.contains(id), context.action(for: activeAdapter)?.presentsPopup != true {
-            ExtensionShims.openPanel(context, owner: self)
+            ExtensionShims.togglePanel(context, owner: self, tab: activeAdapter?.tab?.id)
             return
         }
         // A popup is opened here, straight away. Left to WebKit, it builds

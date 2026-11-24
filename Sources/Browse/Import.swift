@@ -20,6 +20,11 @@ import CommonCrypto
 // error, or worse, its attention.
 
 enum Chromium {
+    struct KeychainPair: Hashable {
+        let service: String
+        let account: String
+    }
+
     struct Source: Identifiable, Hashable {
         let name: String
         /// Under ~/Library/Application Support.
@@ -29,6 +34,8 @@ enum Chromium {
         /// The app itself, to say so when it is on this Mac but its data
         /// isn't where it should be.
         let app: String
+        var alternateFolders: [String] = []
+        var fallbackStorage: [KeychainPair] = []
         /// A folder picked by hand in NSOpenPanel (used to validate a candidate
         /// before committing it to this session).
         var rootOverride: URL? = nil
@@ -40,7 +47,17 @@ enum Chromium {
             if !Store.testing, let selected = Chromium.chosenRoot(for: name) {
                 return selected
             }
-            return Chromium.base.appendingPathComponent(folder, isDirectory: true)
+            let primary = Chromium.base.appendingPathComponent(folder, isDirectory: true)
+            if FileManager.default.fileExists(atPath: primary.path) {
+                return primary
+            }
+            for alt in alternateFolders {
+                let candidate = Chromium.base.appendingPathComponent(alt, isDirectory: true)
+                if FileManager.default.fileExists(atPath: candidate.path) {
+                    return candidate
+                }
+            }
+            return primary
         }
 
         /// Every profile's folder — Default, Profile 1 and on — known by
@@ -92,7 +109,18 @@ enum Chromium {
         Source(name: "Opera", folder: "com.operasoftware.Opera", service: "Opera Safe Storage", account: "Opera", app: "Opera.app"),
         Source(name: "Opera GX", folder: "com.operasoftware.OperaGX", service: "Opera Safe Storage", account: "Opera", app: "Opera GX.app"),
         Source(name: "Helium", folder: "net.imput.helium", service: "Helium Storage Key", account: "Helium", app: "Helium.app"),
-        Source(name: "Comet", folder: "Comet", service: "Comet Safe Storage", account: "Comet", app: "Comet.app"),
+        Source(
+            name: "Comet",
+            folder: "Comet",
+            service: "Comet Safe Storage",
+            account: "Comet",
+            app: "Comet.app",
+            alternateFolders: ["Comet/User Data"],
+            fallbackStorage: [
+                .init(service: "Comet Safe Storage", account: "Comet Key"),
+                .init(service: "Perplexity Comet Safe Storage", account: "Comet"),
+            ]
+        ),
         Source(name: "Thorium", folder: "Thorium", service: "Thorium Safe Storage", account: "Thorium", app: "Thorium.app"),
         Source(name: "Naver Whale", folder: "Naver/Whale", service: "Whale Safe Storage", account: "Whale", app: "Whale.app"),
         Source(name: "Island", folder: "Island", service: "Island Safe Storage", account: "Island", app: "Island.app"),
@@ -641,18 +669,22 @@ enum Chromium {
             let file = source.root.appendingPathComponent("Safe Storage")
             return (try? String(contentsOf: file, encoding: .utf8))?.trimmingCharacters(in: .whitespacesAndNewlines)
         }
-        var out: CFTypeRef?
-        let status = SecItemCopyMatching([
-            kSecClass as String: kSecClassGenericPassword,
-            kSecAttrService as String: source.service,
-            kSecAttrAccount as String: source.account,
-            kSecReturnData as String: true,
-            kSecMatchLimit as String: kSecMatchLimitOne,
-        ] as CFDictionary, &out)
-        guard status == errSecSuccess, let data = out as? Data,
-              let text = String(data: data, encoding: .utf8), !text.isEmpty
-        else { return nil }
-        return text
+        let pairs = [(source.service, source.account)] + source.fallbackStorage.map { ($0.service, $0.account) }
+        for (service, account) in pairs where !service.isEmpty {
+            var out: CFTypeRef?
+            let status = SecItemCopyMatching([
+                kSecClass as String: kSecClassGenericPassword,
+                kSecAttrService as String: service,
+                kSecAttrAccount as String: account,
+                kSecReturnData as String: true,
+                kSecMatchLimit as String: kSecMatchLimitOne,
+            ] as CFDictionary, &out)
+            if status == errSecSuccess, let data = out as? Data,
+               let text = String(data: data, encoding: .utf8), !text.isEmpty {
+                return text
+            }
+        }
+        return nil
     }
 
     /// Chromium's own recipe, unchanged for a decade: PBKDF2 over SHA-1, the
@@ -718,6 +750,7 @@ enum Chromium {
         let folder = FileManager.default.temporaryDirectory
             .appendingPathComponent("office-import-\(UUID().uuidString)", isDirectory: true)
         try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
+        try? FileManager.default.setAttributes([.posixPermissions: 0o700], ofItemAtPath: folder.path)
         let name = file.lastPathComponent
         for suffix in ["", "-wal", "-journal"] {
             let from = URL(fileURLWithPath: file.path + suffix)

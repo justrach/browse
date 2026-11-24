@@ -13,6 +13,8 @@ enum Session {
         var name: String?
         /// Non-nil when the tab belongs to the dedicated Agent tab group.
         var agentGroup: String? = nil
+        /// Optional user-created Tab Group ID; absent in older sessions.
+        var groupID: UUID? = nil
     }
 
     struct Shape: Codable {
@@ -25,6 +27,8 @@ enum Session {
         var share: Double? = nil
         /// Sync Scrolling on for the split pair; absent from older session files.
         var sync: Bool? = nil
+        /// User-created tab groups in this space; absent from older session files.
+        var groups: [TabGroup]? = nil
     }
 
     /// The first space's is the session there always was; each other space

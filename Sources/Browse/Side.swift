@@ -44,8 +44,8 @@ struct SideBar: View {
 
     /// A tab's line: room for 13-point type to breathe, as a Mac's own
     /// sidebars give it.
-    fileprivate static let row: CGFloat = 32
-    fileprivate static let gap: CGFloat = 2
+    static let row: CGFloat = 32
+    static let gap: CGFloat = 2
     /// A pinned tile's height: tall enough for a site's icon to be the tile,
     /// as favourites are in Arc, rather than a key on a keyboard.
     private static let square: CGFloat = 48
@@ -375,9 +375,14 @@ struct SideBar: View {
             SideBar.todayHeight + 4
             + (browser.agentGroupCollapsed ? 0 : CGFloat(agentCount) * (SideBar.row + SideBar.gap) + 6)
         )
+        let userGroupsHeight: CGFloat = browser.tabGroups.reduce(0) { sum, group in
+            let count = browser.tabs(inGroup: group.id).count
+            guard count > 0 else { return sum }
+            return sum + SideBar.todayHeight + 2 + (group.collapsed ? 0 : CGFloat(count) * (SideBar.row + SideBar.gap) + 6)
+        }
         let loose = CGFloat(looseTabs.count) * (SideBar.row + SideBar.gap)
         let newRow = SideBar.row + SideBar.gap
-        return Metrics.strip + pinBlock + agentBlock + SideBar.todayHeight + newRow + loose + 8
+        return Metrics.strip + pinBlock + agentBlock + userGroupsHeight + SideBar.todayHeight + newRow + loose + 8
     }
 
     // MARK: - the pinned squares
@@ -723,6 +728,21 @@ struct SideBar: View {
         VStack(alignment: .leading, spacing: 0) {
             if !agentTabs.isEmpty {
                 agentGroupSection
+            }
+            ForEach(browser.tabGroups) { group in
+                let members = browser.tabs(inGroup: group.id)
+                if !members.isEmpty {
+                    UserGroupSection(browser: browser, group: group, members: members) { tab in
+                        SideRow(
+                            browser: browser,
+                            prefs: prefs,
+                            tab: tab,
+                            live: tab.id == browser.activeID && !browser.talkOnStage,
+                            pill: pill,
+                            close: { browser.close(tab) }
+                        )
+                    }
+                }
             }
             today(loose: !looseTabs.isEmpty)
             NewTabRow(browser: browser)
