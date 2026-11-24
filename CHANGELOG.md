@@ -6,6 +6,10 @@ All notable changes to **browse** are documented here, newest first.
 
 ## Unreleased
 
+### Fixed
+
+- **Release build type-checking (`TabCycleHUD.swift`)**: Split `TabCycleHUD` into small SwiftUI subviews (`card`, `thumbnail`, `sleepBadge`, `titleRow`, `footer`) so production `-c release -Xswiftc -Osize` builds compile cleanly without hitting the compiler type-check timeout.
+
 ## 1.10.0 — 24 November 2026
 
 ### Added
