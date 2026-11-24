@@ -310,6 +310,11 @@ final class Shield: ObservableObject {
         var lean: [[String: Any]] = []
         lean.reserveCapacity(rules.count)
         for var rule in rules {
+            if let action = rule["action"] as? [String: Any],
+               action["type"] as? String == "ignore-previous-rules" {
+                lean.append(rule)
+                continue
+            }
             var trigger = rule["trigger"] as? [String: Any] ?? [:]
             if trigger["if-domain"] != nil {
                 lean.append(rule)
