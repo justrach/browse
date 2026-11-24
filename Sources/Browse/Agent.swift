@@ -890,9 +890,9 @@ final class Agent: ObservableObject {
         unmentionTab(id)
         drafts[id] = nil
     }
-    /// Stopped by hand: the queue waits for the next thing sent rather than
-    /// going on its own — a stop means stop. Send now clears it.
-    private var queueHeld = false
+    /// Stopped by hand or reconnected: the queue waits for the next thing sent
+    /// or an explicit resume — a stop means stop.
+    @Published private(set) var queueHeld = false
     /// Why the last turn went wrong, for its card; nothing once one works.
     private var stumble: String?
     /// What was said before, for a graff that couldn't pick the session
@@ -2238,6 +2238,21 @@ final class Agent: ObservableObject {
     func unqueue(_ id: Queued.ID) {
         if composer.editingQueueID == id { cancelQueueEdit() }
         queue.removeAll { $0.id == id }
+        if queue.isEmpty { queueHeld = false }
+    }
+
+    /// Explicitly release a held queue after Stop/Reconnect and send the next item.
+    func resumeHeldQueue() {
+        guard queueHeld, !prompting, asking == nil, phase == .ready, !queue.isEmpty else { return }
+        queueHeld = false
+        sendQueued()
+    }
+
+    /// Discard every waiting queued message and cancel any active inline queue edit.
+    func clearQueued() {
+        if composer.editingQueueID != nil { cancelQueueEdit() }
+        queue.removeAll()
+        queueHeld = false
     }
 
     /// The turn is over: anything still spinning has finished, or never will.
@@ -2814,13 +2829,6 @@ final class Agent: ObservableObject {
         // The browser's tools come ready to call, not folded away behind
         // graff's search for tools: in a browser they are the point.
         environment["GRAFF_MCP_EAGER"] = "browse"
-        // Straight to SSE. graff's codex WebSocket prewarm goes out without a
-        // model, is refused, and the first turn of every session retries a
-        // socket and falls back — ~7 s of a 12 s "hey there", paid again by
-        // each new chat's graff (justrach/codegraff#1250). Over SSE the first
-        // word comes in ~2.5 s; with the fix, WS still takes 4–5 s for a
-        // first turn, its prewarm round trip ahead of it (24 Sep 2026).
-        if environment["GRAFF_CODEX_WS"] == nil { environment["GRAFF_CODEX_WS"] = "off" }
         // Lean, unless Settings says otherwise: the browser's tools and
         // graff's own, not every MCP server the user's other apps name. Those
         // come up with every graff — a node REPL, code indexes — and took a

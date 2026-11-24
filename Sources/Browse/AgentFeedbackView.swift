@@ -45,7 +45,28 @@ struct AgentFeedbackView: View {
                     .background(Palette.wash, in: RoundedRectangle(cornerRadius: 10))
                     .accessibilityLabel("Expected behavior")
             }
-            Text("The draft includes this description and browse's build details. Review it on GitHub before submitting.")
+            VStack(alignment: .leading, spacing: 6) {
+                HStack {
+                    Text("Report preview").font(.system(size: 12, weight: .medium))
+                    Spacer()
+                    Text("browse \(Updater.version) · build \(Updater.build)")
+                        .font(.system(size: 10.5))
+                        .foregroundStyle(Palette.muted)
+                        .monospacedDigit()
+                }
+                ScrollView {
+                    Text(previewText)
+                        .font(.system(size: 11.5, design: .monospaced))
+                        .foregroundStyle(draft.ready ? Palette.ink.opacity(0.88) : Palette.muted)
+                        .textSelection(.enabled)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                }
+                .frame(height: 82)
+                .padding(10)
+                .background(Palette.wash.opacity(0.75), in: RoundedRectangle(cornerRadius: 10))
+                .overlay(RoundedRectangle(cornerRadius: 10).strokeBorder(Palette.hairline, lineWidth: 0.75))
+            }
+            Text("Only this summary and browse's build details leave your Mac when you review on GitHub.")
                 .font(.system(size: 11.5))
                 .foregroundStyle(Palette.muted)
                 .fixedSize(horizontal: false, vertical: true)
@@ -54,7 +75,7 @@ struct AgentFeedbackView: View {
                 Spacer()
                 Button(copied ? "Copied" : "Copy report") {
                     NSPasteboard.general.clearContents()
-                    NSPasteboard.general.setString(draft.report, forType: .string)
+                    NSPasteboard.general.setString(fullPreviewText, forType: .string)
                     copied = true
                 }
                 .disabled(!draft.ready)
@@ -70,5 +91,13 @@ struct AgentFeedbackView: View {
         .padding(24)
         .frame(width: 480)
         .background(Palette.ground)
+    }
+
+    private var previewText: String {
+        draft.ready ? fullPreviewText : "\(draft.title)\n\nFill in \"What happened?\" to preview the report."
+    }
+
+    private var fullPreviewText: String {
+        "\(draft.title)\n\n\(draft.report)\n\n—\nbrowse \(Updater.version), build \(Updater.build)"
     }
 }

@@ -436,7 +436,8 @@ struct AgentComposer: View {
                     .onTapGesture { localFocusToken &+= 1 }
 
                     let narrow = !full && browser.prefs.agentWidth < 340
-                    HStack(spacing: narrow ? 2 : 4) {
+                    let toolSide: CGFloat = narrow ? 20 : 24
+                    HStack(spacing: narrow ? 1 : 4) {
                         choices
                             .frame(maxWidth: .infinity, alignment: .leading)
                             .layoutPriority(1)
@@ -446,9 +447,9 @@ struct AgentComposer: View {
                         if agent.asking?.isQuestion != true, composer.editingQueueID == nil {
                             Button(action: pickImageFiles) {
                                 Image(systemName: "photo.badge.plus")
-                                    .font(.system(size: 11, weight: .medium))
+                                    .font(.system(size: narrow ? 10 : 11, weight: .medium))
                                     .foregroundStyle(attachHover ? Palette.ink : Palette.muted.opacity(0.82))
-                                    .frame(width: narrow ? 22 : 24, height: narrow ? 22 : 24)
+                                    .frame(width: toolSide, height: toolSide)
                                     .background(
                                         RoundedRectangle(cornerRadius: 6, style: .continuous)
                                             .fill(attachHover ? Palette.hover : .clear)
@@ -463,9 +464,9 @@ struct AgentComposer: View {
                             if browser.tabs.contains(where: { !$0.isBlank }) {
                                 Button(action: insertAtMention) {
                                     Text("@")
-                                        .font(.system(size: 12.5, weight: .medium, design: .rounded))
+                                        .font(.system(size: narrow ? 11.5 : 12.5, weight: .medium, design: .rounded))
                                         .foregroundStyle(mentionHover ? Palette.ink : Palette.muted.opacity(0.82))
-                                        .frame(width: narrow ? 22 : 24, height: narrow ? 22 : 24)
+                                        .frame(width: toolSide, height: toolSide)
                                         .background(
                                             RoundedRectangle(cornerRadius: 6, style: .continuous)
                                                 .fill(mentionHover ? Palette.hover : .clear)
@@ -478,24 +479,22 @@ struct AgentComposer: View {
                                 .help("Mention another open tab   @")
                                 .accessibilityLabel("Mention open tab")
                             }
-                            if !narrow {
-                                Button(action: openWriteMode) {
-                                    Image(systemName: "arrow.up.left.and.arrow.down.right")
-                                        .font(.system(size: 10.5, weight: .medium))
-                                        .foregroundStyle(writeHover ? Palette.ink : Palette.muted.opacity(0.8))
-                                        .frame(width: 24, height: 24)
-                                        .background(
-                                            RoundedRectangle(cornerRadius: 6, style: .continuous)
-                                                .fill(writeHover ? Palette.hover : .clear)
-                                        )
-                                        .contentShape(Rectangle())
-                                }
-                                .buttonStyle(TactilePress())
-                                .onHover { writeHover = $0 }
-                                .animation(Motion.quick, value: writeHover)
-                                .help("Expand editor   ⌘⇧E")
-                                .accessibilityLabel("Expand editor")
+                            Button(action: openWriteMode) {
+                                Image(systemName: "arrow.up.left.and.arrow.down.right")
+                                    .font(.system(size: narrow ? 9.5 : 10.5, weight: .medium))
+                                    .foregroundStyle(writeHover ? Palette.ink : Palette.muted.opacity(0.8))
+                                    .frame(width: toolSide, height: toolSide)
+                                    .background(
+                                        RoundedRectangle(cornerRadius: 6, style: .continuous)
+                                            .fill(writeHover ? Palette.hover : .clear)
+                                    )
+                                    .contentShape(Rectangle())
                             }
+                            .buttonStyle(TactilePress())
+                            .onHover { writeHover = $0 }
+                            .animation(Motion.quick, value: writeHover)
+                            .help("Expand editor   ⌘⇧E")
+                            .accessibilityLabel("Expand editor")
                         }
                         actions
                     }

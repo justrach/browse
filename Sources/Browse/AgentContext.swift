@@ -49,7 +49,8 @@ struct AgentPageContext: View {
                         .font(.system(size: 10, weight: .medium))
                         .foregroundStyle(Palette.accent)
                         .fixedSize()
-                } else if included {
+                }
+                if included {
                     Text("·")
                         .font(.system(size: 10.5))
                         .foregroundStyle(Palette.muted.opacity(0.5))
