@@ -1,9 +1,8 @@
 import SwiftUI
 
 /// Progress comes from actions the agent reports: tools, sources, plans and
-/// messages. Mirrors NanoHarness's working trailer (`view_working.zig`):
-/// seeded rotating flavour words, tabular elapsed time, live "Now" tool and
-/// "Plan" step lines, and a quiet-turn notice when the model pauses > 20 s.
+/// messages. Surfaces real active tools, sources, plan steps, tabular elapsed
+/// time, and actionable recovery when the model pauses > 20 s.
 struct AgentActivity: View {
     let entries: [Agent.Entry]
     let started: Date?
@@ -15,17 +14,10 @@ struct AgentActivity: View {
     let full: Bool
     let visit: (URL) -> Void
     var waiting: String? = nil
+    var onReconnect: (() -> Void)? = nil
+    var onReportProblem: (() -> Void)? = nil
 
     @State private var expanded = false
-
-    /// Exact NanoHarness `view_working.zig` flavour words in order.
-    private static let flavourWords: [String] = [
-        "Harnessing", "Thinking", "Pondering", "Scheming", "Brewing",
-        "Weaving", "Tinkering", "Musing", "Composing", "Sifting",
-        "Untangling", "Distilling", "Sketching", "Plotting", "Riffing",
-        "Combobulating", "Percolating", "Marinating", "Noodling", "Puzzling",
-        "Conjuring",
-    ]
 
     private var activity: [Agent.Entry] { entries.filter { $0.kind != .thought } }
     private var running: [Agent.Entry] {
@@ -75,13 +67,22 @@ struct AgentActivity: View {
         .animation(Motion.snappy, value: running.count)
     }
 
-    /// NanoHarness session-driven working trailer (`view_working.zig`).
+    /// Live status trailer anchored to real tool/plan activity and quiet recovery.
     private var workingTrailer: some View {
         TimelineView(.periodic(from: .now, by: 1)) { context in
             let elapsed = max(0, Int(context.date.timeIntervalSince(started ?? context.date)))
             let silent = lastUpdate.map { max(0, Int(context.date.timeIntervalSince($0))) } ?? 0
             let quiet = waiting == nil && silent >= 20
-            let flavour = Self.flavourWord(seed: chatSeed, elapsed: elapsed)
+            let statusHeadline: String = {
+                if let waiting { return waiting }
+                if responding { return "Writing…" }
+                if let activeTool = running.last {
+                    let step = activeTool.step ?? Steps.fallback(activeTool)
+                    return "\(step.label)…"
+                }
+                if activePlanStep != nil { return "Working…" }
+                return "Thinking…"
+            }()
 
             VStack(alignment: .leading, spacing: 4) {
                 HStack(spacing: 7) {
@@ -95,7 +96,7 @@ struct AgentActivity: View {
                             .frame(width: 12, height: 12)
                     }
 
-                    Text(waiting ?? (responding ? "Writing…" : "\(flavour)…"))
+                    Text(statusHeadline)
                         .font(.system(size: 12, weight: .medium))
                         .foregroundStyle(Palette.muted)
                         .contentTransition(.numericText())
@@ -112,12 +113,30 @@ struct AgentActivity: View {
                             .foregroundStyle(Palette.muted.opacity(0.6))
                             .monospacedDigit()
                             .lineLimit(1)
-                    } else if waiting == nil && running.isEmpty && activePlanStep == nil && !responding {
-                        Text("· Working out the next step")
+                    } else if waiting == nil, running.isEmpty, let countLabel = activityCountSummary {
+                        Text("· \(countLabel)")
                             .font(.system(size: 11))
-                            .foregroundStyle(Palette.muted.opacity(0.6))
+                            .foregroundStyle(Palette.muted.opacity(0.65))
                             .lineLimit(1)
                     }
+                }
+
+                if quiet, (onReconnect != nil || onReportProblem != nil) {
+                    HStack(spacing: 10) {
+                        if let onReconnect {
+                            Button("Reconnect", action: onReconnect)
+                                .buttonStyle(.plain)
+                                .font(.system(size: 11, weight: .medium))
+                                .foregroundStyle(Palette.accent)
+                        }
+                        if let onReportProblem {
+                            Button("Report problem", action: onReportProblem)
+                                .buttonStyle(.plain)
+                                .font(.system(size: 11, weight: .medium))
+                                .foregroundStyle(Palette.muted)
+                        }
+                    }
+                    .padding(.leading, 19)
                 }
 
                 if let activeTool = running.last {
@@ -131,6 +150,12 @@ struct AgentActivity: View {
             }
             .padding(.top, 2)
         }
+    }
+
+    private var activityCountSummary: String? {
+        let count = activity.count
+        guard count > 0 else { return nil }
+        return count == 1 ? "1 step completed" : "\(count) steps completed"
     }
 
     private func trailerDetail(_ label: String, _ text: String, muted: Bool) -> some View {
@@ -157,7 +182,7 @@ struct AgentActivity: View {
             HStack(spacing: 6) {
                 if live && waiting == nil { PulseDot(color: Palette.accent, size: 5, active: true) }
                 if live && waiting != nil { Image(systemName: "pause.circle").font(.system(size: 10)) }
-                Text(live ? summary : summary)
+                Text(summary)
                     .fontWeight(.medium)
                     .lineLimit(2)
                     .multilineTextAlignment(.leading)
@@ -182,16 +207,6 @@ struct AgentActivity: View {
         .disabled(activity.isEmpty)
         .help(expanded ? "Show recent activity" : "Show all actions and results")
         .accessibilityLabel(expanded ? "Show less activity" : "Show all activity")
-    }
-
-    /// FNV-1a seeded flavour word stepping every 7 seconds (`view_working.zig:word`).
-    private static func flavourWord(seed: String, elapsed: Int) -> String {
-        var h: UInt64 = 0xcbf29ce484222325
-        for b in seed.utf8 {
-            h = (h ^ UInt64(b)) &* 0x100000001b3
-        }
-        let step = UInt64(max(0, elapsed) / 7)
-        return flavourWords[Int((h &+ step) % UInt64(flavourWords.count))]
     }
 
     private static func elapsedLabel(_ seconds: Int) -> String {

@@ -116,6 +116,7 @@ struct AsideBar: View {
                     ExtensionSlot()
 
                     if browser.prefs.usesAgent {
+                        let keyHint = toggleKey ?? "."
                         Button { browser.toggleAgent() } label: {
                             HStack(spacing: 5.5) {
                                 GraffMark(
@@ -125,12 +126,12 @@ struct AsideBar: View {
                                 Text("graff")
                                     .font(.system(size: 12.5, weight: .semibold, design: .rounded))
                                     .foregroundStyle(agentOpen ? Palette.accent : Palette.ink)
-                                if !agentOpen, let toggleKey {
-                                    ShortcutBadge(keys: toggleKey)
+                                if !agentOpen {
+                                    ShortcutBadge(keys: keyHint)
                                 }
                             }
                             .padding(.leading, 9)
-                            .padding(.trailing, (!agentOpen && toggleKey != nil) ? 6 : 10)
+                            .padding(.trailing, !agentOpen ? 6 : 10)
                             .frame(height: 28)
                             .background(
                                 Capsule()
@@ -154,7 +155,7 @@ struct AsideBar: View {
                         }
                         .buttonStyle(TactilePress())
                         .onHover { askHover = $0 }
-                        .help((agentOpen ? "Hide graff" : "Open graff") + (toggleKey.map { "   \($0)" } ?? ""))
+                        .help((agentOpen ? "Hide graff" : "Open graff") + "   \(keyHint)  ·  Press . while reading")
                         .padding(.leading, 4)
                     }
                 }

@@ -50,6 +50,11 @@ extension Agent {
 struct AgentTaskStateView: View {
     @ObservedObject var agent: Agent
     let focus: () -> Void
+    var onOpenSettings: (() -> Void)? = nil
+    var onReportProblem: (() -> Void)? = nil
+    var onReviewApproval: (() -> Void)? = nil
+
+    @State private var dismissedFinished = false
 
     private var state: Agent.TaskState { agent.taskState }
 
@@ -57,34 +62,47 @@ struct AgentTaskStateView: View {
         switch state {
         case .answer, .approval, .interrupted, .stopped, .signedOut, .missing:
             return true
-        case .idle, .starting, .working, .finished:
+        case .finished:
+            return !dismissedFinished && !agent.entries.isEmpty
+        case .idle, .starting, .working:
             return false
         }
     }
 
+    private var shouldShow: Bool {
+        needsBanner && (!agent.entries.isEmpty || state == .missing || state == .signedOut || state == .approval || state == .answer)
+    }
+
     var body: some View {
-        if needsBanner && !agent.entries.isEmpty {
-            HStack(alignment: .center, spacing: 9) {
-                if state == .working || state == .starting {
-                    Ring(size: 10)
-                } else {
-                    Image(systemName: icon).font(.system(size: 11)).foregroundStyle(Palette.muted)
-                }
-                VStack(alignment: .leading, spacing: 3) {
-                    Text(state.words).fontWeight(.medium)
-                    if let detail {
-                        Text(detail).font(.system(size: 11)).foregroundStyle(Palette.muted)
-                            .lineLimit(2).help(detail)
+        Group {
+            if shouldShow {
+                HStack(alignment: .center, spacing: 9) {
+                    if state == .working || state == .starting {
+                        Ring(size: 10)
+                    } else {
+                        Image(systemName: icon)
+                            .font(.system(size: 11))
+                            .foregroundStyle(state == .finished ? Color.green : Palette.muted)
                     }
+                    VStack(alignment: .leading, spacing: 3) {
+                        Text(state.words).fontWeight(.medium)
+                        if let detail {
+                            Text(detail).font(.system(size: 11)).foregroundStyle(Palette.muted)
+                                .lineLimit(2).help(detail)
+                        }
+                    }
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    action
                 }
-                .frame(maxWidth: .infinity, alignment: .leading)
-                action
+                .font(.system(size: 12))
+                .foregroundStyle(Palette.ink)
+                .padding(10)
+                .background(Palette.ink.opacity(0.025), in: RoundedRectangle(cornerRadius: 10))
+                .accessibilityElement(children: .contain)
             }
-            .font(.system(size: 12))
-            .foregroundStyle(Palette.ink)
-            .padding(10)
-            .background(Palette.ink.opacity(0.025), in: RoundedRectangle(cornerRadius: 10))
-            .accessibilityElement(children: .contain)
+        }
+        .onChange(of: state) { _, next in
+            if next != .finished { dismissedFinished = false }
         }
     }
 
@@ -93,18 +111,26 @@ struct AgentTaskStateView: View {
         case .working: return agent.currentAction
         case .answer, .approval: return agent.asking?.title
         case .interrupted(let why): return why
-        case .stopped: return agent.queue.isEmpty ? "Send a follow-up when you're ready." : "Queued follow-ups wait for your next send."
+        case .finished: return "Ask a follow-up or start a fresh chat."
+        case .missing: return "Install Codegraff or choose it in Settings › Agent."
+        case .signedOut: return "Approve this Mac on codegraff.com to continue."
+        case .stopped:
+            if agent.queue.isEmpty { return "Send a follow-up when you're ready." }
+            return agent.queueHeld ? "Queued follow-ups are held until you send or resume." : "Queued follow-ups wait for your next send."
         default: return nil
         }
     }
 
     private var icon: String {
         switch state {
+        case .working: return "ellipsis.circle"
         case .answer: return "bubble.left"
         case .approval: return "hand.raised"
         case .finished: return "checkmark.circle"
         case .stopped: return "pause.circle"
         case .interrupted: return "exclamationmark.circle"
+        case .missing: return "exclamationmark.triangle"
+        case .signedOut: return "person.crop.circle"
         default: return "person.crop.circle"
         }
     }
@@ -113,16 +139,57 @@ struct AgentTaskStateView: View {
         switch state {
         case .working: control("Stop") { agent.stop() }
         case .answer: control("Answer") { focus() }
-        case .approval: Text("Review below").font(.system(size: 10.5)).foregroundStyle(Palette.muted)
-        case .interrupted: control("Reconnect") { agent.reconnect() }
-        case .signedOut: control("Sign in") { agent.signIn() }
-        case .finished: control("Follow up") { focus() }
-        case .stopped:
-            control("Continue") {
-                if agent.draft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
-                    agent.draft = "Continue from where you stopped."
+        case .approval:
+            HStack(spacing: 8) {
+                if let ask = agent.asking {
+                    control("Cancel") { agent.answer(ask, with: nil) }
                 }
-                focus()
+                control("Review") { (onReviewApproval ?? focus)() }
+            }
+        case .interrupted:
+            HStack(spacing: 8) {
+                if let onReportProblem {
+                    control("Report", action: onReportProblem)
+                }
+                control("Reconnect") { agent.reconnect() }
+            }
+        case .missing:
+            HStack(spacing: 8) {
+                if let onOpenSettings {
+                    control("Settings…", action: onOpenSettings)
+                }
+                control("Retry") { agent.restart() }
+            }
+        case .signedOut: control("Sign in") { agent.signIn() }
+        case .finished:
+            HStack(spacing: 8) {
+                control("New chat") {
+                    agent.startOver()
+                    focus()
+                }
+                control("Follow up") { focus() }
+                Button { dismissedFinished = true } label: {
+                    Image(systemName: "xmark")
+                        .font(.system(size: 9.5, weight: .semibold))
+                        .foregroundStyle(Palette.muted)
+                        .frame(width: 18, height: 18)
+                        .contentShape(Rectangle())
+                }
+                .buttonStyle(.plain)
+                .help("Dismiss")
+                .accessibilityLabel("Dismiss finished status")
+            }
+        case .stopped:
+            HStack(spacing: 8) {
+                if agent.queueHeld && !agent.queue.isEmpty {
+                    control("Send queued") { agent.resumeHeldQueue() }
+                }
+                control("Continue") {
+                    if agent.draft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                        agent.draft = "Continue from where you stopped."
+                    }
+                    focus()
+                }
             }
         default: EmptyView()
         }

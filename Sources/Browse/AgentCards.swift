@@ -302,13 +302,45 @@ struct QueuePanel: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
-            Text(agent.queue.count == 1 ? "Queued" : "Queued · \(agent.queue.count)")
-                .font(.system(size: 11, weight: .medium))
-                .foregroundStyle(Palette.muted)
-                .monospacedDigit()
-                .padding(.horizontal, 12)
-                .padding(.top, 8)
-                .padding(.bottom, 2)
+            HStack(spacing: 8) {
+                Text(agent.queue.count == 1 ? "Queued" : "Queued · \(agent.queue.count)")
+                    .font(.system(size: 11, weight: .medium))
+                    .foregroundStyle(Palette.muted)
+                    .monospacedDigit()
+                if agent.queueHeld {
+                    Text("Held")
+                        .font(.system(size: 10, weight: .medium))
+                        .foregroundStyle(Palette.accent)
+                        .padding(.horizontal, 6)
+                        .padding(.vertical, 1.5)
+                        .background(Palette.accent.opacity(0.12), in: Capsule())
+                }
+                Spacer(minLength: 4)
+                if agent.queueHeld && !agent.queue.isEmpty && agent.phase == .ready {
+                    Button("Send next") { agent.resumeHeldQueue() }
+                        .buttonStyle(.plain)
+                        .font(.system(size: 10.5, weight: .medium))
+                        .foregroundStyle(Palette.accent)
+                        .help("Send the next held message now")
+                }
+                if !agent.queue.isEmpty {
+                    Button("Clear") { agent.clearQueued() }
+                        .buttonStyle(.plain)
+                        .font(.system(size: 10.5))
+                        .foregroundStyle(Palette.muted)
+                        .help("Discard all queued messages")
+                }
+            }
+            .padding(.horizontal, 12)
+            .padding(.top, 8)
+            .padding(.bottom, agent.queueHeld ? 2 : 4)
+            if agent.queueHeld {
+                Text("Waiting after stop or reconnect until you send or resume.")
+                    .font(.system(size: 10.5))
+                    .foregroundStyle(Palette.muted.opacity(0.8))
+                    .padding(.horizontal, 12)
+                    .padding(.bottom, 4)
+            }
             ForEach(Array(agent.queue.enumerated()), id: \.element.id) { index, item in
                 Row(item: item, first: index == 0, editing: composer.editingQueueID == item.id, agent: agent)
             }

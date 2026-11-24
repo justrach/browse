@@ -187,7 +187,15 @@ struct AgentColumn: View {
             }
             measure(
                 VStack(spacing: 0) {
-                    AgentTaskStateView(agent: agent, focus: browser.focusAgent)
+                    AgentTaskStateView(
+                        agent: agent,
+                        focus: browser.focusAgent,
+                        onOpenSettings: {
+                            Store.settings.set("agent", forKey: "settings.page")
+                            browser.tuning = true
+                        },
+                        onReportProblem: { browser.reportAgentProblem(kind: .stalled) }
+                    )
                     AgentPagesView()
                 }
                 .padding(.horizontal, full ? 20 : 18)
@@ -236,7 +244,7 @@ struct AgentColumn: View {
                         }
                     }
                     if full || agent.asking != nil || !agent.phase.words.isEmpty {
-                        HStack(spacing: 4) {
+                        HStack(spacing: 5) {
                             if full {
                                 PulseDot(color: light, size: 5, active: agent.phase == .starting || agent.phase == .working)
                             }
@@ -245,6 +253,13 @@ struct AgentColumn: View {
                                 .foregroundStyle(Palette.muted)
                                 .lineLimit(1)
                                 .contentTransition(.numericText())
+                            if agent.phase == .working {
+                                Button("Stop") { agent.stop() }
+                                    .buttonStyle(.plain)
+                                    .font(.system(size: 10, weight: .medium))
+                                    .foregroundStyle(Palette.accent)
+                                    .help("Stop current run")
+                            }
                         }
                     }
                 }
@@ -394,6 +409,8 @@ struct AgentColumn: View {
                                                 agent.draft = prompt
                                                 browser.focusAgent()
                                             },
+                                            onReconnect: { confirmingReconnect = true },
+                                            onReportProblem: { browser.reportAgentProblem(kind: .stalled) },
                                             feedback: { browser.reportAgentProblem(kind: .answer) }
                                         )
                                     }
@@ -1430,6 +1447,8 @@ private struct TurnView: View {
     let visit: (URL) -> Void
     var onRetry: (() -> Void)? = nil
     var onEditPrompt: ((String) -> Void)? = nil
+    var onReconnect: (() -> Void)? = nil
+    var onReportProblem: (() -> Void)? = nil
 
     @State private var copied = false
     let feedback: () -> Void
@@ -1442,7 +1461,9 @@ private struct TurnView: View {
             if turn.work.contains(where: { $0.kind != .thought }) || live {
                 AgentActivity(entries: turn.work, started: turn.started, ended: turn.ended,
                               lastUpdate: lastUpdate, chatSeed: chatSeed,
-                              live: live, responding: !turn.answer.isEmpty, full: full, visit: visit, waiting: live ? waiting : nil)
+                              live: live, responding: !turn.answer.isEmpty, full: full, visit: visit,
+                              waiting: live ? waiting : nil,
+                              onReconnect: onReconnect, onReportProblem: onReportProblem)
             }
             ForEach(turn.answer) { entry in
                 EntryRow(entry: entry, full: full, visit: visit)

@@ -1432,7 +1432,7 @@ final class Browser: NSObject, ObservableObject {
             NSPasteboard.general.setString(sel.text, forType: .string)
             announce("Copied")
         case .ask:
-            guard prefs.usesAgent, agent.asking == nil,
+            guard prefs.usesAgent,
                   let passage = AgentPassage(text: sel.text, from: tab) else { return }
             agent.passage = passage
             talkToColumn()

@@ -93,7 +93,7 @@ struct AgentHome: View {
 
     private var field: some View {
         HStack(spacing: 12) {
-            TextField("", text: $typed, prompt: Text(mode == .ask ? "Ask anything, or give graff a task" : "Search or type a URL")
+            TextField("", text: $typed, prompt: Text("Search or type a URL")
                 .foregroundStyle(Palette.muted.opacity(0.8)))
                 .textFieldStyle(.plain)
                 .font(.system(size: 16))
@@ -166,17 +166,8 @@ struct AgentHome: View {
     private func go() {
         let text = typed.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !text.isEmpty else { return }
-        switch mode {
-        case .search:
-            guard browser.visit(text) else { refuse(); return }
-            typed = ""
-        case .ask:
-            agent.draft = text
-            guard agent.canSend else { refuse(); return }
-            typed = ""
-            // Nothing behind this page to talk about: the words go alone.
-            agent.send(page: nil)
-        }
+        guard browser.visit(text) else { refuse(); return }
+        typed = ""
     }
 
     private func refuse() {
@@ -505,7 +496,10 @@ struct AgentNotice: View {
                 }
             case .broken(let why):
                 words("graff stopped", why)
-                Pill("Reconnect", filled: true) { agent.reconnect() }
+                HStack(spacing: 6) {
+                    Pill("Reconnect", filled: true) { agent.reconnect() }
+                    Pill("Report problem") { browser.reportAgentProblem(why, kind: .stalled) }
+                }
             default:
                 EmptyView()
             }
