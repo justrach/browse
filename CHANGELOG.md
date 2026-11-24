@@ -6,6 +6,8 @@ All notable changes to **browse** are documented here, newest first.
 
 ## Unreleased
 
+## 1.12.0 — 25 November 2026
+
 ### Added
 
 - **`chrome.proxy` extension support (`ExtensionProxy.swift`, `ExtensionShims.swift`, `Extensions.swift`, `Spaces.swift`, `Tab.swift`)**: Parses `fixed_servers` (`singleProxy`, `proxyForHttp`, `proxyForHttps`, `fallbackProxy`, HTTP/HTTPS/SOCKS5, credentials, `<local>` and wildcard `bypassList` normalization) and `system`/`direct` configs into `Network.ProxyConfiguration` across Space and extension-enabled private `WKWebsiteDataStore` instances, while flagging unsupported modes (`pac_script`, `socks4`) cleanly.
