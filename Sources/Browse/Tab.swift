@@ -223,7 +223,6 @@ final class Tab: ObservableObject, Identifiable {
         let hoveredLink: Bool
         let windowFullScreen: Bool
         let passkeysOffered: Bool
-        let devCapture: Bool
         let css: String
     }
 
@@ -805,7 +804,6 @@ final class Tab: ObservableObject, Identifiable {
         static let passkeyBridge = WKUserScript(source: PasskeyRelay.bridge, injectionTime: .atDocumentStart, forMainFrameOnly: false, in: Web.world)
         static let webNotificationsPage = WKUserScript(source: WebNotifications.page, injectionTime: .atDocumentStart, forMainFrameOnly: true, in: .page)
         static let webNotificationsBridge = WKUserScript(source: WebNotifications.bridge, injectionTime: .atDocumentStart, forMainFrameOnly: true, in: Web.world)
-        static let devCapture = WKUserScript(source: DevCapture.script, injectionTime: .atDocumentStart, forMainFrameOnly: true, in: .page)
     }
 
     func arm(hiding css: String) {
@@ -820,14 +818,12 @@ final class Tab: ObservableObject, Identifiable {
             hoveredLink: HoveredLink.on,
             windowFullScreen: WindowFullScreen.on,
             passkeysOffered: FormRelay.passkeysOffered,
-            devCapture: DevCapture.on,
             css: css
         )
         guard armedSignature != signature else { return }
         armedSignature = signature
         let controller = built.configuration.userContentController
         controller.removeAllUserScripts()
-        if signature.devCapture { controller.addUserScript(Scripts.devCapture) }
         if signature.scrollRelay { controller.addUserScript(Scripts.scrollRelay) }
         controller.addUserScript(Scripts.veilingPicker)
         controller.addUserScript(Scripts.formRelay)

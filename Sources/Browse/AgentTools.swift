@@ -740,6 +740,11 @@ final class AgentTools: ObservableObject {
                 let clear = arguments["clear"] as? Bool ?? false
                 let (value, error) = await target.run(DevCapture.readConsoleScript(level: level, limit: limit, clear: clear))
                 if let error { return AgentTools.failed(error) }
+                if let dict = value as? [String: Any], (dict["active"] as? Bool) == false {
+                    _ = await target.run(DevCapture.script)
+                    let armed: [String: Any] = ["active": true, "justArmed": true, "total": 0, "entries": []]
+                    return AgentTools.said(["page": target.id, "url": target.address, "console": armed])
+                }
                 return AgentTools.said(["page": target.id, "url": target.address, "console": value ?? [:]])
             }
 
@@ -751,6 +756,11 @@ final class AgentTools: ObservableObject {
                 let clear = arguments["clear"] as? Bool ?? false
                 let (value, error) = await target.run(DevCapture.readNetworkScript(failedOnly: failedOnly, filter: filter, limit: limit, clear: clear))
                 if let error { return AgentTools.failed(error) }
+                if let dict = value as? [String: Any], (dict["active"] as? Bool) == false {
+                    _ = await target.run(DevCapture.script)
+                    let armed: [String: Any] = ["active": true, "justArmed": true, "total": 0, "entries": []]
+                    return AgentTools.said(["page": target.id, "url": target.address, "network": armed])
+                }
                 return AgentTools.said(["page": target.id, "url": target.address, "network": value ?? [:]])
             }
 
@@ -2005,11 +2015,9 @@ private final class Sheet: Target {
         // trackers is a page settled() is still waiting on.
         Shield.shared.protect(config.userContentController)
         if !reading {
-            if DevCapture.on {
-                config.userContentController.addUserScript(
-                    WKUserScript(source: DevCapture.script, injectionTime: .atDocumentStart, forMainFrameOnly: true, in: .page)
-                )
-            }
+            config.userContentController.addUserScript(
+                WKUserScript(source: DevCapture.script, injectionTime: .atDocumentStart, forMainFrameOnly: true, in: .page)
+            )
             config.userContentController.addScriptMessageHandler(passkeyRelay, contentWorld: Web.world, name: PasskeyRelay.name)
             config.userContentController.addUserScript(
                 WKUserScript(source: PasskeyRelay.page, injectionTime: .atDocumentStart, forMainFrameOnly: false, in: .page)
