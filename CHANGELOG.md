@@ -6,6 +6,8 @@ All notable changes to **browse** are documented here, newest first.
 
 ## Unreleased
 
+## 1.14.1 — 25 November 2026
+
 ### Fixed
 
 - **On-demand `DevCapture` (`DevCapture.swift`, `Tab.swift`, `Browser.swift`, `AgentTools.swift`)**: Removed default `.page`-world `fetch`/`XMLHttpRequest`/`console` hooks from regular browsing tabs so page-world execution stays untouched; `console_logs` and `network_requests` now arm capture strictly on demand on inspected tabs and agent pages, using a `WeakMap` instead of `XMLHttpRequest` own properties and safe DOM/plain-object formatting.
