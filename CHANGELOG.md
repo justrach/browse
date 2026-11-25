@@ -6,6 +6,8 @@ All notable changes to **browse** are documented here, newest first.
 
 ## Unreleased
 
+## 1.13.0 — 25 November 2026
+
 ### Improved
 
 - **Codegraff streaming, composer, and agent tool latency (`MarkdownView.swift`, `Citations.swift`, `Agent.swift`, `AgentColumn.swift`, `AgentComposer.swift`, `AgentCards.swift`, `AgentHome.swift`, `AgentTools.swift`, `AgentTransport.swift`, `NanoComposerField.swift`)**:

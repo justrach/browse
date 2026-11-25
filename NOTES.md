@@ -1,3 +1,5 @@
+Faster streaming Markdown and Codegraff composer/tool latency, 120 FPS rendering across tabs, split views, and smooth scrolling, quicker startup, navigation, favicons, and extension loading, plus Reading Mode, floating video controls, tab group drag/split parity, SiteCard, Find, Bookmarks, and Downloads polish.
+
 Real chrome.proxy support via WebKit proxyConfigurations, open-tab Web Notifications bridged to macOS Notification Center with per-site Privacy permissions, Universal Intel (x86_64) and Apple Silicon (arm64) macOS builds, and Roadmap cleanup.
 
 User Tab Groups with chrome.tabGroups and a formal Lean 4 proof, docked chrome.sidePanel with Bitwarden and Vimium C fixes, Split View divider menu with Sync Scrolling and sidebar drag-to-split, opt-in smooth mouse-wheel scrolling, always-visible address bar, and page-tinted title bar, Codegraff activity/queue/context recovery UX improvements, Comet importer hardening, HTML5 video keyboard controls, pinned-tab new-tab routing, stuck closed-tab WebContent guard, cached Shield setup with Gmail $generichide exceptions, Dvorak–QWERTY Command shortcuts, and a zero-warning Swift build.
