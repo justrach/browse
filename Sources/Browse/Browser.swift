@@ -2018,7 +2018,6 @@ final class Browser: NSObject, ObservableObject {
         // Once a day, quietly: is there a newer one?
         Updater.shared.checkIfDue { [weak self] line in self?.announce(line) }
         FormRelay.passkeysOffered = prefs.passkeys
-        DevCapture.on = prefs.usesAgent
 
         // The History menu lists what the history holds, and the menu is drawn
         // from this object's changes — only forward when the top-8 actually
@@ -2248,11 +2247,7 @@ final class Browser: NSObject, ObservableObject {
         prefs.$usesAgent
             .removeDuplicates()
             .sink { [weak self] on in
-                DevCapture.on = on
                 guard let self else { return }
-                for tab in tabs + parkedTabs {
-                    tab.arm(hiding: curtain.css(on: curtain.host(of: tab.address)))
-                }
                 guard !on else { return }
                 consulting = false
                 agentFull = false

@@ -8,13 +8,15 @@ import Foundation
 /// cookies, `Authorization` headers, or request/response bodies.
 @MainActor
 enum DevCapture {
-    static var on = true
+    static var on = false
 
     static let script = """
     (function () {
       if (window.__browseDevLog) return;
       var MAX = 200;
       var store = { console: [], network: [] };
+      var xhrMeta = typeof WeakMap === 'function' ? new WeakMap() : null;
+      var xhrHooked = typeof WeakMap === 'function' ? new WeakMap() : null;
       function push(arr, item) {
         if (arr.length >= MAX) arr.shift();
         arr.push(item);
@@ -25,7 +27,15 @@ enum DevCapture {
           if (v instanceof Error) return (v.name ? v.name + ': ' : '') + (v.message || String(v));
           if (v === null) return 'null';
           if (v === undefined) return 'undefined';
-          if (typeof v === 'object') return JSON.stringify(v);
+          if (typeof Node !== 'undefined' && v instanceof Node) {
+            return '<' + String(v.nodeName || 'node').toLowerCase() + '>';
+          }
+          if (typeof v === 'object') {
+            if (Array.isArray(v) || Object.prototype.toString.call(v) === '[object Object]') {
+              return JSON.stringify(v).slice(0, 400);
+            }
+            return Object.prototype.toString.call(v);
+          }
           return String(v);
         } catch (_) {
           try { return String(v); } catch (__) { return '[unserializable]'; }
@@ -126,18 +136,20 @@ enum DevCapture {
         var origSend = XMLHttpRequest.prototype.send;
         XMLHttpRequest.prototype.open = function (method, url) {
           try {
-            this.__browseMeta = {
-              method: String(method || 'GET').toUpperCase(),
-              url: normalizeURL(url)
-            };
+            if (xhrMeta) {
+              xhrMeta.set(this, {
+                method: String(method || 'GET').toUpperCase(),
+                url: normalizeURL(url)
+              });
+            }
           } catch (_) {}
           return origOpen.apply(this, arguments);
         };
         XMLHttpRequest.prototype.send = function () {
           try {
-            var meta = this.__browseMeta || { method: 'GET', url: '' };
-            if (!this.__browseHooked) {
-              this.__browseHooked = true;
+            var meta = (xhrMeta && xhrMeta.get(this)) || { method: 'GET', url: '' };
+            if (!xhrHooked || !xhrHooked.has(this)) {
+              if (xhrHooked) xhrHooked.set(this, true);
               var xhr = this;
               var t0 = performance.now();
               var ts = Date.now();
@@ -162,7 +174,7 @@ enum DevCapture {
         };
       }
 
-      Object.defineProperty(window, '__browseDevLog', { value: store, enumerable: false, configurable: false });
+      Object.defineProperty(window, '__browseDevLog', { value: store, enumerable: false, configurable: true });
     })();
     """
 

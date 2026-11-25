@@ -37,9 +37,8 @@ enum WebNotifications {
 
     nonisolated static let page = """
     (function () {
-      if (window.__browseNotifInstalled) return;
+      if (typeof window.Notification === 'function') return;
       if (location.protocol !== 'https:' && location.protocol !== 'http:') return;
-      Object.defineProperty(window, '__browseNotifInstalled', { value: true, configurable: true });
 
       var ASK = '\(askEvent)', REPLY = '\(replyEvent)';
       var currentPermission = 'default';
@@ -78,7 +77,7 @@ enum WebNotifications {
         }
       });
 
-      function BrowseNotification(title, options) {
+      function Notification(title, options) {
         if (arguments.length < 1) {
           throw new TypeError("Failed to construct 'Notification': 1 argument required, but only 0 present.");
         }
@@ -115,16 +114,21 @@ enum WebNotifications {
         });
       }
 
-      Object.defineProperty(BrowseNotification, 'permission', {
+      if (typeof EventTarget === 'function') {
+        Object.setPrototypeOf(Notification.prototype, EventTarget.prototype);
+        Object.setPrototypeOf(Notification, EventTarget);
+      }
+
+      Object.defineProperty(Notification, 'permission', {
         configurable: true,
         get: function () { return currentPermission; }
       });
-      Object.defineProperty(BrowseNotification, 'maxActions', {
+      Object.defineProperty(Notification, 'maxActions', {
         configurable: true,
         get: function () { return 0; }
       });
 
-      BrowseNotification.requestPermission = function (cb) {
+      Notification.requestPermission = function (cb) {
         var reqId = nextReq++;
         var p = new Promise(function (resolve) {
           pending.set(reqId, function (perm) {
@@ -138,34 +142,34 @@ enum WebNotifications {
         return p;
       };
 
-      BrowseNotification.prototype.close = function () {
+      Notification.prototype.close = function () {
         send({ op: 'close', notifId: this._id, tag: this.tag });
         this._emit('close');
         instances.delete(this._id);
         if (this.tag && deliveredIds.get(this.tag) === this._id) deliveredIds.delete(this.tag);
       };
 
-      BrowseNotification.prototype.addEventListener = function (type, fn) {
+      Notification.prototype.addEventListener = function (type, fn) {
         if (!fn || typeof fn !== 'function') return;
         var list = this._listeners[type];
         if (!list) list = this._listeners[type] = [];
         if (list.indexOf(fn) === -1) list.push(fn);
       };
 
-      BrowseNotification.prototype.removeEventListener = function (type, fn) {
+      Notification.prototype.removeEventListener = function (type, fn) {
         var list = this._listeners[type];
         if (!list) return;
         var idx = list.indexOf(fn);
         if (idx !== -1) list.splice(idx, 1);
       };
 
-      BrowseNotification.prototype.dispatchEvent = function (evt) {
+      Notification.prototype.dispatchEvent = function (evt) {
         if (!evt || !evt.type) return false;
         this._emit(evt.type, evt);
         return true;
       };
 
-      BrowseNotification.prototype._emit = function (type, existingEvent) {
+      Notification.prototype._emit = function (type, existingEvent) {
         var evt = existingEvent || new Event(type);
         var prop = this['on' + type];
         if (typeof prop === 'function') {
@@ -180,13 +184,11 @@ enum WebNotifications {
       };
 
       Object.defineProperty(window, 'Notification', {
-        value: BrowseNotification,
+        value: Notification,
         writable: true,
         enumerable: false,
         configurable: true
       });
-
-      send({ op: 'query' });
     })();
     """
 
@@ -205,6 +207,7 @@ enum WebNotifications {
         var text = typeof payload === 'string' ? payload : JSON.stringify(payload);
         window.dispatchEvent(new CustomEvent('\(replyEvent)', { detail: text }));
       };
+      try { handler.postMessage({ op: 'query' }); } catch (_) {}
     })();
     """
 
