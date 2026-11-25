@@ -1,3 +1,5 @@
+Site search !bangs and custom keywords, Nanolight browse:// deep links and launcher.json indexing, Page Capture & Export (PNG, PDF, Markdown), opt-in native Cookie Banner Shield, per-site CSS Boosts and Force Dark Mode, global media & muted tabs popover, passive DevTools console/network MCP tools for Codegraff, Tab Group @group context mentions, native on-device Translation, and a Split View transition fix.
+
 Faster streaming Markdown and Codegraff composer/tool latency, 120 FPS rendering across tabs, split views, and smooth scrolling, quicker startup, navigation, favicons, and extension loading, plus Reading Mode, floating video controls, tab group drag/split parity, SiteCard, Find, Bookmarks, and Downloads polish.
 
 Real chrome.proxy support via WebKit proxyConfigurations, open-tab Web Notifications bridged to macOS Notification Center with per-site Privacy permissions, Universal Intel (x86_64) and Apple Silicon (arm64) macOS builds, and Roadmap cleanup.

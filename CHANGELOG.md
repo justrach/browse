@@ -6,6 +6,8 @@ All notable changes to **browse** are documented here, newest first.
 
 ## Unreleased
 
+## 1.14.0 — 25 November 2026
+
 ### Added
 
 - **Site search shortcuts & `!bangs` (`SiteSearch.swift`, `Prefs.swift`, `Browser.swift`, `Settings.swift`)**: Added built-in `!gh`, `!yt`, `!mdn`, `!w`, `!hn`, `!r`, `!npm`, `!crates`, `!so`, `!maps`, `!g`, `!ddg`, `!kagi`, `!apple`, `!x`, and `!pkg` keywords plus customizable site-search templates in **Settings › General** resolving directly in the Omnibox (`⌘L`/`⌘T`) and Command Switcher (`⌘K`).
