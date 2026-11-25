@@ -81,7 +81,9 @@ final class Links: NSObject, NSApplicationDelegate {
 
     @objc private func handle(getURL event: NSAppleEventDescriptor, reply: NSAppleEventDescriptor) {
         guard let text = event.paramDescriptor(forKeyword: AEKeyword(keyDirectObject))?.stringValue,
-              let url = URL(string: text), url.scheme?.lowercased().hasPrefix("http") == true
+              let url = URL(string: text),
+              let scheme = url.scheme?.lowercased(),
+              scheme == "http" || scheme == "https" || scheme == "browse"
         else { return }
         Links.take(url)
     }
@@ -91,8 +93,11 @@ final class Links: NSObject, NSApplicationDelegate {
     /// once Search is the Mac's browser (it says it can open them, see
     /// build.sh), which this used to drop without a word.
     func application(_ application: NSApplication, open urls: [URL]) {
-        for url in urls where url.isFileURL || url.scheme?.lowercased().hasPrefix("http") == true {
-            Links.take(url)
+        for url in urls {
+            let scheme = url.scheme?.lowercased() ?? ""
+            if url.isFileURL || scheme == "http" || scheme == "https" || scheme == "browse" {
+                Links.take(url)
+            }
         }
     }
 
@@ -136,6 +141,11 @@ final class Links: NSObject, NSApplicationDelegate {
     static func hand(to browser: Browser) {
         Links.browser = browser
         deliver = { [weak browser] url in
+            if let command = BrowseScheme.parse(url) {
+                browser?.perform(command)
+                activateBrowserWindow()
+                return
+            }
             // In a small window of its own, for whoever chose that.
             if let browser, browser.prefs.littleLinks {
                 LittleWindow.show(url, for: browser)
@@ -158,11 +168,19 @@ final class Links: NSObject, NSApplicationDelegate {
         waiting = []
         guard let first = early.first else { return }
         onceShown { [weak browser] in
-            browser?.arrive(first)
+            if let command = BrowseScheme.parse(first) {
+                browser?.perform(command)
+            } else {
+                browser?.arrive(first)
+            }
             comeForward()
             for (n, url) in early.dropFirst().enumerated() {
                 DispatchQueue.main.asyncAfter(deadline: .now() + 0.15 * Double(n + 1)) { [weak browser] in
-                    browser?.open(url, foreground: false, atEnd: true)
+                    if let command = BrowseScheme.parse(url) {
+                        browser?.perform(command)
+                    } else {
+                        browser?.open(url, foreground: false, atEnd: true)
+                    }
                 }
             }
         }

@@ -38,6 +38,7 @@ jobs:
           bash tests/web-notifications.sh
           bash tests/site-search.sh
           bash tests/cookie-shield.sh
+          bash tests/browse-scheme.sh
           bash tests/ui-layout.sh
       - name: Build
         run: swift build -c release

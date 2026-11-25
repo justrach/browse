@@ -200,6 +200,11 @@ cat > "$APP/Contents/Info.plist" <<PLIST
       <key>CFBundleURLSchemes</key>
       <array><string>http</string><string>https</string></array>
     </dict>
+    <dict>
+      <key>CFBundleURLName</key><string>browse command</string>
+      <key>CFBundleURLSchemes</key>
+      <array><string>browse</string></array>
+    </dict>
   </array>
   <key>CFBundleDocumentTypes</key>
   <array>

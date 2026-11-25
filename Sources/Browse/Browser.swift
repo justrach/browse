@@ -90,6 +90,7 @@ final class Browser: NSObject, ObservableObject {
             if let id = activeID, id != oldValue, let held = heldDialogs.removeValue(forKey: id) {
                 DispatchQueue.main.async { held.forEach { $0.present() } }
             }
+            refreshLauncherIndex()
             guard oldValue != activeID, let old = oldValue else { return }
             linkStatus.dismiss()
             tabs.first { $0.id == old }?.touch()
@@ -2051,8 +2052,18 @@ final class Browser: NSObject, ObservableObject {
             }.store(in: &bag)
         }
         bookmarks.objectWillChange
-            .sink { [weak self] in self?.objectWillChange.send() }
+            .sink { [weak self] in
+                guard let self else { return }
+                self.objectWillChange.send()
+                DispatchQueue.main.async { [weak self] in self?.refreshLauncherIndex() }
+            }
             .store(in: &bag)
+        for changed in [prefs.$siteSearchShortcuts.map { _ in () }.eraseToAnyPublisher(),
+                        prefs.$customSiteShortcuts.map { _ in () }.eraseToAnyPublisher()] {
+            changed.dropFirst().sink { [weak self] in
+                DispatchQueue.main.async { [weak self] in self?.refreshLauncherIndex() }
+            }.store(in: &bag)
+        }
 
         // An icon that arrives is put on every tab showing that site, not only
         // the one that happened to ask for it.
@@ -2225,6 +2236,7 @@ final class Browser: NSObject, ObservableObject {
             first.wake()
             wakePair()
         }
+        refreshLauncherIndex()
     }
 
     /// The few settings that something else has to be told about. The rest are
@@ -2463,6 +2475,22 @@ final class Browser: NSObject, ObservableObject {
             )
         )
         ICloudSync.shared.tabsChanged()
+        refreshLauncherIndex(now: now)
+    }
+
+    func refreshLauncherIndex(now: Bool = false) {
+        let snap = LauncherIndex.snapshot(
+            tabs: tabs,
+            parked: parked,
+            spaces: spaces,
+            activeSpaceID: spaceID,
+            activeTabID: activeID,
+            groups: tabGroups,
+            bookmarks: bookmarks.roots,
+            customShortcuts: prefs.customSiteShortcuts,
+            siteShortcutsEnabled: prefs.siteSearchShortcuts
+        )
+        LauncherIndex.scheduleWrite(snap, immediate: now)
     }
 
     /// Whether a tab goes into the session: not a private one or the
@@ -2961,6 +2989,72 @@ final class Browser: NSObject, ObservableObject {
             editing = false
         } else {
             open(url, foreground: true)
+        }
+    }
+
+    /// Executes a validated `browse://` command delivered via URL scheme from
+    /// Nanolight or other local launchers (`ask` prefills only; never auto-sends).
+    func perform(_ command: BrowseCommand) {
+        switch command {
+        case .tab(let id):
+            if let tab = tabs.first(where: { $0.id == id && !$0.shy }) {
+                if talkOnStage { leaveStage() }
+                select(tab)
+                return
+            }
+            for (space, row) in parked {
+                if let tab = row.tabs.first(where: { $0.id == id && !$0.shy }) {
+                    switchSpace(to: space)
+                    if let restored = tabs.first(where: { $0.id == tab.id }) {
+                        select(restored)
+                    }
+                    return
+                }
+            }
+
+        case .space(let id, let name):
+            if let id, spaces.contains(where: { $0.id == id }) {
+                switchSpace(to: id)
+            } else if let name,
+                      let found = spaces.first(where: { $0.name.compare(name, options: .caseInsensitive) == .orderedSame }) {
+                switchSpace(to: found.id)
+            }
+
+        case .open(let url, let newTab):
+            guard let scheme = url.scheme?.lowercased(), scheme == "http" || scheme == "https" else { return }
+            if talkOnStage { leaveStage() }
+            if newTab {
+                open(url, foreground: true)
+            } else {
+                arrive(url)
+            }
+
+        case .search(let query):
+            guard let url = destination(for: query),
+                  let scheme = url.scheme?.lowercased(),
+                  scheme == "http" || scheme == "https"
+            else { return }
+            if talkOnStage { leaveStage() }
+            arrive(url)
+
+        case .ask(let prompt):
+            if !prefs.usesAgent { prefs.usesAgent = true }
+            if active?.isBlank == true {
+                takeStage()
+            } else {
+                talkToColumn()
+            }
+            agent.draft = prompt
+            focusAgent()
+
+        case .newTab:
+            newTab()
+
+        case .newPrivateTab:
+            newShyTab()
+
+        case .switcher:
+            summon()
         }
     }
 
