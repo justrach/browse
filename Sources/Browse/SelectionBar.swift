@@ -149,12 +149,14 @@ struct SelectionBar: View {
     let onAsk: () -> Void
     let onExplain: () -> Void
     let onRewrite: () -> Void
+    var onTranslate: (() -> Void)? = nil
     let onCopy: () -> Void
 
     @Environment(\.colorScheme) private var scheme
 
     var body: some View {
-        let pillWidth: CGFloat = !usesAgent ? 44 : (selection.editable ? 268 : 200)
+        let baseWidth: CGFloat = !usesAgent ? 44 : (selection.editable ? 268 : 200)
+        let pillWidth: CGFloat = baseWidth + (onTranslate != nil ? 34 : 0)
         let pillHeight: CGFloat = 32
         let viewW = viewport.width > 0 ? viewport.width : 900
         let viewH = viewport.height > 0 ? viewport.height : 600
@@ -173,6 +175,10 @@ struct SelectionBar: View {
                     pillDivider
                     pillButton(icon: "wand.and.stars", label: "Rewrite", action: onRewrite)
                 }
+                pillDivider
+            }
+            if let onTranslate {
+                pillButton(icon: "translate", label: nil, help: "Translate selection", action: onTranslate)
                 pillDivider
             }
             pillButton(icon: "doc.on.doc", label: nil, help: "Copy selection", action: onCopy)

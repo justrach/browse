@@ -319,7 +319,11 @@ struct GroupContextMenu: View {
     let group: TabGroup
 
     var body: some View {
+        let openMembers = browser.tabs.filter { $0.userGroupID == group.id && !$0.isBlank }
         Button("New Tab in Group") { browser.newTab(inGroup: group.id) }
+        if browser.prefs.usesAgent, !openMembers.isEmpty {
+            Button("Ask Codegraff about Group") { browser.askAgentAboutGroup(group.id) }
+        }
         Divider()
         Button("Rename Group") { browser.editingGroupID = group.id }
         Button(group.collapsed ? "Expand Group" : "Collapse Group") {

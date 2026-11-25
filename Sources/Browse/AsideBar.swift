@@ -219,6 +219,7 @@ private struct AddressSummaryButton: View {
     @State private var readerHover = false
     @State private var readerMenuOpen = false
     @State private var audioHover = false
+    @State private var mediaMenuOpen = false
 
     var body: some View {
         let host: String = {
@@ -308,21 +309,37 @@ private struct AddressSummaryButton: View {
             .help("Open or edit address   ⌘L")
 
             if !tab.isBlank && (tab.noisy || tab.muted) {
-                Button { tab.toggleMute() } label: {
+                let multiAudio = browser.mediaEntries().count > 1
+                Button {
+                    if multiAudio {
+                        mediaMenuOpen.toggle()
+                    } else {
+                        tab.toggleMute()
+                    }
+                } label: {
                     Image(systemName: tab.muted ? "speaker.slash.fill" : "speaker.wave.2.fill")
                         .font(.system(size: 10, weight: .medium))
                         .foregroundStyle(tab.muted ? Palette.muted : Palette.ink.opacity(0.86))
                         .frame(width: 22, height: 22)
                         .background(
                             RoundedRectangle(cornerRadius: 6, style: .continuous)
-                                .fill(Palette.ink.opacity(audioHover ? 0.08 : 0))
+                                .fill(Palette.ink.opacity(audioHover || mediaMenuOpen ? 0.08 : 0))
                         )
                         .contentShape(RoundedRectangle(cornerRadius: 6, style: .continuous))
                 }
                 .buttonStyle(.plain)
                 .onHover { audioHover = $0 }
                 .padding(.trailing, 1)
-                .help(tab.muted ? "Unmute Tab" : "Mute Tab")
+                .help(multiAudio ? "Audio controls across tabs" : (tab.muted ? "Unmute Tab" : "Mute Tab"))
+                .popover(isPresented: $mediaMenuOpen, arrowEdge: .bottom) {
+                    MediaPopover(browser: browser) { mediaMenuOpen = false }
+                }
+                .contextMenu {
+                    Button(tab.muted ? "Unmute Tab" : "Mute Tab") { tab.toggleMute() }
+                    Button("Play / Pause Media") { tab.toggleMediaPlayback() }
+                    Divider()
+                    Button("All Playing Tabs…") { mediaMenuOpen = true }
+                }
                 .transition(.opacity.combined(with: .scale(scale: 0.9)))
             }
 
@@ -679,15 +696,16 @@ struct EmbeddedAddressBar: View {
     }
 }
 
-/// Folded-sidebar indicator for background tabs actively playing audio.
+/// Folded-sidebar and cross-Space indicator for tabs actively playing audio.
 private struct AsideBackgroundAudioButton: View {
     @ObservedObject var browser: Browser
     @State private var hovering = false
+    @State private var popoverOpen = false
 
     var body: some View {
-        let noisy = browser.tabs.filter { $0.id != browser.activeID && $0.noisy && !$0.muted }
+        let noisy = browser.mediaEntries().filter { $0.tab.id != browser.activeID && $0.tab.noisy && !$0.tab.muted }
         if !noisy.isEmpty {
-            Button { browser.select(noisy[0]) } label: {
+            Button { popoverOpen.toggle() } label: {
                 HStack(spacing: 3) {
                     Image(systemName: "speaker.wave.2.fill")
                         .font(.system(size: 10.5, weight: .medium))
@@ -701,21 +719,26 @@ private struct AsideBackgroundAudioButton: View {
                 .frame(minWidth: 28, minHeight: 28, maxHeight: 28)
                 .background(
                     RoundedRectangle(cornerRadius: 7.5, style: .continuous)
-                        .fill(Palette.accent.opacity(hovering ? 0.16 : 0.10))
+                        .fill(Palette.accent.opacity(hovering || popoverOpen ? 0.16 : 0.10))
                 )
                 .contentShape(RoundedRectangle(cornerRadius: 7.5, style: .continuous))
             }
             .buttonStyle(.plain)
             .onHover { hovering = $0 }
-            .help("Jump to audio tab: \(noisy[0].label) (right-click for options)")
+            .help("Playing audio across tabs: \(noisy[0].tab.label)")
+            .popover(isPresented: $popoverOpen, arrowEdge: .bottom) {
+                MediaPopover(browser: browser) { popoverOpen = false }
+            }
             .contextMenu {
-                ForEach(noisy) { tab in
-                    Button("Go to “\(tab.label)”") { browser.select(tab) }
-                    Button("Mute “\(tab.label)”") { tab.toggleMute() }
+                ForEach(noisy) { entry in
+                    Button("Go to “\(entry.tab.label)”") { browser.jumpToMedia(entry) }
+                    Button(entry.tab.muted ? "Unmute “\(entry.tab.label)”" : "Mute “\(entry.tab.label)”") {
+                        entry.tab.toggleMute()
+                    }
                     Divider()
                 }
                 Button("Mute All Background Audio") {
-                    for tab in noisy { tab.toggleMute() }
+                    for entry in noisy { entry.tab.toggleMute() }
                 }
             }
             .animation(Motion.quick, value: hovering)

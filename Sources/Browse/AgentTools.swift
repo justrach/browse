@@ -481,6 +481,7 @@ final class AgentTools: ObservableObject {
     private static func annotations(for name: String) -> [String: Any] {
         switch name {
         case "search", "read_pages", "read", "read_markdown", "page_info", "links",
+             "console_logs", "network_requests",
              "tabs", "snapshot", "form_fields", "screenshot", "wait_for":
             return ["readOnlyHint": true, "destructiveHint": false, "idempotentHint": true, "openWorldHint": true]
         case "open", "open_tab", "go", "back", "forward", "reload", "scroll", "hover", "show":
@@ -527,6 +528,19 @@ final class AgentTools: ObservableObject {
         ]),
         tool("page_info", "Fast page metadata: title, URL, loading state, viewport size, scroll position/height, and currently focused element.", [
             "page": page,
+        ]),
+        tool("console_logs", "Read captured browser console messages (log, info, warn, error) and uncaught runtime errors on a page.", [
+            "page": page,
+            "level": ["type": "string", "enum": ["all", "log", "info", "warn", "error"], "description": "Filter by console level (default all)."],
+            "limit": ["type": "integer", "description": "Maximum number of recent entries to return (default 50, max 200)."],
+            "clear": ["type": "boolean", "description": "Clear the buffered console entries after reading."],
+        ]),
+        tool("network_requests", "Read captured fetch and XMLHttpRequest calls on a page (method, URL, status, duration, failure state; omits headers/cookies/bodies).", [
+            "page": page,
+            "failed_only": ["type": "boolean", "description": "Only return failed or non-2xx/3xx requests."],
+            "filter": ["type": "string", "description": "Case-insensitive URL substring filter."],
+            "limit": ["type": "integer", "description": "Maximum number of recent requests to return (default 50, max 200)."],
+            "clear": ["type": "boolean", "description": "Clear the buffered network entries after reading."],
         ]),
         tool("links", "The links on a page: their words and where they go.", ["page": page]),
         tool("go", "Take a page to another address and wait for it to load.", [
@@ -717,6 +731,27 @@ final class AgentTools: ObservableObject {
                 info["passkeysAvailable"] = !offered.isEmpty
                 info["passkeyCount"] = offered.count
                 return AgentTools.said(info)
+            }
+
+        case "console_logs":
+            return await on(arguments, browser, owner, caller) { target in
+                let level = arguments["level"] as? String ?? "all"
+                let limit = arguments["limit"] as? Int ?? 50
+                let clear = arguments["clear"] as? Bool ?? false
+                let (value, error) = await target.run(DevCapture.readConsoleScript(level: level, limit: limit, clear: clear))
+                if let error { return AgentTools.failed(error) }
+                return AgentTools.said(["page": target.id, "url": target.address, "console": value ?? [:]])
+            }
+
+        case "network_requests":
+            return await on(arguments, browser, owner, caller) { target in
+                let failedOnly = arguments["failed_only"] as? Bool ?? false
+                let filter = arguments["filter"] as? String
+                let limit = arguments["limit"] as? Int ?? 50
+                let clear = arguments["clear"] as? Bool ?? false
+                let (value, error) = await target.run(DevCapture.readNetworkScript(failedOnly: failedOnly, filter: filter, limit: limit, clear: clear))
+                if let error { return AgentTools.failed(error) }
+                return AgentTools.said(["page": target.id, "url": target.address, "network": value ?? [:]])
             }
 
         case "links":
@@ -1076,6 +1111,8 @@ final class AgentTools: ObservableObject {
         case "screenshot": return "Taking screenshot…"
         case "snapshot": return "Reading page elements…"
         case "page_info": return "Inspecting page…"
+        case "console_logs": return "Reading console logs…"
+        case "network_requests": return "Inspecting network requests…"
         case "search": return "Searching…"
         case "read_pages", "read", "read_markdown": return "Reading page…"
         case "open", "go": return "Loading page…"
@@ -1685,7 +1722,7 @@ final class AgentTools: ObservableObject {
     })()
     """
 
-    private static let markdownScript = """
+    static let markdownScript = """
     (function () {
       var root = document.querySelector('main, article, [role="main"]') || document.body;
       if (!root) return '';
@@ -1968,6 +2005,11 @@ private final class Sheet: Target {
         // trackers is a page settled() is still waiting on.
         Shield.shared.protect(config.userContentController)
         if !reading {
+            if DevCapture.on {
+                config.userContentController.addUserScript(
+                    WKUserScript(source: DevCapture.script, injectionTime: .atDocumentStart, forMainFrameOnly: true, in: .page)
+                )
+            }
             config.userContentController.addScriptMessageHandler(passkeyRelay, contentWorld: Web.world, name: PasskeyRelay.name)
             config.userContentController.addUserScript(
                 WKUserScript(source: PasskeyRelay.page, injectionTime: .atDocumentStart, forMainFrameOnly: false, in: .page)

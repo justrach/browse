@@ -260,6 +260,7 @@ extension Browser {
         typed = ""
         askFocus()
         announce(space.name)
+        refreshLauncherIndex()
     }
 
     /// Every other space's row, made ahead of time, so the column can show

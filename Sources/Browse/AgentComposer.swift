@@ -141,15 +141,17 @@ struct AgentComposer: View {
         }
     }
 
-    /// Unified `@` mention candidate: either an open tab or a recently visited
-    /// history item (Dia-style `@tab` + `@history`).
+    /// Unified `@` mention candidate: an open tab, a tab group, or a recently
+    /// visited history item (Dia-style `@tab`, `@group`, `@history`).
     private enum MentionCandidate: Identifiable {
         case tab(Tab)
+        case group(TabGroup, [Tab])
         case history(History.Trace)
 
         var id: String {
             switch self {
             case .tab(let t): return "tab-\(t.id.uuidString)"
+            case .group(let g, _): return "group-\(g.id.uuidString)"
             case .history(let h): return "hist-\(h.url.absoluteString)"
             }
         }
@@ -167,7 +169,24 @@ struct AgentComposer: View {
 
         var out: [MentionCandidate] = []
         var openURLs = Set<String>()
+        let already = Set(agent.mentionedTabs.map(\.id))
         if !historyOnly {
+            if !browser.tabGroups.isEmpty {
+                var groupAdded = 0
+                for group in browser.tabGroups {
+                    let members = browser.tabs.filter { $0.userGroupID == group.id && !$0.isBlank && !already.contains($0.id) }
+                    guard !members.isEmpty else { continue }
+                    let matchesName = needle.isEmpty || group.name.localizedCaseInsensitiveContains(needle)
+                    let matchesMember = !needle.isEmpty && members.contains {
+                        $0.label.localizedCaseInsensitiveContains(needle)
+                        || ($0.address?.host()?.localizedCaseInsensitiveContains(needle) ?? false)
+                    }
+                    guard matchesName || matchesMember else { continue }
+                    out.append(.group(group, members))
+                    groupAdded += 1
+                    if groupAdded >= 3 { break }
+                }
+            }
             for tab in mentionMatches.prefix(5) {
                 if let url = tab.address?.absoluteString { openURLs.insert(url) }
                 out.append(.tab(tab))
@@ -203,6 +222,8 @@ struct AgentComposer: View {
         switch chosen {
         case .tab(let tab):
             agent.mentionTab(tab)
+        case .group(_, let members):
+            for tab in members { agent.mentionTab(tab) }
         case .history(let trace):
             agent.mentionHistory(title: trace.title, url: trace.url)
         }
@@ -611,6 +632,21 @@ struct AgentComposer: View {
                                     .lineLimit(1)
                                     .truncationMode(.tail)
                             }
+                        case .group(let group, let members):
+                            let dotColor = Spaces.toned(group.colour ?? 0, dark: scheme == .dark)
+                            Circle()
+                                .fill(dotColor)
+                                .frame(width: 9, height: 9)
+                                .frame(width: 14, height: 14)
+                            Text(group.name)
+                                .font(.system(size: 12, weight: .medium))
+                                .foregroundStyle(Palette.ink)
+                                .lineLimit(1)
+                                .truncationMode(.tail)
+                            Text("\(members.count) \(members.count == 1 ? "tab" : "tabs")")
+                                .font(.system(size: 11))
+                                .foregroundStyle(Palette.muted)
+                                .lineLimit(1)
                         case .history(let trace):
                             let host = (trace.url.host() ?? "").replacingOccurrences(of: "www.", with: "")
                             Image(systemName: "clock")

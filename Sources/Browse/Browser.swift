@@ -90,6 +90,7 @@ final class Browser: NSObject, ObservableObject {
             if let id = activeID, id != oldValue, let held = heldDialogs.removeValue(forKey: id) {
                 DispatchQueue.main.async { held.forEach { $0.present() } }
             }
+            refreshLauncherIndex()
             guard oldValue != activeID, let old = oldValue else { return }
             linkStatus.dismiss()
             tabs.first { $0.id == old }?.touch()
@@ -356,7 +357,8 @@ final class Browser: NSObject, ObservableObject {
     func visit(_ typed: String) -> Bool {
         let words = typed.trimmingCharacters(in: .whitespacesAndNewlines)
         guard let url = destination(for: words) else { return false }
-        let searched = Address.url(from: words) == nil ? words : nil
+        let isSiteShortcut = siteSearchMatch(for: words) != nil
+        let searched = (Address.url(from: words) == nil && !isSiteShortcut) ? words : nil
         if let tab = active, tab.isBlank {
             if let searched { rememberSearch(searched, url: url, in: tab) }
             tab.go(to: url)
@@ -511,12 +513,36 @@ final class Browser: NSObject, ObservableObject {
         withAnimation(Motion.glide) { prefs.sidebar.toggle() }
     }
 
+    /// Attach every non-blank tab in `groupID` to the Codegraff composer and open
+    /// the Codegraff column so the user can ask about or compare the whole group.
+    func askAgentAboutGroup(_ groupID: UUID) {
+        if !prefs.usesAgent { prefs.usesAgent = true }
+        let members = tabs.filter { $0.userGroupID == groupID && !$0.isBlank }
+        guard !members.isEmpty else {
+            announce("Group has no open pages to attach")
+            return
+        }
+        for tab in members {
+            agent.mentionTab(tab)
+        }
+        if !consulting {
+            talkToColumn()
+        } else {
+            if agentFull { agentFull = false }
+            focusAgent()
+        }
+    }
+
+    func siteSearchMatch(for text: String) -> SiteSearch.Match? {
+        SiteSearch.resolve(text, custom: prefs.customSiteShortcuts, enabled: prefs.siteSearchShortcuts)
+    }
+
     func searchURL(for text: String) -> URL? {
         Engine.url(for: text, template: prefs.engine.template(custom: prefs.customEngine))
     }
 
     func destination(for typed: String) -> URL? {
-        Address.url(from: typed) ?? searchURL(for: typed)
+        Address.url(from: typed) ?? siteSearchMatch(for: typed)?.url ?? searchURL(for: typed)
     }
 
     /// ⌘S: the column folded away, and slid out over the page for a look
@@ -783,6 +809,35 @@ final class Browser: NSObject, ObservableObject {
         }
     }
 
+    struct MediaEntry: Identifiable {
+        let tab: Tab
+        let space: Space?
+        var id: Tab.ID { tab.id }
+    }
+
+    /// All currently playing or muted tabs across the active Space and any parked Spaces.
+    func mediaEntries() -> [MediaEntry] {
+        var entries: [MediaEntry] = tabs
+            .filter { !$0.isBlank && ($0.noisy || $0.muted) }
+            .map { MediaEntry(tab: $0, space: nil) }
+        guard prefs.usesSpaces else { return entries }
+        for space in spaces where space.id != spaceID {
+            guard let row = parked[space.id] else { continue }
+            for tab in row.tabs where !tab.isBlank && (tab.noisy || tab.muted) {
+                entries.append(MediaEntry(tab: tab, space: space))
+            }
+        }
+        return entries
+    }
+
+    /// Switches Spaces if necessary and brings an audio/media tab to the front.
+    func jumpToMedia(_ entry: MediaEntry) {
+        if let space = entry.space, space.id != spaceID {
+            switchSpace(to: space.id)
+        }
+        select(entry.tab)
+    }
+
     /// ⌘⇧M. Whatever is making noise in this tab stops making noise.
     func pauseMedia() {
         guard let tab = active else { return }
@@ -810,6 +865,53 @@ final class Browser: NSObject, ObservableObject {
 
     var hereHost: String? { curtain.host(of: active?.address) }
     var hereVeils: [Veil] { curtain.veils(on: hereHost) }
+    var hereDarkMode: Bool { curtain.isDarkMode(on: hereHost) }
+    var hereCustomCSS: String { curtain.boost(on: hereHost).css }
+    var hereHasBoost: Bool { !curtain.boost(on: hereHost).isEmpty }
+
+    func toggleSiteDarkMode() {
+        guard let host = hereHost else { return }
+        objectWillChange.send()
+        curtain.toggleDarkMode(on: host)
+        reapplyCurtain(for: host)
+        announce(curtain.isDarkMode(on: host) ? "Force dark mode on" : "Force dark mode off")
+    }
+
+    func setSiteCustomCSS(_ css: String) {
+        guard let host = hereHost else { return }
+        objectWillChange.send()
+        curtain.setCustomCSS(css, on: host)
+        reapplyCurtain(for: host)
+        announce("Updated site CSS")
+    }
+
+    func clearSiteBoost() {
+        guard let host = hereHost else { return }
+        objectWillChange.send()
+        curtain.clearBoost(on: host)
+        reapplyCurtain(for: host)
+        announce("Cleared site boost")
+    }
+
+    func restyleSiteWithAgent() {
+        guard let host = hereHost, prefs.usesAgent else { return }
+        reviewing = false
+        if !consulting {
+            talkToColumn()
+        } else {
+            if agentFull { agentFull = false }
+            focusAgent()
+        }
+        agent.draft = "Write clean, minimal custom CSS overrides for \(host) to improve typography, spacing, and clutter removal. Return only the CSS block so I can paste it into Site Boost."
+    }
+
+    private func reapplyCurtain(for host: String) {
+        let css = curtain.css(on: host)
+        for tab in tabs + parkedTabs where curtain.host(of: tab.address) == host {
+            tab.arm(hiding: css)
+            tab.applyVeils(css)
+        }
+    }
 
     /// ⌘⇧H. Point at anything on the page and it goes, for good, on this site.
     func toggleHiding() {
@@ -1429,8 +1531,10 @@ final class Browser: NSObject, ObservableObject {
         announce("Cache cleared")
     }
 
+    @Published var translatingText: String?
+
     /// The context menu prepares a draft. Selecting text never sends it.
-    /// Dia-style floating selection bar actions (Ask, Explain, Rewrite, Copy).
+    /// Dia-style floating selection bar actions (Ask, Explain, Rewrite, Translate, Copy).
     func runSelectionAction(_ kind: SelectionActionKind) {
         guard let sel = pageSelection,
               let tab = tabs.first(where: { $0.id == sel.tabID }) else { return }
@@ -1440,6 +1544,8 @@ final class Browser: NSObject, ObservableObject {
             NSPasteboard.general.clearContents()
             NSPasteboard.general.setString(sel.text, forType: .string)
             announce("Copied")
+        case .translate:
+            translatingText = sel.text
         case .ask:
             guard prefs.usesAgent,
                   let passage = AgentPassage(text: sel.text, from: tab) else { return }
@@ -1462,7 +1568,7 @@ final class Browser: NSObject, ObservableObject {
         }
     }
 
-    enum SelectionActionKind { case ask, explain, rewrite, copy }
+    enum SelectionActionKind { case ask, explain, rewrite, translate, copy }
 
     /// Visual `⌃Tab` / `⌃⇧Tab` MRU preview switcher: holding Control cycles
     /// recent tabs with live thumbnails; releasing Control commits the switch.
@@ -1898,6 +2004,7 @@ final class Browser: NSObject, ObservableObject {
         super.init()
         Shield.shared.enabled = prefs.shielded
         if prefs.shielded { Shield.shared.compile() }
+        Shield.shared.setCookieBlocking(prefs.blocksCookieBanners)
         Connect.shared.start(for: self)
         if #available(macOS 15.4, *) { Extensions.shared.start(for: self) }
         if prefs.bench {
@@ -1911,6 +2018,7 @@ final class Browser: NSObject, ObservableObject {
         // Once a day, quietly: is there a newer one?
         Updater.shared.checkIfDue { [weak self] line in self?.announce(line) }
         FormRelay.passkeysOffered = prefs.passkeys
+        DevCapture.on = prefs.usesAgent
 
         // The History menu lists what the history holds, and the menu is drawn
         // from this object's changes — only forward when the top-8 actually
@@ -1931,6 +2039,8 @@ final class Browser: NSObject, ObservableObject {
             .store(in: &bag)
         for changed in [prefs.$engine.map { _ in () }.eraseToAnyPublisher(),
                         prefs.$customEngine.map { _ in () }.eraseToAnyPublisher(),
+                        prefs.$siteSearchShortcuts.map { _ in () }.eraseToAnyPublisher(),
+                        prefs.$customSiteShortcuts.map { _ in () }.eraseToAnyPublisher(),
                         prefs.$recentSearches.map { _ in () }.eraseToAnyPublisher(),
                         prefs.$googleSuggestions.map { _ in () }.eraseToAnyPublisher()] {
             changed.dropFirst().sink { [weak self] in
@@ -1942,8 +2052,18 @@ final class Browser: NSObject, ObservableObject {
             }.store(in: &bag)
         }
         bookmarks.objectWillChange
-            .sink { [weak self] in self?.objectWillChange.send() }
+            .sink { [weak self] in
+                guard let self else { return }
+                self.objectWillChange.send()
+                DispatchQueue.main.async { [weak self] in self?.refreshLauncherIndex() }
+            }
             .store(in: &bag)
+        for changed in [prefs.$siteSearchShortcuts.map { _ in () }.eraseToAnyPublisher(),
+                        prefs.$customSiteShortcuts.map { _ in () }.eraseToAnyPublisher()] {
+            changed.dropFirst().sink { [weak self] in
+                DispatchQueue.main.async { [weak self] in self?.refreshLauncherIndex() }
+            }.store(in: &bag)
+        }
 
         // An icon that arrives is put on every tab showing that site, not only
         // the one that happened to ask for it.
@@ -2116,6 +2236,7 @@ final class Browser: NSObject, ObservableObject {
             first.wake()
             wakePair()
         }
+        refreshLauncherIndex()
     }
 
     /// The few settings that something else has to be told about. The rest are
@@ -2127,7 +2248,12 @@ final class Browser: NSObject, ObservableObject {
         prefs.$usesAgent
             .removeDuplicates()
             .sink { [weak self] on in
-                guard let self, !on else { return }
+                DevCapture.on = on
+                guard let self else { return }
+                for tab in tabs + parkedTabs {
+                    tab.arm(hiding: curtain.css(on: curtain.host(of: tab.address)))
+                }
+                guard !on else { return }
                 consulting = false
                 agentFull = false
                 agent.shutDown()
@@ -2153,6 +2279,14 @@ final class Browser: NSObject, ObservableObject {
                 if on, Shield.shared.lists.isEmpty { Shield.shared.compile() }
                 Shield.shared.apply(to: tabs.compactMap { $0.built?.configuration.userContentController })
                 announce(on ? "Ads and trackers blocked" : "Blocking off — reload to see the difference")
+            }
+            .store(in: &bag)
+        prefs.$blocksCookieBanners
+            .dropFirst()
+            .removeDuplicates()
+            .sink { [weak self] on in
+                Shield.shared.setCookieBlocking(on)
+                self?.announce(on ? "Hiding cookie banners — reload active pages" : "Cookie banner blocking off")
             }
             .store(in: &bag)
 
@@ -2341,6 +2475,22 @@ final class Browser: NSObject, ObservableObject {
             )
         )
         ICloudSync.shared.tabsChanged()
+        refreshLauncherIndex(now: now)
+    }
+
+    func refreshLauncherIndex(now: Bool = false) {
+        let snap = LauncherIndex.snapshot(
+            tabs: tabs,
+            parked: parked,
+            spaces: spaces,
+            activeSpaceID: spaceID,
+            activeTabID: activeID,
+            groups: tabGroups,
+            bookmarks: bookmarks.roots,
+            customShortcuts: prefs.customSiteShortcuts,
+            siteShortcutsEnabled: prefs.siteSearchShortcuts
+        )
+        LauncherIndex.scheduleWrite(snap, immediate: now)
     }
 
     /// Whether a tab goes into the session: not a private one or the
@@ -2839,6 +2989,72 @@ final class Browser: NSObject, ObservableObject {
             editing = false
         } else {
             open(url, foreground: true)
+        }
+    }
+
+    /// Executes a validated `browse://` command delivered via URL scheme from
+    /// Nanolight or other local launchers (`ask` prefills only; never auto-sends).
+    func perform(_ command: BrowseCommand) {
+        switch command {
+        case .tab(let id):
+            if let tab = tabs.first(where: { $0.id == id && !$0.shy }) {
+                if talkOnStage { leaveStage() }
+                select(tab)
+                return
+            }
+            for (space, row) in parked {
+                if let tab = row.tabs.first(where: { $0.id == id && !$0.shy }) {
+                    switchSpace(to: space)
+                    if let restored = tabs.first(where: { $0.id == tab.id }) {
+                        select(restored)
+                    }
+                    return
+                }
+            }
+
+        case .space(let id, let name):
+            if let id, spaces.contains(where: { $0.id == id }) {
+                switchSpace(to: id)
+            } else if let name,
+                      let found = spaces.first(where: { $0.name.compare(name, options: .caseInsensitive) == .orderedSame }) {
+                switchSpace(to: found.id)
+            }
+
+        case .open(let url, let newTab):
+            guard let scheme = url.scheme?.lowercased(), scheme == "http" || scheme == "https" else { return }
+            if talkOnStage { leaveStage() }
+            if newTab {
+                open(url, foreground: true)
+            } else {
+                arrive(url)
+            }
+
+        case .search(let query):
+            guard let url = destination(for: query),
+                  let scheme = url.scheme?.lowercased(),
+                  scheme == "http" || scheme == "https"
+            else { return }
+            if talkOnStage { leaveStage() }
+            arrive(url)
+
+        case .ask(let prompt):
+            if !prefs.usesAgent { prefs.usesAgent = true }
+            if active?.isBlank == true {
+                takeStage()
+            } else {
+                talkToColumn()
+            }
+            agent.draft = prompt
+            focusAgent()
+
+        case .newTab:
+            newTab()
+
+        case .newPrivateTab:
+            newShyTab()
+
+        case .switcher:
+            summon()
         }
     }
 
@@ -3420,7 +3636,15 @@ final class Browser: NSObject, ObservableObject {
             }
         }
 
-        if let search = searchURL(for: q) {
+        if let hit = siteSearchMatch(for: q) {
+            add(SwitcherAction(
+                id: "site-search:\(q)",
+                kind: .search,
+                title: "Search \(hit.shortcut.name) for “\(hit.query)”",
+                subtitle: hit.url.host() ?? hit.shortcut.name,
+                url: hit.url
+            ))
+        } else if let search = searchURL(for: q) {
             let engineName = prefs.engine.name(custom: prefs.customEngine)
             add(SwitcherAction(
                 id: "search:\(q)",
@@ -3788,15 +4012,21 @@ final class Browser: NSObject, ObservableObject {
             .compactMap { words in searchURL(for: words).map { Suggestion(key: words, title: "", url: $0, kind: .searched) } }
         list = typed.contains(" ") ? again + list : list + again
         // Last in the list, and only when what was typed cannot be a place.
-        if !typed.isEmpty,
-           Address.url(from: typed) == nil,
-           let asked = searchURL(for: typed) {
-            list.append(
-                Suggestion(key: typed, title: prefs.engine.name(custom: prefs.customEngine), url: asked, kind: .search)
-            )
-            // The engine's icon for its rows, fetched once if no page of it
-            // has been open yet — a new Mac's field wore a magnifying glass.
-            if !privateTab, let host = asked.host() { Favicons.shared.fetch(host: host) }
+        if !typed.isEmpty, Address.url(from: typed) == nil {
+            if let hit = siteSearchMatch(for: typed) {
+                list.insert(
+                    Suggestion(key: hit.query, title: hit.shortcut.name, url: hit.url, kind: .search),
+                    at: 0
+                )
+                if !privateTab, let host = hit.url.host() { Favicons.shared.fetch(host: host) }
+            } else if let asked = searchURL(for: typed) {
+                list.append(
+                    Suggestion(key: typed, title: prefs.engine.name(custom: prefs.customEngine), url: asked, kind: .search)
+                )
+                // The engine's icon for its rows, fetched once if no page of it
+                // has been open yet — a new Mac's field wore a magnifying glass.
+                if !privateTab, let host = asked.host() { Favicons.shared.fetch(host: host) }
+            }
         }
         // Words that aren't a place can be a question instead: the last row
         // hands them to Codegraff, with the page you're on.
@@ -4074,14 +4304,16 @@ final class Browser: NSObject, ObservableObject {
         if let picked, offers.indices.contains(picked) {
             let offer = offers[picked]
             target = offer.kind == .google ? searchURL(for: offer.key) : offer.url
-            searched = offer.kind == .search || offer.kind == .searched || offer.kind == .google ? offer.key : nil
+            let isShortcut = siteSearchMatch(for: typed) != nil && offer.kind == .search
+            searched = (!isShortcut && (offer.kind == .search || offer.kind == .searched || offer.kind == .google)) ? offer.key : nil
         } else if ending != nil {
             // The grey ending can finish a search as well as an address.
             target = Address.url(from: completed) ?? searchURL(for: completed)
             searched = Address.url(from: completed) == nil ? completed : nil
         } else {
+            let shortcut = siteSearchMatch(for: typed)
             target = destination(for: typed)
-            searched = Address.url(from: typed) == nil ? typed : nil
+            searched = (shortcut == nil && Address.url(from: typed) == nil) ? typed : nil
         }
 
         guard let url = target else {
