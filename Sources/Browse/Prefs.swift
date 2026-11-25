@@ -114,6 +114,18 @@ final class Preferences: ObservableObject {
     @Published var customEngine: String {
         didSet { store.set(customEngine, forKey: "search.custom") }
     }
+    /// Site search `!bang` prefixes and custom keywords in the address bar.
+    @Published var siteSearchShortcuts: Bool {
+        didSet { store.set(siteSearchShortcuts, forKey: "search.siteShortcuts") }
+    }
+    /// User-defined site search keyword templates.
+    @Published var customSiteShortcuts: [SiteShortcut] {
+        didSet {
+            if let data = try? JSONEncoder().encode(customSiteShortcuts) {
+                store.set(data, forKey: "search.customSiteShortcuts")
+            }
+        }
+    }
     /// Recent searches under an empty address field. Off until asked for.
     @Published var recentSearches: Bool {
         didSet { store.set(recentSearches, forKey: "search.recent") }
@@ -154,6 +166,10 @@ final class Preferences: ObservableObject {
     /// The ad blocker. On unless turned off; there is nothing else to it.
     @Published var shielded: Bool {
         didSet { store.set(shielded, forKey: "shield") }
+    }
+    /// Native WebKit cookie-banner blocker. Off unless turned on in Settings › Privacy.
+    @Published var blocksCookieBanners: Bool {
+        didSet { store.set(blocksCookieBanners, forKey: "shield.cookies") }
     }
     /// Settings › Privacy › Prevent cross-site tracking, turned off: WebKit's
     /// tracking prevention off, as Safari's same switch does (see
@@ -508,6 +524,9 @@ final class Preferences: ObservableObject {
         glyph = store.string(forKey: "glyph").flatMap(Glyph.init) ?? .letters
         engine = store.string(forKey: "search.engine").flatMap(Engine.init) ?? .standard
         customEngine = store.string(forKey: "search.custom") ?? ""
+        siteSearchShortcuts = store.object(forKey: "search.siteShortcuts") as? Bool ?? true
+        customSiteShortcuts = (store.data(forKey: "search.customSiteShortcuts")
+            .flatMap { try? JSONDecoder().decode([SiteShortcut].self, from: $0) }) ?? []
         recentSearches = store.bool(forKey: "search.recent")
         googleSuggestions = store.bool(forKey: "search.google.suggestions")
         sleepsTabs = store.object(forKey: "tabs.sleep") as? Bool ?? true
@@ -516,6 +535,7 @@ final class Preferences: ObservableObject {
         showsReading = reading
         ScrollRelay.on = reading
         shielded = store.object(forKey: "shield") as? Bool ?? true
+        blocksCookieBanners = store.bool(forKey: "shield.cookies")
         let keeps = store.bool(forKey: "sites.keep")
         keepsSignIns = keeps
         // Before the first page is loaded into the store.

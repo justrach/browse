@@ -13,6 +13,9 @@ struct Page: View {
     @ObservedObject var tab: Tab
     /// Rounded, as a card in a split (Split.swift); square on its own.
     var corner: CGFloat = 0
+    /// False while transitioning out in favor of `SplitStage` so an exiting
+    /// single-pane stage never reclaims a `WKWebView` mid-animation.
+    var active: Bool = true
 
     var body: some View {
         ZStack {
@@ -23,7 +26,11 @@ struct Page: View {
             // before and after the float changes nothing SwiftUI can see, so
             // the stage was never told to take it back when it landed, and
             // the tab stayed empty. Nothing, then the page, is a change.
-            WebStage(page: tab.isBlank || tab.asleep || tab.floating ? nil : tab.web, corner: corner)
+            WebStage(
+                page: tab.isBlank || tab.asleep || tab.floating ? nil : tab.web,
+                corner: corner,
+                active: active
+            )
             if corner > 0 {
                 PageOverlays(tab: tab)
                     .clipShape(RoundedRectangle(cornerRadius: corner, style: .continuous))
@@ -353,6 +360,7 @@ private struct Disc: View {
 struct WebStage: NSViewRepresentable {
     let page: NSView?
     var corner: CGFloat = 0
+    var active: Bool = true
 
     final class Coordinator {
         weak var lastPage: NSView?
@@ -365,6 +373,7 @@ struct WebStage: NSViewRepresentable {
     func makeNSView(context: Context) -> StageView { StageView() }
 
     func updateNSView(_ view: StageView, context: Context) {
+        guard active else { return }
         let coord = context.coordinator
         let cornerChanged = !coord.hasUpdated || coord.lastCorner != corner
         let pageChanged = !coord.hasUpdated || coord.lastPage !== page || (page != nil && page?.superview !== view)
@@ -376,6 +385,11 @@ struct WebStage: NSViewRepresentable {
         }
         coord.lastPage = page
         view.show(page)
+    }
+
+    static func dismantleNSView(_ view: StageView, coordinator: Coordinator) {
+        coordinator.lastPage = nil
+        view.relinquishIfMoved()
     }
 }
 
@@ -506,6 +520,16 @@ final class StageView: NSView {
             wanted.frame = bounds
         }
         endLiveResize()
+    }
+
+    /// Drops `wanted` when this stage is dismantled after the page moved to
+    /// another container (such as `SplitPaneSlot`), leaving the live container intact.
+    func relinquishIfMoved() {
+        if let page = wanted, page.superview !== self {
+            endLiveResize()
+            unbackPage()
+            wanted = nil
+        }
     }
 
     func endLiveResize() {

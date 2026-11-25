@@ -575,6 +575,13 @@ struct SettingsPanel: View {
                 .padding(.bottom, 11)
             }
             Rule()
+            Line("Site search shortcuts", "Type !gh, !yt, !mdn, !w + query in the address bar, or add your own keywords") {
+                Switch(on: $prefs.siteSearchShortcuts)
+            }
+            if prefs.siteSearchShortcuts {
+                SiteShortcutsEditor(prefs: prefs)
+            }
+            Rule()
             Line("Show recent searches", "Offer recent searches in an empty address field; never in private tabs") {
                 Switch(on: $prefs.recentSearches)
             }
@@ -862,6 +869,10 @@ struct SettingsPanel: View {
                             }
                         ))
                     }
+                }
+                Rule()
+                Line("Hide cookie banners", "Blocks common cookie consent prompts in WebKit with no page scripts") {
+                    Switch(on: $prefs.blocksCookieBanners)
                 }
                 Rule()
                 Line("Prevent cross-site tracking", "As in Safari. Off, sites you rarely open keep their sign-ins, and trackers inside other sites can follow you across them again, as in Chrome. Private tabs keep it on") {
@@ -1247,5 +1258,91 @@ private struct PermissionSites: View {
             .padding(.trailing, 14)
             .padding(.vertical, 10)
         }
+    }
+}
+
+private struct SiteShortcutsEditor: View {
+    @ObservedObject var prefs: Preferences
+    @State private var keyword = ""
+    @State private var name = ""
+    @State private var template = ""
+
+    private var cleanKeyword: String? { SiteSearch.normalizeKeyword(keyword) }
+    private var cleanTemplate: String { template.trimmingCharacters(in: .whitespacesAndNewlines) }
+    private var canAdd: Bool { cleanKeyword != nil && Engine.accepts(cleanTemplate) }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            ForEach(prefs.customSiteShortcuts) { item in
+                HStack(spacing: 8) {
+                    Text("!\(item.keyword)")
+                        .font(.system(size: 11.5, weight: .semibold, design: .monospaced))
+                        .foregroundStyle(Palette.accent)
+                    Text(item.name)
+                        .font(.system(size: 12, weight: .medium))
+                        .foregroundStyle(Palette.ink)
+                        .lineLimit(1)
+                    Text(item.template)
+                        .font(.system(size: 11))
+                        .foregroundStyle(Palette.muted)
+                        .lineLimit(1)
+                        .truncationMode(.middle)
+                    Spacer(minLength: 6)
+                    Button {
+                        prefs.customSiteShortcuts.removeAll { $0.keyword == item.keyword }
+                    } label: {
+                        Image(systemName: "xmark")
+                            .font(.system(size: 10, weight: .medium))
+                            .foregroundStyle(Palette.muted)
+                    }
+                    .buttonStyle(.plain)
+                    .help("Remove shortcut")
+                }
+                .padding(.horizontal, 10)
+                .padding(.vertical, 6)
+                .background(Palette.wash, in: RoundedRectangle(cornerRadius: 8, style: .continuous))
+            }
+
+            HStack(spacing: 6) {
+                TextField("key", text: $keyword)
+                    .textFieldStyle(.plain)
+                    .font(.system(size: 12, design: .monospaced))
+                    .frame(width: 64)
+                    .padding(.horizontal, 8)
+                    .padding(.vertical, 6)
+                    .background(Palette.wash, in: RoundedRectangle(cornerRadius: 8, style: .continuous))
+
+                TextField("Site name", text: $name)
+                    .textFieldStyle(.plain)
+                    .font(.system(size: 12))
+                    .frame(width: 96)
+                    .padding(.horizontal, 8)
+                    .padding(.vertical, 6)
+                    .background(Palette.wash, in: RoundedRectangle(cornerRadius: 8, style: .continuous))
+
+                TextField("https://example.com/search?q=%s", text: $template)
+                    .textFieldStyle(.plain)
+                    .font(.system(size: 12))
+                    .padding(.horizontal, 8)
+                    .padding(.vertical, 6)
+                    .background(Palette.wash, in: RoundedRectangle(cornerRadius: 8, style: .continuous))
+
+                Pill("Add", filled: canAdd) {
+                    guard let key = cleanKeyword, Engine.accepts(cleanTemplate) else { return }
+                    let label = name.trimmingCharacters(in: .whitespacesAndNewlines)
+                    let hostFallback = URL(string: cleanTemplate.replacingOccurrences(of: "%s", with: "q"))?.host() ?? key
+                    let shortcut = SiteShortcut(keyword: key, name: label.isEmpty ? hostFallback : label, template: cleanTemplate)
+                    prefs.customSiteShortcuts.removeAll { (SiteSearch.normalizeKeyword($0.keyword) ?? $0.keyword.lowercased()) == key }
+                    prefs.customSiteShortcuts.append(shortcut)
+                    keyword = ""
+                    name = ""
+                    template = ""
+                }
+                .disabled(!canAdd)
+                .opacity(canAdd ? 1 : 0.45)
+            }
+        }
+        .padding(.horizontal, 14)
+        .padding(.bottom, 12)
     }
 }

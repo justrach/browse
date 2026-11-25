@@ -1,5 +1,8 @@
 import SwiftUI
 import AppKit
+#if canImport(Translation)
+import Translation
+#endif
 
 // A window, a row of titles, and a field. Typing an address gets you a page;
 // there is nothing else to learn and nothing else to press.
@@ -45,6 +48,23 @@ struct BrowseApp: App {
                     .shortcut(shortcuts.key(for: .closeTab))
             }
             CommandGroup(replacing: .printItem) {
+                Button("Copy Page as Markdown") { browser.copyPageAsMarkdown() }
+                    .disabled(browser.active?.isBlank ?? true)
+                Menu("Capture Screenshot") {
+                    Button("Copy Visible Screenshot") {
+                        browser.captureScreenshot(fullPage: false, copyToClipboard: true)
+                    }
+                    Button("Save Visible Screenshot…") {
+                        browser.captureScreenshot(fullPage: false, copyToClipboard: false)
+                    }
+                    Button("Save Full-Page Screenshot…") {
+                        browser.captureScreenshot(fullPage: true, copyToClipboard: false)
+                    }
+                }
+                .disabled(browser.active?.isBlank ?? true)
+                Divider()
+                Button("Save Page as PDF…") { browser.savePageAsPDF() }
+                    .disabled(browser.active?.isBlank ?? true)
                 Button("Share…") { browser.share() }
                     .shortcut(shortcuts.key(for: .share))
                     .disabled(browser.active?.isBlank ?? true)
@@ -579,7 +599,6 @@ struct ContentView: View {
             SplitStage(browser: browser, left: pair.left, right: pair.right, inUnifiedCanvas: arcFrame) { tab in
                 paneOverlays(tab)
             }
-            .transition(.opacity)
         } else if let tab = browser.active {
             if arcFrame {
                 let shape = RoundedRectangle(cornerRadius: Split.corner, style: .continuous)
@@ -588,7 +607,7 @@ struct ContentView: View {
                     // StageView rounds its own CALayer natively; avoid SwiftUI
                     // .clipShape/.shadow directly on the NSViewRepresentable so
                     // AppKit never promotes WKWebView above the Omnibox overlay.
-                    pane(tab, corner: Split.corner)
+                    pane(tab, corner: Split.corner, active: browser.shownSplit == nil)
                     shape
                         .strokeBorder(
                             darkCanvas ? Color.white.opacity(0.095) : Color.black.opacity(0.075),
@@ -607,7 +626,7 @@ struct ContentView: View {
                 .padding(.top, (asideBarShown || fullScreenTopHidden) ? 0 : Split.gap)
                 .padding(.bottom, Split.gap)
             } else {
-                pane(tab)
+                pane(tab, active: browser.shownSplit == nil)
             }
         } else {
             Palette.ground
@@ -616,8 +635,8 @@ struct ContentView: View {
 
     /// A tab's page, with what goes over the page in front: the link under
     /// the pointer, Find, the offer to fill a form, saved sign-ins.
-    private func pane(_ tab: Tab, corner: CGFloat = 0) -> some View {
-        Page(tab: tab, corner: corner)
+    private func pane(_ tab: Tab, corner: CGFloat = 0, active: Bool = true) -> some View {
+        Page(tab: tab, corner: corner, active: active)
             .overlay { paneOverlays(tab, includePageOverlays: false) }
     }
 
@@ -653,6 +672,7 @@ struct ContentView: View {
                     onAsk: { browser.runSelectionAction(.ask) },
                     onExplain: { browser.runSelectionAction(.explain) },
                     onRewrite: { browser.runSelectionAction(.rewrite) },
+                    onTranslate: nativeTranslateAction,
                     onCopy: { browser.runSelectionAction(.copy) }
                 )
             }
@@ -954,6 +974,7 @@ struct ContentView: View {
             .animation(Motion.settle, value: browser.managing)
             .animation(Motion.settle, value: browser.bringingIn != nil)
             .animation(Motion.settle, value: browser.reviewing)
+            .nativeTranslationPresentation(text: $browser.translatingText)
         .onAppear {
             watchKeys()
             MenuKeySanitizer.shared.start()
@@ -1854,5 +1875,37 @@ private final class FullScreenEscape {
             current = candidate.superview
         }
         return nil
+    }
+}
+
+private extension ContentView {
+    var nativeTranslateAction: (() -> Void)? {
+        #if canImport(Translation)
+        if #available(macOS 15.0, *) {
+            return { browser.runSelectionAction(.translate) }
+        }
+        #endif
+        return nil
+    }
+}
+
+private extension View {
+    @ViewBuilder
+    func nativeTranslationPresentation(text: Binding<String?>) -> some View {
+        #if canImport(Translation)
+        if #available(macOS 15.0, *) {
+            self.translationPresentation(
+                isPresented: Binding(
+                    get: { text.wrappedValue != nil },
+                    set: { if !$0 { text.wrappedValue = nil } }
+                ),
+                text: text.wrappedValue ?? ""
+            )
+        } else {
+            self
+        }
+        #else
+        self
+        #endif
     }
 }

@@ -23,15 +23,18 @@ final class Shield: ObservableObject {
     /// What's compiled so far, in the order it arrived.
     private(set) var lists: [WKContentRuleList] = []
 
-    /// Tracks each controller's current host and how many of `lists` are attached,
-    /// avoiding WebKit content-rule-list tear-down/re-attach IPC on normal navigations.
+    /// Tracks each controller's current host and how many of `lists` (plus the
+    /// optional cookie-banner rule list) are attached, avoiding WebKit rule-list
+    /// tear-down/re-attach IPC on normal navigations.
     private final class ControllerState {
         var host: String
         var attachedCount: Int
+        var cookieAttached: Bool
 
-        init(host: String, attachedCount: Int) {
+        init(host: String, attachedCount: Int, cookieAttached: Bool) {
             self.host = host
             self.attachedCount = attachedCount
+            self.cookieAttached = cookieAttached
         }
     }
 
@@ -50,6 +53,9 @@ final class Shield: ObservableObject {
     /// this changes, so it takes effect on the next request rather than the
     /// next launch.
     var enabled = true
+    var blocksCookieBanners = false
+    private var cookieList: WKContentRuleList?
+    private var compilingCookies = false
 
     /// Sites it is off for — the ones it broke. A checkout that never
     /// finishes, a video that never starts: switching off here, for this site,
@@ -74,33 +80,105 @@ final class Shield: ObservableObject {
     /// for the whole page rather than for the second half of it.
     func tune(_ controller: WKUserContentController, for host: String?) {
         let hostKey = host ?? ""
-        let want = enabled && !isPaused(on: host)
+        let paused = isPaused(on: host)
+        let want = enabled && !paused
+        let wantCookie = blocksCookieBanners && !paused
         if let state = controllers.object(forKey: controller) {
             state.host = hostKey
-            sync(controller, state: state, want: want)
+            sync(controller, state: state, want: want, wantCookie: wantCookie)
             return
         }
         // Unregistered controller (e.g. external caller): ensure clean initial state.
-        let state = ControllerState(host: hostKey, attachedCount: 0)
+        let state = ControllerState(host: hostKey, attachedCount: 0, cookieAttached: false)
         controllers.setObject(state, forKey: controller)
         lists.forEach { controller.remove($0) }
+        if let cookieList { controller.remove(cookieList) }
         if want {
             lists.forEach { controller.add($0) }
             state.attachedCount = lists.count
         }
+        if wantCookie, let cookieList {
+            controller.add(cookieList)
+            state.cookieAttached = true
+        }
     }
 
-    private func sync(_ controller: WKUserContentController, state: ControllerState, want: Bool) {
+    private func sync(_ controller: WKUserContentController, state: ControllerState, want: Bool, wantCookie: Bool) {
         if want {
-            guard state.attachedCount < lists.count else { return }
-            for i in state.attachedCount..<lists.count {
-                controller.add(lists[i])
+            if state.attachedCount < lists.count {
+                for i in state.attachedCount..<lists.count {
+                    controller.add(lists[i])
+                }
+                state.attachedCount = lists.count
             }
-            state.attachedCount = lists.count
-        } else {
-            guard state.attachedCount > 0 else { return }
+        } else if state.attachedCount > 0 {
             lists.forEach { controller.remove($0) }
             state.attachedCount = 0
+        }
+
+        if let cookieList {
+            if wantCookie, !state.cookieAttached {
+                controller.add(cookieList)
+                state.cookieAttached = true
+            } else if !wantCookie, state.cookieAttached {
+                controller.remove(cookieList)
+                state.cookieAttached = false
+            }
+        } else {
+            state.cookieAttached = false
+        }
+    }
+
+    /// Toggles native cookie-banner blocking across all active controllers.
+    func setCookieBlocking(_ on: Bool) {
+        blocksCookieBanners = on
+        if on, cookieList == nil, !compilingCookies {
+            compileCookieList()
+        }
+        resyncAllControllers()
+    }
+
+    private func resyncAllControllers() {
+        for controller in controllers.keyEnumerator().allObjects as? [WKUserContentController] ?? [] {
+            guard let state = controllers.object(forKey: controller) else { continue }
+            let host = state.host.isEmpty ? nil : state.host
+            let paused = isPaused(on: host)
+            sync(controller, state: state, want: enabled && !paused, wantCookie: blocksCookieBanners && !paused)
+        }
+    }
+
+    private func compileCookieList() {
+        guard !compilingCookies, let spec = CookieShield.spec, let store = WKContentRuleListStore.default() else { return }
+        compilingCookies = true
+        let identifier = spec.identifier
+        let json = spec.json
+        store.getAvailableContentRuleListIdentifiers { kept in
+            for old in kept ?? [] where old.hasPrefix("office-cookies") && old != identifier {
+                store.removeContentRuleList(forIdentifier: old) { _ in }
+            }
+        }
+        store.lookUpContentRuleList(forIdentifier: identifier) { [weak self] found, _ in
+            MainActor.assumeIsolated {
+                guard let self else { return }
+                if let found {
+                    self.compilingCookies = false
+                    self.cookieList = found
+                    self.resyncAllControllers()
+                    return
+                }
+                store.compileContentRuleList(forIdentifier: identifier, encodedContentRuleList: json) { [weak self] compiled, error in
+                    MainActor.assumeIsolated {
+                        guard let self else { return }
+                        self.compilingCookies = false
+                        guard let compiled else {
+                            NSLog("shield: cookie banner rules didn't compile: \(error?.localizedDescription ?? "unknown")")
+                            return
+                        }
+                        self.cookieList = compiled
+                        self.resyncAllControllers()
+                    }
+                }
+            }
         }
     }
 
@@ -393,21 +471,17 @@ final class Shield: ObservableObject {
     private func arrived(_ list: WKContentRuleList) {
         lists.append(list)
         guard enabled else { return }
-        for controller in controllers.keyEnumerator().allObjects as? [WKUserContentController] ?? [] {
-            guard let state = controllers.object(forKey: controller) else { continue }
-            let host = state.host.isEmpty ? nil : state.host
-            if !isPaused(on: host) {
-                sync(controller, state: state, want: true)
-            }
-        }
+        resyncAllControllers()
     }
 
     /// Every tab asks for it; whoever asks before it is ready gets it as
     /// each list arrives.
     func protect(_ controller: WKUserContentController) {
-        let state = ControllerState(host: "", attachedCount: enabled ? lists.count : 0)
+        let attachCookie = blocksCookieBanners ? cookieList : nil
+        let state = ControllerState(host: "", attachedCount: enabled ? lists.count : 0, cookieAttached: attachCookie != nil)
         controllers.setObject(state, forKey: controller)
         if enabled { lists.forEach { controller.add($0) } }
+        if let attachCookie { controller.add(attachCookie) }
     }
 
     /// Switched on or off for every page that is already open.
@@ -415,10 +489,15 @@ final class Shield: ObservableObject {
         for controller in controllers {
             if let state = self.controllers.object(forKey: controller) {
                 let host = state.host.isEmpty ? nil : state.host
-                sync(controller, state: state, want: enabled && !isPaused(on: host))
+                let paused = isPaused(on: host)
+                sync(controller, state: state, want: enabled && !paused, wantCookie: blocksCookieBanners && !paused)
             } else {
                 lists.forEach { controller.remove($0) }
                 if enabled { lists.forEach { controller.add($0) } }
+                if let cookieList {
+                    controller.remove(cookieList)
+                    if blocksCookieBanners { controller.add(cookieList) }
+                }
             }
         }
     }

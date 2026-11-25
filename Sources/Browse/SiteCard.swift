@@ -177,6 +177,7 @@ struct SiteCard: View {
     @ObservedObject var tab: Tab
     let close: () -> Void
     @ObservedObject private var shield = Shield.shared
+    @ObservedObject private var curtain: Curtain
 
     /// One step in: the connection, said in full.
     @State private var deeper: Bool
@@ -188,6 +189,7 @@ struct SiteCard: View {
         self.browser = browser
         self.tab = tab
         self.close = close
+        self.curtain = browser.curtain
         _deeper = State(initialValue: deeper)
     }
 
@@ -251,6 +253,8 @@ struct SiteCard: View {
     private var front: some View {
         let permissions = sitePermissions
         let veils = browser.hereVeils
+        let darkOn = browser.curtain.isDarkMode(on: shieldHost)
+        let customCount = veils.count
         return VStack(alignment: .leading, spacing: 0) {
             if let url = tab.pageAddress {
                 Header(title: SiteCard.site(url))
@@ -267,7 +271,12 @@ struct SiteCard: View {
                     }
                 }
             }
-            if !permissions.isEmpty || !veils.isEmpty {
+            if shieldHost != nil {
+                Row(darkOn ? "Turn Off Force Dark Mode" : "Force Dark Mode") {
+                    after { browser.toggleSiteDarkMode() }
+                }
+            }
+            if !permissions.isEmpty || !veils.isEmpty || browser.hereHasBoost || shieldHost != nil {
                 Separator()
                 ForEach(permissions) { choice in
                     Row("Reset \(choice.kind)", keys: choice.allowed ? "Allowed" : "Blocked") {
@@ -275,14 +284,20 @@ struct SiteCard: View {
                     }
                 }
                 if !veils.isEmpty {
-                    Row("Hidden on This Site (\(veils.count))") {
+                    Row("Hidden & Boosts (\(customCount))") {
+                        after { browser.reviewing = true }
+                    }
+                } else if shieldHost != nil {
+                    Row("Customize This Site…") {
                         after { browser.reviewing = true }
                     }
                 }
                 Separator()
             }
             Row("Copy Address", keys: "⇧⌘C") { after { browser.copyAddress() } }
+            Row("Copy as Markdown") { after { browser.copyPageAsMarkdown() } }
             Separator()
+            Row("Save as PDF…") { after { browser.savePageAsPDF() } }
             Row("Print…", keys: "⌘P") { after { browser.printPage() } }
             zoom
         }

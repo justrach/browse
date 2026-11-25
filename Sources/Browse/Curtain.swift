@@ -22,12 +22,28 @@ struct Veil: Codable, Identifiable, Equatable {
     var id: String { selector }
 }
 
+/// Per-site styling overrides ("Boosts"): optional smart dark mode and user CSS
+/// applied at document-start alongside any hidden element selectors.
+struct SiteBoost: Codable, Equatable {
+    var css: String = ""
+    var darkMode: Bool = false
+
+    var isEmpty: Bool {
+        !darkMode && css.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+    }
+}
+
 @MainActor
 final class Curtain: ObservableObject {
     @Published private(set) var byHost: [String: [Veil]] = [:]
+    @Published private(set) var boostsByHost: [String: SiteBoost] = [:]
     private var saving = false
+    private var savingBoosts = false
 
-    init() { load() }
+    init() {
+        load()
+        loadBoosts()
+    }
 
     func host(of url: URL?) -> String? {
         guard let host = url?.host()?.lowercased() else { return nil }
@@ -74,21 +90,98 @@ final class Curtain: ObservableObject {
     /// One selector may be left out — that is how a row in the list shows you
     /// what it is offering to bring back, without bringing it back.
     func css(on host: String?, without spared: String? = nil) -> String {
-        veils(on: host)
+        var parts = veils(on: host)
             .filter { $0.selector != spared }
             .map { "\($0.selector) { display: none !important; }" }
-            .joined(separator: "\n")
+        let siteBoost = boost(on: host)
+        if siteBoost.darkMode {
+            parts.append(Curtain.darkModeCSS)
+        }
+        let custom = siteBoost.css.trimmingCharacters(in: .whitespacesAndNewlines)
+        if !custom.isEmpty {
+            parts.append(custom)
+        }
+        return parts.joined(separator: "\n")
     }
+
+    func boost(on host: String?) -> SiteBoost {
+        guard let host else { return SiteBoost() }
+        return boostsByHost[host] ?? SiteBoost()
+    }
+
+    func isDarkMode(on host: String?) -> Bool {
+        boost(on: host).darkMode
+    }
+
+    func hasCustomizations(on host: String?) -> Bool {
+        !veils(on: host).isEmpty || !boost(on: host).isEmpty
+    }
+
+    func toggleDarkMode(on host: String) {
+        var current = boostsByHost[host] ?? SiteBoost()
+        current.darkMode.toggle()
+        boostsByHost[host] = current.isEmpty ? nil : current
+        saveBoosts()
+    }
+
+    func setCustomCSS(_ css: String, on host: String) {
+        var current = boostsByHost[host] ?? SiteBoost()
+        current.css = css
+        boostsByHost[host] = current.isEmpty ? nil : current
+        saveBoosts()
+    }
+
+    func clearBoost(on host: String) {
+        boostsByHost[host] = nil
+        saveBoosts()
+    }
+
+    private static let darkModeCSS = """
+    html {
+      filter: invert(0.92) hue-rotate(180deg) !important;
+      background-color: #111 !important;
+      color-scheme: dark !important;
+    }
+    img, video, picture, canvas, iframe, [style*="background-image"] {
+      filter: invert(1) hue-rotate(180deg) !important;
+    }
+    """
 
     // MARK: - the file
 
     private static var file: URL { Store.file("hidden.json") }
+    private static var boostsFile: URL { Store.file("boosts.json") }
 
     private func load() {
         guard let data = try? Data(contentsOf: Curtain.file),
               let stored = try? JSONDecoder().decode([String: [Veil]].self, from: data)
         else { return }
         byHost = stored
+    }
+
+    private func loadBoosts() {
+        guard let data = try? Data(contentsOf: Curtain.boostsFile),
+              let stored = try? JSONDecoder().decode([String: SiteBoost].self, from: data)
+        else { return }
+        boostsByHost = stored
+    }
+
+    private func saveBoosts() {
+        guard !savingBoosts else { return }
+        savingBoosts = true
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.4) { [weak self] in
+            guard let self else { return }
+            savingBoosts = false
+            let snapshot = boostsByHost
+            let file = Curtain.boostsFile
+            DispatchQueue.global(qos: .utility).async {
+                guard let data = try? JSONEncoder().encode(snapshot) else { return }
+                try? FileManager.default.createDirectory(
+                    at: file.deletingLastPathComponent(), withIntermediateDirectories: true
+                )
+                try? data.write(to: file, options: .atomic)
+            }
+        }
     }
 
     private func save() {

@@ -223,6 +223,7 @@ final class Tab: ObservableObject, Identifiable {
         let hoveredLink: Bool
         let windowFullScreen: Bool
         let passkeysOffered: Bool
+        let devCapture: Bool
         let css: String
     }
 
@@ -410,6 +411,38 @@ final class Tab: ObservableObject, Identifiable {
     func toggleMute() {
         muted.toggle()
         if let built { Muter.set(muted, on: built) }
+    }
+
+    /// Toggles HTML5 audio/video playback in the active frame, falling back
+    /// to muting when no `<video>`/`<audio>` element is controllable directly.
+    func toggleMediaPlayback() {
+        guard let web = built else { return }
+        let script = """
+        (function () {
+          var media = Array.prototype.slice.call(document.querySelectorAll('video, audio'));
+          if (!media.length) return 'none';
+          var playing = media.filter(function (m) { return !m.paused && !m.ended; });
+          if (playing.length) {
+            playing.forEach(function (m) { try { m.pause(); } catch (_) {} });
+            return 'paused';
+          }
+          var target = media.find(function (m) { return m.readyState > 0; }) || media[0];
+          if (!target) return 'none';
+          try {
+            var p = target.play();
+            if (p && p.catch) p.catch(function () {});
+            return 'playing';
+          } catch (_) { return 'none'; }
+        })()
+        """
+        web.evaluateJavaScript(script) { [weak self] result, _ in
+            MainActor.assumeIsolated {
+                guard let self else { return }
+                if (result as? String) == "none" {
+                    self.toggleMute()
+                }
+            }
+        }
     }
 
     /// What the page hands back when you point at something and click it.
@@ -772,6 +805,7 @@ final class Tab: ObservableObject, Identifiable {
         static let passkeyBridge = WKUserScript(source: PasskeyRelay.bridge, injectionTime: .atDocumentStart, forMainFrameOnly: false, in: Web.world)
         static let webNotificationsPage = WKUserScript(source: WebNotifications.page, injectionTime: .atDocumentStart, forMainFrameOnly: true, in: .page)
         static let webNotificationsBridge = WKUserScript(source: WebNotifications.bridge, injectionTime: .atDocumentStart, forMainFrameOnly: true, in: Web.world)
+        static let devCapture = WKUserScript(source: DevCapture.script, injectionTime: .atDocumentStart, forMainFrameOnly: true, in: .page)
     }
 
     func arm(hiding css: String) {
@@ -786,12 +820,14 @@ final class Tab: ObservableObject, Identifiable {
             hoveredLink: HoveredLink.on,
             windowFullScreen: WindowFullScreen.on,
             passkeysOffered: FormRelay.passkeysOffered,
+            devCapture: DevCapture.on,
             css: css
         )
         guard armedSignature != signature else { return }
         armedSignature = signature
         let controller = built.configuration.userContentController
         controller.removeAllUserScripts()
+        if signature.devCapture { controller.addUserScript(Scripts.devCapture) }
         if signature.scrollRelay { controller.addUserScript(Scripts.scrollRelay) }
         controller.addUserScript(Scripts.veilingPicker)
         controller.addUserScript(Scripts.formRelay)

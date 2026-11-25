@@ -6,6 +6,21 @@ All notable changes to **browse** are documented here, newest first.
 
 ## Unreleased
 
+### Added
+
+- **Site search shortcuts & `!bangs` (`SiteSearch.swift`, `Prefs.swift`, `Browser.swift`, `Settings.swift`)**: Added built-in `!gh`, `!yt`, `!mdn`, `!w`, `!hn`, `!r`, `!npm`, `!crates`, `!so`, `!maps`, `!g`, `!ddg`, `!kagi`, `!apple`, `!x`, and `!pkg` keywords plus customizable site-search templates in **Settings › General** resolving directly in the Omnibox (`⌘L`/`⌘T`) and Command Switcher (`⌘K`).
+- **Page capture & export (`PageExport.swift`, `AgentTools.swift`, `App.swift`, `SiteCard.swift`)**: Added **Copy Page as Markdown**, **Save Page as PDF…**, and **Capture Screenshot** (copy visible, save visible, and save full-page PNG off the main thread) to the File menu and Site Card.
+- **Opt-in native cookie-banner blocking (`CookieShield.swift`, `Shield.swift`, `Prefs.swift`, `Settings.swift`, `Browser.swift`)**: Added **Settings › Privacy › Hide cookie banners** backed by a native `WKContentRuleList` blocking common third-party CMP scripts and exact-selector banners without runtime page JavaScript, respecting per-site shield pauses.
+- **Per-site CSS Boosts & Force Dark Mode (`Curtain.swift`, `Hidden.swift`, `Browser.swift`, `SiteCard.swift`)**: Extended the per-site panel (`⇧⌘U`) and Site Card with **Force Dark Mode**, a document-start **Custom CSS** editor saved per host in `boosts.json`, and a **Draft with Codegraff** helper.
+- **Global playing & muted tabs popover (`MediaPopover.swift`, `AsideBar.swift`, `Tab.swift`, `Browser.swift`)**: Upgraded background audio controls to surface playing and muted tabs across all Spaces in a single popover with play/pause, mute/unmute, Mute All, and cross-Space jump-to-tab.
+- **DevTools agent inspection tools (`DevCapture.swift`, `Tab.swift`, `AgentTools.swift`)**: Added read-only `console_logs` and `network_requests` MCP tools powered by a passive page-world ring buffer (logging levels, uncaught errors, and `fetch`/`XHR` status/timings without cookies, auth headers, or bodies).
+- **Tab Group → Codegraff multi-tab context (`TabGroups.swift`, `AgentComposer.swift`, `Browser.swift`)**: Added **Ask Codegraff about Group** to group context menus and group suggestions inside the composer `@` picker to attach every open tab in a group in one step.
+- **Native on-device translation (`SelectionBar.swift`, `Browser.swift`, `App.swift`)**: Added a **Translate** action on the page selection pill on macOS 15+ backed by Apple's `Translation` presentation sheet (weak-linked for macOS 14 compatibility).
+
+### Fixed
+
+- **Split View slide transition race (`Stage.swift`, `App.swift`)**: Prevented an exiting single-pane `WebStage` from reclaiming `tab.web` mid-transition while entering Split View (`⌘D`), leaving both split panes intact on frame 0.
+
 ## 1.13.0 — 25 November 2026
 
 ### Improved
