@@ -52,8 +52,12 @@ struct WebNotificationsTests {
         )
         check(!WebNotifications.hasAppBundle, "CLI test binary must not report a .app bundle")
         check(WebNotifications.page.contains("Object.defineProperty(window, 'Notification'"), "page script defines window.Notification")
+        check(!WebNotifications.page.contains("__browseNotifInstalled"), "page script must not expose __browseNotifInstalled global")
+        check(WebNotifications.page.contains("EventTarget.prototype"), "Notification inherits from EventTarget")
+        check(!WebNotifications.page.contains("send({ op: 'query' })"), "page script must not fire startup permission event")
         check(!WebNotifications.page.contains("webkit.messageHandlers"), "page script must never touch window.webkit")
         check(WebNotifications.bridge.contains("webkit.messageHandlers.\(WebNotifications.name)"), "bridge relays to WebNotificationRelay")
+        check(WebNotifications.bridge.contains("op: 'query'"), "bridge triggers startup permission query in Web.world")
 
         print("PASS web notifications origin, permission-key, and bundle-safety checks")
     }
