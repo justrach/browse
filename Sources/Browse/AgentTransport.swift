@@ -323,8 +323,10 @@ final class AcpPipe: @unchecked Sendable {
         return !ended && process.isRunning
     }
 
-    /// graff reads a line into 64 KiB and stops listening at a longer one.
-    static let longest = 65_000
+    /// graff reads up to 64 MiB per ACP stdin line (`stdin_line.zig`), while
+    /// Browse keeps text page context trimmed via `Agent.longestLine` so LLM
+    /// prompts stay fast and pasted images never hit a false pipe limit.
+    static let longest = 16 * 1024 * 1024
 
     init(program: URL, arguments: [String], environment: [String: String], folder: URL) {
         process.executableURL = program

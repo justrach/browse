@@ -656,7 +656,7 @@ final class AgentTools: ObservableObject {
                 return AgentTools.failed("search needs a query")
             }
             let sheet = await load(url, as: "Search: \(query)", reading: true, owner: owner)
-            let (text, error) = await sheet.run("document.body ? document.body.innerText : ''")
+            let (text, error) = await sheet.run(Agent.pageTextScript(limit: 22_000))
             if let error { return AgentTools.failed(error) }
             let (found, _) = await sheet.run(AgentTools.results(excluding: url.host() ?? ""))
             // Read, so closed: it is named in the talk, a click from being a tab.
@@ -704,9 +704,11 @@ final class AgentTools: ObservableObject {
 
         case "read":
             return await on(arguments, browser, owner, caller) { target in
-                let (text, error) = await target.run("document.body ? document.body.innerText : ''")
+                let requestedLimit = arguments["limit"] as? Int ?? 60_000
+                let scriptLimit = max(1_000, min(requestedLimit + 2_000, 200_000))
+                let (text, error) = await target.run(Agent.pageTextScript(limit: scriptLimit))
                 if let error { return AgentTools.failed(error) }
-                let body = AgentTools.cut(text as? String ?? "", arguments["limit"] as? Int ?? 60_000)
+                let body = AgentTools.cut(text as? String ?? "", requestedLimit)
                 return AgentTools.text("\(target.title)\n\(target.address)\n\n\(body)")
             }
 
@@ -1142,7 +1144,8 @@ final class AgentTools: ObservableObject {
     /// Load, extract text, and close a disposable reading sheet for `read_pages`.
     private func readPage(_ url: URL, limit: Int, owner: String) async -> String {
         let sheet = await load(url, as: nil, reading: true, owner: owner)
-        let (text, error) = await sheet.run("document.body ? document.body.innerText : ''")
+        let scriptLimit = max(1_000, min(limit + 2_000, 200_000))
+        let (text, error) = await sheet.run(Agent.pageTextScript(limit: scriptLimit))
         let body = error.map { "(couldn't read it: \($0))" } ?? AgentTools.cut(text as? String ?? "", limit)
         let said = "## \(sheet.title)\n\(sheet.address)\n\n\(body)"
         close(sheet)

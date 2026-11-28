@@ -6,6 +6,10 @@ All notable changes to **browse** are documented here, newest first.
 
 ## Unreleased
 
+### Fixed
+
+- **Out-of-the-box chat lag & freeze on large pages (`App.swift`, `Stage.swift`, `Tab.swift`, `Browser.swift`, `Agent.swift`, `AgentTransport.swift`, `AgentTools.swift`)**: Unified `AgentColumn` so default top-tab mode uses the single-reflow `agentTrailing` + `pinnedSlideWidth` slide and balanced WebKit live-resize lifecycle instead of leaving `inLiveResize` stuck `true` and mounting two columns; added a `StageView`/`PageView` slide live-resize watchdog for zero-delta/drawer/full-stage transitions; replaced unbounded `document.body.innerText` calls in `Agent.read` and `AgentTools` (`search`/`read`/`read_pages`) with a bounded, layout-free `Agent.pageTextScript` + 3s timeout; raised `AcpPipe.longest` to 16 MiB and bounded personal memory; short-circuited `Browser.fillable` after 3 visible inputs.
+
 ## 1.14.1 — 25 November 2026
 
 ### Fixed

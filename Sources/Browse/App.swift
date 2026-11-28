@@ -391,6 +391,10 @@ struct ContentView: View {
     /// Pending horizontal window width delta from `adjustWindowForAgent` so
     /// `bracketPanelSlide` pins `WKWebView` to its exact post-slide width once.
     @State private var pendingWindowWidthDelta: CGFloat = 0
+    /// Last observed docked agent trailing width so transitions where
+    /// `agentTrailing` stays `0` (overlay drawer or full-stage exit) still
+    /// consume `pendingWindowWidthDelta` and exit live-resize immediately.
+    @State private var lastAgentTrailing: CGFloat = 0
 
 
     /// True when the Arc/Dia-style unified frosted frame wraps the floating
@@ -499,12 +503,13 @@ struct ContentView: View {
                     .transition(.opacity)
             }
 
-            // Codegraff sits beside the webpage card below AsideBar (or in Full
-            // Screen / narrow overlay mode), sharing the exact same top edge,
-            // bottom margin, and 10pt squircle corners. Kept warm after first
-            // open so repeated ⌘; toggles glide on a pure GPU `.offset` without
-            // rebuilding `NanoTextView` or re-laying out the transcript.
-            let agentCardVisible = fullHeightAgent || floatingAgentDrawer
+            // Codegraff sits cleanly down the right edge (flush hairline column
+            // in classic top-tab mode, matching 10pt squircle card beside AsideBar
+            // or Full Screen, or elevated overlay drawer on narrow windows).
+            // Kept warm after first open so repeated ⌘; toggles glide on a pure
+            // GPU `.offset` without rebuilding `NanoTextView` or re-laying out
+            // the transcript.
+            let agentCardVisible = consulting && !browser.agentFull
             ZStack(alignment: .topTrailing) {
                 Color.clear.allowsHitTesting(false)
                 if (agentWarm || agentCardVisible) && !browser.agentFull && browser.prefs.usesAgent {
@@ -512,7 +517,7 @@ struct ContentView: View {
                         browser: browser,
                         agent: browser.agent,
                         prefs: browser.prefs,
-                        fullHeight: !floatingAgentDrawer,
+                        fullHeight: fullHeightAgent && !floatingAgentDrawer,
                         darkCanvas: darkCanvas,
                         overlayDrawer: floatingAgentDrawer
                     )
@@ -543,16 +548,33 @@ struct ContentView: View {
         .onChange(of: consulting) { _, now in
             if now && !browser.agentFull { agentWarm = true }
             if !now { handBack() }
-            pendingWindowWidthDelta = adjustWindowForAgent(opening: now)
+            let winDelta = adjustWindowForAgent(opening: now)
+            let nextFloating = now && !browser.agentFull && !browser.prefs.isDraggingAgentWidth && narrowForAgent
+            let nextTrailing: CGFloat = (now && !browser.agentFull && !nextFloating) ? browser.prefs.agentWidth : 0
+            if nextTrailing != lastAgentTrailing {
+                pendingWindowWidthDelta = winDelta
+            } else {
+                pendingWindowWidthDelta = 0
+                if abs(winDelta) >= 0.5 {
+                    bracketPanelSlide(deltaWidth: winDelta)
+                } else {
+                    visiblePageViews.forEach { $0.endLiveResize() }
+                }
+            }
         }
         .onChange(of: agentTrailing) { old, new in
+            lastAgentTrailing = new
             guard old != new, !browser.prefs.isDraggingAgentWidth else { return }
             let winDelta = pendingWindowWidthDelta
             pendingWindowWidthDelta = 0
             bracketPanelSlide(deltaWidth: winDelta + (old - new))
         }
         .onChange(of: browser.agentFull) { _, full in
-            if full { agentWarm = false }
+            if full {
+                agentWarm = false
+            } else if consulting {
+                agentWarm = true
+            }
         }
         .onChange(of: browser.prefs.usesAgent) { _, uses in
             if !uses { agentWarm = false }
@@ -581,10 +603,6 @@ struct ContentView: View {
                         darkCanvas: darkCanvas
                     )
                     .transition(.move(edge: .trailing).combined(with: .opacity))
-                }
-                if consulting && !fullHeightAgent && !floatingAgentDrawer {
-                    AgentColumn(browser: browser, agent: browser.agent, prefs: browser.prefs, darkCanvas: darkCanvas)
-                        .transition(.move(edge: .trailing).combined(with: .opacity))
                 }
             }
         }
@@ -765,7 +783,7 @@ struct ContentView: View {
                 // is not what the field is standing over, and dimming it along
                 // with the page says otherwise.
                 .padding(.leading, (sidebar ? browser.prefs.sideWidth : 0) + otherHalf.leading)
-                .padding(.trailing, (consulting && !browser.agentFull ? browser.prefs.agentWidth : 0) + otherHalf.trailing)
+                .padding(.trailing, agentTrailing + otherHalf.trailing)
                 .transition(.scale(scale: 0.97).combined(with: .opacity))
         }
     }
@@ -1170,7 +1188,7 @@ struct ContentView: View {
     /// Trailing inset reserved for the docked Agent sidebar (0 when floating
     /// as an overlay drawer so the webpage never shrinks to mobile width).
     private var agentTrailing: CGFloat {
-        (fullHeightAgent && !floatingAgentDrawer) ? browser.prefs.agentWidth : 0
+        (consulting && !browser.agentFull && !floatingAgentDrawer) ? browser.prefs.agentWidth : 0
     }
 
     /// In windowed mode, smoothly widen the NSWindow when opening the Agent

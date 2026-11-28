@@ -1595,6 +1595,7 @@ final class PageView: WKWebView {
     /// WebKit's drawing area treats frame updates as an asynchronous live
     /// resize instead of blocking the main thread on DidUpdateGeometry IPC.
     var splitLiveResizing = false
+    private var slideWatchdog: DispatchWorkItem?
 
     override var inLiveResize: Bool {
         splitLiveResizing || super.inLiveResize
@@ -1604,6 +1605,8 @@ final class PageView: WKWebView {
     /// mode (with background colour backing) so edge drags and sidebar slides
     /// run at 120 FPS without synchronous `DidUpdateGeometry` main-thread stalls.
     func beginLiveResize() {
+        slideWatchdog?.cancel()
+        slideWatchdog = nil
         if let stage = superview as? StageView {
             stage.startLiveResize()
         } else if !splitLiveResizing {
@@ -1612,9 +1615,27 @@ final class PageView: WKWebView {
         }
     }
 
+    /// Arms WebKit async live-resize ahead of an upcoming animated slide while
+    /// guarding against slides that end up not resizing the stage.
+    func prepareSlideLiveResize() {
+        if let stage = superview as? StageView {
+            stage.prepareForSlide()
+        } else {
+            beginLiveResize()
+            let work = DispatchWorkItem { [weak self] in
+                self?.slideWatchdog = nil
+                self?.endLiveResize()
+            }
+            slideWatchdog = work
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.15, execute: work)
+        }
+    }
+
     /// Single-reflow GPU slide: resizes the inner WKWebView once to its exact
     /// post-slide width at `t = 0` while `StageView` smoothly masks its bounds.
     func beginSlide(deltaWidth: CGFloat) {
+        slideWatchdog?.cancel()
+        slideWatchdog = nil
         if let stage = superview as? StageView {
             stage.beginSlide(deltaWidth: deltaWidth)
         } else {
@@ -1623,6 +1644,8 @@ final class PageView: WKWebView {
     }
 
     func endSlide() {
+        slideWatchdog?.cancel()
+        slideWatchdog = nil
         if let stage = superview as? StageView {
             stage.endSlide()
         } else {
@@ -1641,6 +1664,8 @@ final class PageView: WKWebView {
     }
 
     func endLiveResize() {
+        slideWatchdog?.cancel()
+        slideWatchdog = nil
         if let stage = superview as? StageView {
             stage.endLiveResize()
         } else if splitLiveResizing {

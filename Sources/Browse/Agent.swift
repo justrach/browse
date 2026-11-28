@@ -2204,7 +2204,8 @@ final class Agent: ObservableObject {
             var intro = Agent.introduction
             let memory = prefs.agentMemory.trimmingCharacters(in: .whitespacesAndNewlines)
             if !memory.isEmpty {
-                intro += "\n\nUser's personal preferences and memory (always honor these):\n" + memory
+                let cappedMemory = memory.count > 8_000 ? String(memory.prefix(8_000)) + "\n…" : memory
+                intro += "\n\nUser's personal preferences and memory (always honor these):\n" + cappedMemory
             }
             blocks.insert(["type": "text", "text": intro], at: 0)
         }
@@ -2835,7 +2836,9 @@ final class Agent: ObservableObject {
             return out + historyBlock + excerpt + words
         }
 
-        var bodies = sources.map(\.whole)
+        var bodies = sources.map { src -> String in
+            src.whole.count > 48_000 ? String(src.whole.prefix(48_000)) : src.whole
+        }
         let room = longestLine - 16_000
         var size = wire(assemble(bodies))
         while size > room {
@@ -2858,6 +2861,114 @@ final class Agent: ObservableObject {
         return assemble(finalBodies) + imageBlocks
     }
 
+    /// Bounded, layout-free page text extractor so huge feeds (like X.com) do
+    /// not pay a multi-megabyte `document.body.innerText` layout & XPC tax only
+    /// to get trimmed down to ~44 KB afterward. Falls back to sliced `innerText`
+    /// only when the light DOM yields no text nodes (for example, built-in PDFs).
+    nonisolated static func pageTextScript(limit: Int = 48_000, maxNodes: Int = 25_000) -> String {
+        let clampedLimit = max(256, limit)
+        let clampedNodes = max(500, maxNodes)
+        return #"""
+        (function () {
+          var limit = \#(clampedLimit), maxNodes = \#(clampedNodes);
+          var root = document.body || document.documentElement;
+          if (!root) return '';
+          var skip = { SCRIPT: 1, STYLE: 1, NOSCRIPT: 1, SVG: 1, TEMPLATE: 1, IFRAME: 1, CANVAS: 1, HEAD: 1 };
+          var blocks = {
+            ADDRESS: 1, ARTICLE: 1, ASIDE: 1, BLOCKQUOTE: 1, BR: 1, DD: 1, DIV: 1, DL: 1, DT: 1,
+            FIELDSET: 1, FIGCAPTION: 1, FIGURE: 1, FOOTER: 1, FORM: 1, H1: 1, H2: 1, H3: 1, H4: 1, H5: 1, H6: 1,
+            HEADER: 1, HGROUP: 1, HR: 1, LI: 1, MAIN: 1, NAV: 1, OL: 1, P: 1, PRE: 1, SECTION: 1, TABLE: 1, TR: 1, UL: 1
+          };
+          var parts = [], len = 0, nodes = 0, truncated = false;
+          var walker = document.createTreeWalker(root, NodeFilter.SHOW_ELEMENT | NodeFilter.SHOW_TEXT, {
+            acceptNode: function (node) {
+              if (node.nodeType === 1) {
+                var tag = (node.tagName || '').toUpperCase();
+                if (skip[tag]) return NodeFilter.FILTER_REJECT;
+                if (node.hidden) return NodeFilter.FILTER_REJECT;
+                if (node.getAttribute && node.getAttribute('aria-hidden') === 'true') return NodeFilter.FILTER_REJECT;
+                var st = node.style;
+                if (st && (st.display === 'none' || st.visibility === 'hidden')) return NodeFilter.FILTER_REJECT;
+                return NodeFilter.FILTER_ACCEPT;
+              }
+              return NodeFilter.FILTER_ACCEPT;
+            }
+          });
+          var cur;
+          while ((cur = walker.nextNode())) {
+            if (++nodes > maxNodes) { truncated = true; break; }
+            if (cur.nodeType === 1) {
+              var tag = (cur.tagName || '').toUpperCase();
+              if (blocks[tag] && len > 0 && parts.length > 0 && parts[parts.length - 1] !== '\n') {
+                parts.push('\n');
+                len += 1;
+              }
+              continue;
+            }
+            var raw = cur.nodeValue;
+            if (!raw) continue;
+            var s = raw.replace(/[ \t\r]+/g, ' ').replace(/\n+/g, '\n').trim();
+            if (!s) continue;
+            if (len > 0 && parts[parts.length - 1] !== '\n') {
+              parts.push(' ');
+              len += 1;
+            }
+            if (len + s.length > limit) {
+              var take = Math.max(0, limit - len);
+              if (take > 0) parts.push(s.slice(0, take));
+              truncated = true;
+              break;
+            }
+            parts.push(s);
+            len += s.length;
+          }
+          var out = parts.join('').replace(/\n{3,}/g, '\n\n').trim();
+          if (!out && document.body && document.body.innerText) {
+            var fallback = document.body.innerText;
+            if (fallback.length > limit) return fallback.slice(0, limit) + '\n…';
+            return fallback;
+          }
+          if (truncated && out.length > 0) out += '\n…';
+          return out;
+        })()
+        """#
+    }
+
+    private final class OnceResume<Value>: @unchecked Sendable {
+        private let lock = NSLock()
+        private var continuation: CheckedContinuation<Value, Never>?
+        private var timer: DispatchWorkItem?
+
+        init(_ continuation: CheckedContinuation<Value, Never>) {
+            self.continuation = continuation
+        }
+
+        func armTimeout(_ seconds: TimeInterval, fallback: Value) {
+            let work = DispatchWorkItem { [self] in
+                self.resume(fallback)
+            }
+            lock.lock()
+            if continuation != nil {
+                timer = work
+                lock.unlock()
+                DispatchQueue.main.asyncAfter(deadline: .now() + seconds, execute: work)
+            } else {
+                lock.unlock()
+            }
+        }
+
+        func resume(_ value: Value) {
+            lock.lock()
+            let cont = continuation
+            continuation = nil
+            let work = timer
+            timer = nil
+            lock.unlock()
+            work?.cancel()
+            cont?.resume(returning: value)
+        }
+    }
+
     /// The page's words, as a reader would take them: its text, not its
     /// markup — and the tab's id as the browser's tools know it, so graff can
     /// act on the page it was shown.
@@ -2865,19 +2976,23 @@ final class Agent: ObservableObject {
         guard let web = tab.built, let address = tab.address else { return nil }
         let title = tab.title
         var text: String = await withCheckedContinuation { done in
-            web.evaluateJavaScript("document.body ? document.body.innerText : ''") { value, _ in
-                done.resume(returning: (value as? String) ?? "")
+            let gate = OnceResume(done)
+            gate.armTimeout(3.0, fallback: "")
+            web.evaluateJavaScript(pageTextScript(limit: 48_000)) { value, _ in
+                gate.resume((value as? String) ?? "")
             }
         }
         if YouTubeHelper.isYouTubeWatch(address) {
             let yt: String = await withCheckedContinuation { done in
+                let gate = OnceResume(done)
+                gate.armTimeout(3.0, fallback: "")
                 web.callAsyncJavaScript(
                     "return await \(YouTubeHelper.contextScript)",
                     arguments: [:],
                     in: nil,
                     in: .page
                 ) { result in
-                    done.resume(returning: (try? result.get() as? String) ?? "")
+                    gate.resume((try? result.get() as? String) ?? "")
                 }
             }
             if !yt.isEmpty {
