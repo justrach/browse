@@ -272,10 +272,10 @@ final class Browser: NSObject, ObservableObject {
     func prepareActivePagesForLiveResize() {
         guard !Motion.reduced else { return }
         if let pair = shownSplit {
-            pair.left.built?.beginLiveResize()
-            pair.right.built?.beginLiveResize()
+            pair.left.built?.prepareSlideLiveResize()
+            pair.right.built?.prepareSlideLiveResize()
         } else {
-            active?.built?.beginLiveResize()
+            active?.built?.prepareSlideLiveResize()
         }
     }
 
@@ -401,7 +401,8 @@ final class Browser: NSObject, ObservableObject {
     func talk(about tab: Tab, task: String? = nil) {
         if !prefs.usesAgent { prefs.usesAgent = true }
         if activeID != tab.id { select(tab) }
-        withAnimation(Motion.glide) {
+        prepareActivePagesForLiveResize()
+        withAnimation(Motion.panelSlide) {
             consulting = true
             agentFull = false
         }
@@ -429,14 +430,17 @@ final class Browser: NSObject, ObservableObject {
         guard let web = tab.built, !tab.isBlank else { return 0 }
         let script = """
         (function () {
-          var n = 0, skip = ['hidden', 'password', 'submit', 'button', 'image', 'reset', 'file', 'search'];
-          document.querySelectorAll('input, select, textarea').forEach(function (e) {
-            if (skip.indexOf((e.type || '').toLowerCase()) >= 0 || e.disabled || e.readOnly) return;
+          var n = 0, checks = 0, skip = ['hidden', 'password', 'submit', 'button', 'image', 'reset', 'file', 'search'];
+          var els = document.querySelectorAll('input, select, textarea');
+          for (var i = 0; i < els.length; i++) {
+            var e = els[i];
+            if (skip.indexOf((e.type || '').toLowerCase()) >= 0 || e.disabled || e.readOnly) continue;
+            if (++checks > 120) break;
             var r = e.getBoundingClientRect();
-            if (r.width < 16 || r.height < 10) return;
-            if (e.checkVisibility && !e.checkVisibility({ checkOpacity: true, checkVisibilityCSS: true })) return;
-            n++;
-          });
+            if (r.width < 16 || r.height < 10) continue;
+            if (e.checkVisibility && !e.checkVisibility({ checkOpacity: true, checkVisibilityCSS: true })) continue;
+            if (++n >= 3) return n;
+          }
           return n;
         })()
         """

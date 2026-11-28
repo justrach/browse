@@ -425,6 +425,7 @@ final class StageView: NSView {
     /// while `StageView.bounds` glides at pure 120 FPS GPU lockstep.
     private var pinnedSlideWidth: CGFloat?
     private var unback: DispatchWorkItem?
+    private var slideLiveResizeWatchdog: DispatchWorkItem?
     private var lastSize: CGSize = .zero
 
     /// The Web Inspector each page off show had docked beside it. WebKit
@@ -488,7 +489,34 @@ final class StageView: NSView {
     /// area to async live-resize instead of blocking the main thread on
     /// synchronous WebContent presentation updates at every 120 Hz step.
     func startLiveResize() {
+        slideLiveResizeWatchdog?.cancel()
+        slideLiveResizeWatchdog = nil
         pinnedSlideWidth = nil
+        ensureLiveResize()
+    }
+
+    /// Prepares the stage for an upcoming animated panel slide while preserving
+    /// any in-flight `pinnedSlideWidth` for smooth mid-slide reversals. Arms a
+    /// short watchdog so live-resize can never stay stuck if the layout change
+    /// turns out not to resize the stage (for example, an overlay drawer).
+    func prepareForSlide() {
+        slideLiveResizeWatchdog?.cancel()
+        ensureLiveResize()
+        guard liveResizingWeb != nil else { return }
+        let work = DispatchWorkItem { [weak self] in
+            guard let self else { return }
+            self.slideLiveResizeWatchdog = nil
+            if self.pinnedSlideWidth != nil {
+                self.endSlide()
+            } else {
+                self.endLiveResize()
+            }
+        }
+        slideLiveResizeWatchdog = work
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.15, execute: work)
+    }
+
+    private func ensureLiveResize() {
         backPage()
         guard let web = wanted as? WKWebView, liveResizingWeb !== web else { return }
         endLiveResize()
@@ -502,11 +530,16 @@ final class StageView: NSView {
     /// 240 ms spring — turning 30 consecutive DOM/ResizeObserver reflows on
     /// heavy feeds like X/Twitter into a single reflow with zero post-slide jump.
     func beginSlide(deltaWidth: CGFloat) {
+        slideLiveResizeWatchdog?.cancel()
+        slideLiveResizeWatchdog = nil
         let baseWidth = pinnedSlideWidth ?? bounds.width
-        startLiveResize()
+        ensureLiveResize()
         guard let wanted, baseWidth > 0, bounds.height > 0 else { return }
+        guard abs(deltaWidth) >= 0.5 || pinnedSlideWidth != nil else { return }
         let targetWidth = max(200, baseWidth + deltaWidth)
         pinnedSlideWidth = targetWidth
+        wantsLayer = true
+        layer?.masksToBounds = true
         let targetFrame = CGRect(x: 0, y: 0, width: targetWidth, height: bounds.height)
         if wanted.frame != targetFrame {
             wanted.frame = targetFrame
@@ -514,7 +547,10 @@ final class StageView: NSView {
     }
 
     func endSlide() {
+        slideLiveResizeWatchdog?.cancel()
+        slideLiveResizeWatchdog = nil
         pinnedSlideWidth = nil
+        layer?.masksToBounds = (layer?.cornerRadius ?? 0) > 0
         if let wanted, window != nil, wanted.superview === self, subviews.count == 1,
            wanted.frame != bounds {
             wanted.frame = bounds
@@ -533,6 +569,11 @@ final class StageView: NSView {
     }
 
     func endLiveResize() {
+        slideLiveResizeWatchdog?.cancel()
+        slideLiveResizeWatchdog = nil
+        if pinnedSlideWidth == nil {
+            layer?.masksToBounds = (layer?.cornerRadius ?? 0) > 0
+        }
         guard let web = liveResizingWeb else { return }
         liveResizingWeb = nil
         (web as? PageView)?.splitLiveResizing = false

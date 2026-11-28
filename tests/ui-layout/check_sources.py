@@ -407,6 +407,7 @@ side_panel_src = read("Sources/Browse/ExtensionSidePanel.swift")
 user_groups_lean = read("lean-proofs/Browse/UserTabGroups.lean")
 agent_transport_src = read("Sources/Browse/AgentTransport.swift") if (ROOT / "Sources/Browse/AgentTransport.swift").exists() else ""
 agent_all_src = agent_src + "\n" + agent_transport_src
+agent_tools_src = read("Sources/Browse/AgentTools.swift")
 check(
     "static var on = false" in wheel_glide_src
     and "addEventListener('wheel'" not in wheel_glide_src
@@ -419,6 +420,24 @@ check(
     and "ignore-previous-rules" in shield_src
     and "GRAFF_CODEX_WS" not in agent_all_src,
     "PR 1-4 invariants: opt-in WheelGlide, UserTabGroups + optional Session fields + Lean proof, docked SidePanel, Shield $generichide preservation, zero GRAFF_CODEX_WS workaround",
+)
+
+# 23. Out-of-the-box chat slide/live-resize balance and bounded large-page reads.
+check(
+    app_src.count("AgentColumn(") == 2
+    and "consulting && !fullHeightAgent && !floatingAgentDrawer" not in app_src
+    and "&& !floatingAgentDrawer) ? browser.prefs.agentWidth : 0" in app_src
+    and "func prepareForSlide()" in stage_src
+    and "slideLiveResizeWatchdog" in stage_src
+    and "func prepareSlideLiveResize()" in tab_scroll_src
+    and "nonisolated static func pageTextScript(" in agent_src
+    and "OnceResume" in agent_src
+    and "document.body ? document.body.innerText" not in agent_src
+    and "Agent.pageTextScript(" in agent_tools_src
+    and "document.body ? document.body.innerText" not in agent_tools_src
+    and "static let longest = 16 * 1024 * 1024" in agent_transport_src
+    and "if (++n >= 3) return n;" in browser_src,
+    "Unified AgentColumn + balanced slide watchdog, bounded/timeout pageTextScript reads, 16 MiB AcpPipe.longest, and early-exit fillable scan",
 )
 
 if failures:
